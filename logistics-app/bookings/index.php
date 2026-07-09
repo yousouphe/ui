@@ -471,6 +471,11 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         @media (max-width:576px){
             .sticky-chat-btn{right:14px;bottom:230px}
             .chat-panel{right:12px;left:12px;width:auto;bottom:300px}.call-panel{right:12px;left:12px;width:auto;bottom:620px}
+            #detail_map{height:260px}
+            #booking_map{height:260px !important}
+            .map-wrap{height:260px}
+            .rider-float-list{max-height:35vh}
+            body.has-rider-float-bar{padding-bottom:180px}
         }
     </style>
 </head>
@@ -564,20 +569,20 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 </div>
 
+                <div id="route_map_card" style="display:none;">
+                    <div class="cardx p-3 mb-4">
+                        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+                            <h3 class="h5 mb-0">Route preview</h3>
+                            <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
+                            <span class="small text-soft" id="route_summary"></span>
+                        </div>
+                        <div id="booking_map" class="map-wrap"></div>
+                    </div>
+                </div>
+
                 <div class="wizard-pane" data-step="2">
                     <h2 class="h4 fw-bold mb-1">What are you sending?</h2>
                     <p class="text-soft mb-4">Recipient and item details, plus a quick look at the route.</p>
-
-                    <div class="col-12" id="route_map_card" style="display:none;">
-                        <div class="cardx p-3 mb-4">
-                            <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-                                <h3 class="h5 mb-0">Route preview</h3>
-                                <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
-                                <span class="small text-soft" id="route_summary"></span>
-                            </div>
-                            <div id="booking_map" class="map-wrap"></div>
-                        </div>
-                    </div>
 
                     <div class="row g-4">
                         <div class="col-md-6">
@@ -633,11 +638,11 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
                     <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
 
-                    <div class="d-flex justify-content-between mt-4">
+                    <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mt-4">
                         <button class="btn btn-outline-light" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-outline-light" type="submit" name="save_draft">Save as Draft</button>
-                            <button class="btn btn-primary" type="submit" name="submit_booking">Send Package</button>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-light flex-fill" type="submit" name="save_draft">Save as Draft</button>
+                            <button class="btn btn-primary flex-fill" type="submit" name="submit_booking">Send Package</button>
                         </div>
                     </div>
                 </div>

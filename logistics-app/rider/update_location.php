@@ -5,18 +5,36 @@ require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
 
-// Fetch the active booking for this rider (if any)
+// Fetch the active booking for this rider (if any) - covers every stage from being
+// matched through to in_transit, matching the status list used across the rest of the app.
 $stmt = $pdo->prepare('
-    SELECT b.* FROM bookings b 
-    WHERE b.selected_rider_user_id = ? 
-    AND b.booking_status IN ("accepted", "in_transit") 
+    SELECT b.* FROM bookings b
+    WHERE b.selected_rider_user_id = ?
+    AND b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
     LIMIT 1
 ');
 $stmt->execute([$user['id']]);
 $activeBooking = $stmt->fetch();
 
-$destLat = $activeBooking ? (float)$activeBooking['delivery_latitude'] : null;
-$destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
+// Target is pickup while matched/accepted (not yet picked up), delivery from
+// arrived_at_pickup onward - matching the target logic used on every other map in the app.
+$targetType = null;
+$targetLat = null;
+$targetLng = null;
+$targetAddress = null;
+if ($activeBooking) {
+    if (in_array($activeBooking['booking_status'], ['matched', 'accepted'], true)) {
+        $targetType = 'Pickup';
+        $targetLat = $activeBooking['pickup_latitude'] !== null ? (float)$activeBooking['pickup_latitude'] : null;
+        $targetLng = $activeBooking['pickup_longitude'] !== null ? (float)$activeBooking['pickup_longitude'] : null;
+        $targetAddress = $activeBooking['pickup_address'];
+    } else {
+        $targetType = 'Delivery';
+        $targetLat = $activeBooking['delivery_latitude'] !== null ? (float)$activeBooking['delivery_latitude'] : null;
+        $targetLng = $activeBooking['delivery_longitude'] !== null ? (float)$activeBooking['delivery_longitude'] : null;
+        $targetAddress = $activeBooking['delivery_address'];
+    }
+}
 
 
 
@@ -53,15 +71,15 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
 
         <?php if ($activeBooking): ?>
             <div class="mb-3">
-                <p class="small text-soft mb-1">Destination:</p>
-                <p class="fw-bold mb-0 text-truncate"><?= e($activeBooking['delivery_address']) ?></p>
+                <p class="small text-soft mb-1"><?= e($targetType) ?>:</p>
+                <p class="fw-bold mb-0 text-truncate"><?= e((string)$targetAddress) ?></p>
             </div>
 
             <form id="arrival_form" method="post" action="rider/mark_arrived.php">
                 <?= csrf_field() ?>
                 <input type="hidden" name="booking_id" value="<?= $activeBooking['id'] ?>">
                 <button type="submit" id="btn_arrived" class="btn btn-secondary w-100 py-3 fw-bold btn-arrival" disabled>
-                    Not Yet at Destination
+                    Not Yet at <?= e($targetType) ?>
                 </button>
             </form>
         <?php else: ?>
@@ -102,25 +120,43 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
     const btnArrived = document.getElementById('btn_arrived');
     const distDisplay = document.getElementById('distance_display');
     
-    // Delivery Destination (from PHP)
+    // Current target (pickup or delivery, from PHP based on booking status)
     const dest = {
-        lat: <?= $destLat ?? 'null' ?>,
-        lng: <?= $destLng ?? 'null' ?>
+        lat: <?= $targetLat ?? 'null' ?>,
+        lng: <?= $targetLng ?? 'null' ?>,
+        label: <?= json_encode((string)$targetType) ?>
     };
     const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
+    // Nigeria's geographic centroid - used only until a real GPS fix or target arrives.
+    const NIGERIA_CENTER = [9.0820, 8.6753];
+
     let map, riderMarker, destMarker;
 
+    function explainGeoError(err) {
+        if (!err) return 'Unable to fetch current location.';
+        if (err.code === 1) return 'Location permission was denied.';
+        if (err.code === 2) return 'Position unavailable. The device could not get a reliable fix.';
+        if (err.code === 3) return 'Location request timed out.';
+        return 'Unable to fetch current location.';
+    }
+
+    function logEntry(text) {
+        const entry = document.createElement('div');
+        entry.textContent = text;
+        logBox.prepend(entry);
+    }
+
     function initMap() {
-        map = L.map('nav_map').setView([0, 0], 2);
+        map = L.map('nav_map').setView(dest.lat ? [dest.lat, dest.lng] : NIGERIA_CENTER, dest.lat ? 14 : 6);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OSM'
         }).addTo(map);
-        
+
         if (dest.lat) {
             destMarker = L.marker([dest.lat, dest.lng], {
                 icon: L.divIcon({html: '🚩', className: 'fs-3', iconSize: [30, 30]})
-            }).addTo(map).bindPopup("Delivery Location");
+            }).addTo(map).bindPopup(dest.label + ' Location');
         }
     }
 
@@ -157,8 +193,11 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
                 const distance = calculateDistance(riderLat, riderLng, dest.lat, dest.lng);
                 distDisplay.textContent = distance > 1000 ? (distance/1000).toFixed(2) + ' km' : Math.round(distance) + ' m';
                 
-                // Enable "Arrived" button if within 200 meters
-                if (distance <= 200) {
+                // This page uses straight-line distance (no road routing), which usually
+                // underestimates real road distance - so use a tighter radius than the
+                // 300m road-distance threshold used on the full rider dashboards, to reduce
+                // false "arrived" triggers.
+                if (distance <= 150) {
                     btnArrived.disabled = false;
                     btnArrived.textContent = "MARK AS ARRIVED";
                     btnArrived.classList.replace('btn-secondary', 'btn-success');
@@ -184,13 +223,20 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
                 const res = await response.json();
                 if (res.success) {
                     syncTime.textContent = new Date().toLocaleTimeString();
-                    const entry = document.createElement('div');
-                    entry.textContent = `Synced @ ${riderLat.toFixed(4)}, ${riderLng.toFixed(4)}`;
-                    logBox.prepend(entry);
+                    logEntry(res.skipped
+                        ? `Synced @ ${riderLat.toFixed(4)}, ${riderLng.toFixed(4)} (unchanged, skipped write)`
+                        : `Synced @ ${riderLat.toFixed(4)}, ${riderLng.toFixed(4)}`);
+                } else {
+                    logEntry(`Sync rejected: ${res.message || 'unknown error'}`);
                 }
-            } catch (e) { console.error("Sync failed"); }
+            } catch (e) {
+                logEntry('Sync failed: could not reach server.');
+            }
 
-        }, null, { enableHighAccuracy: true });
+        }, function (err) {
+            logEntry(explainGeoError(err));
+            distDisplay.textContent = 'GPS issue';
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
     }
 
     initMap();

@@ -48,7 +48,7 @@ $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
           AND NOT EXISTS (
               SELECT 1 FROM bookings b 
               WHERE b.selected_rider_user_id = u.id 
-              AND b.booking_status IN ('accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
+              AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
           )
         ORDER BY distance_km ASC LIMIT 20";
 

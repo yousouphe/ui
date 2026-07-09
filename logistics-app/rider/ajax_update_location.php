@@ -25,6 +25,14 @@ if ($lat === null || $lng === null) {
     exit;
 }
 
+// Reject implausible fixes (e.g. the (0,0) "no fix" glitch, or a reading outside Nigeria)
+// so one bad GPS sample can't snap the rider's tracked position off the map.
+$withinNigeria = $lat >= 4.0 && $lat <= 14.0 && $lng >= 2.5 && $lng <= 15.0;
+if (!$withinNigeria) {
+    echo json_encode(['success' => false, 'message' => 'Location reading ignored: outside expected range.']);
+    exit;
+}
+
 $stmt = $pdo->prepare('SELECT last_latitude, last_longitude, last_location_updated_at, availability_status FROM rider_profiles WHERE user_id = ? LIMIT 1');
 $stmt->execute([$user['id']]);
 $current = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -48,7 +56,9 @@ if ($current) {
     $movedEnough = ($distanceMeters === null || $distanceMeters >= 55);
     $staleEnough = ($secondsSince >= 15);
 
-    $shouldWrite = $statusChanged || ($movedEnough && $staleEnough);
+    // Write on a status change, on meaningful movement, or as a stale-position heartbeat -
+    // ANDing movedEnough/staleEnough would mean a stationary rider never gets written at all.
+    $shouldWrite = $statusChanged || $movedEnough || $staleEnough;
 }
 
 if (!$shouldWrite) {

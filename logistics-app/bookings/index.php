@@ -1861,6 +1861,8 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         }
 
         if (canTrack) {
+            let currentTrackTarget = null;
+
             async function pollTracking() {
                 try {
                     const res = await fetch(`bookings/ajax_track_status.php?booking_id=${selectedBookingId}`);
@@ -1884,12 +1886,24 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                         workspaceState.trackingMarker.setLatLng(riderLatLng);
                     }
 
+                    // Match the rider-side target logic: pickup while matched/accepted (not yet
+                    // picked up), delivery from arrived_at_pickup onward (package is en route).
                     let target;
-                    if (d.booking_status === 'accepted' || d.booking_status === 'matched' || d.booking_status === 'arrived_at_pickup') {
+                    if (d.booking_status === 'matched' || d.booking_status === 'accepted') {
                         target = [parseFloat(d.pickup_lat), parseFloat(d.pickup_lng)];
                     } else {
                         target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
                     }
+
+                    // Only rebuild the routing control when the target actually changes (pickup vs
+                    // delivery) - matching the pattern already used in bookings/track.php. Rebuilding
+                    // on every poll regardless of movement causes visible flicker and hits the public
+                    // OSRM demo server every 10s for no reason.
+                    const targetKey = JSON.stringify(target);
+                    if (workspaceState.routingControl && targetKey === currentTrackTarget) {
+                        return;
+                    }
+                    currentTrackTarget = targetKey;
 
                     clearRouteInternal();
 

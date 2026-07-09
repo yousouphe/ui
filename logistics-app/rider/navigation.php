@@ -186,8 +186,9 @@ $stmt->execute([$user['id']]);
 $profile = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $isOnline = ($profile['availability_status'] ?? 'offline') === 'available';
-$initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 12.0022;
-$initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.5920;
+// Fall back to Nigeria's geographic centroid (not any specific city) when a rider has no saved fix yet.
+$initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 9.0820;
+$initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.6753;
 
 $respondRequestUrl = url_path('rider/respond_request.php');
 $ajaxUpdateLocationUrl = url_path('rider/ajax_update_location.php');
@@ -1289,7 +1290,7 @@ function badge_class(string $status): string
                 const fallbackLng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
                 updateMapAndTargetUI(fallbackLat, fallbackLng);
             },
-            { enableHighAccuracy: true, timeout: 12000, maximumAge: 3000 }
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
         );
     }
 

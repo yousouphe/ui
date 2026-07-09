@@ -698,7 +698,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <nav class="navbar navbar-expand-lg navbar-dark navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
-        <div class="navbar-nav ms-auto">
+        <div class="navbar-nav ms-auto flex-row gap-3">
+            <a class="nav-link" href="<?= e(url_path('rider/dashboard.php')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Deliveries</a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</a>
         </div>
     </div>
@@ -725,48 +726,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
         <div>
             <h1 class="h3 fw-bold mb-1">Rider Dashboard</h1>
-            <p class="text-soft mb-0">Track jobs, manage requests, monitor earnings, and update delivery workflow.</p>
-        </div>
-        <div class="d-flex gap-2 flex-wrap">
-            <span class="pill"><i class="fa-solid fa-box-open text-info"></i><span id="top-ongoing-count"><?= count($ongoingBookings) ?></span> ongoing</span>
-            <span class="pill"><i class="fa-solid fa-circle-check text-success"></i><span id="top-delivered-count"><?= count($deliveredBookings) ?></span> completed</span>
-            <span class="pill"><i class="fa-solid fa-wallet text-warning"></i>₦<span id="top-outstanding-amount"><?= number_format($totalOutstanding, 2) ?></span> unpaid</span>
-        </div>
-    </div>
-
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
-            <div class="summary-card">
-                <div class="stat-label">Paid Today</div>
-                <div class="money-big" id="paid-today-value">₦<?= number_format($totalPaidToday, 2) ?></div>
-                <div class="small text-soft mt-1"><?= count($todayPaidRows) ?> payment<?= count($todayPaidRows) === 1 ? '' : 's' ?></div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="summary-card">
-                <div class="stat-label">Paid This Week</div>
-                <div class="money-big" id="paid-week-value">₦<?= number_format($totalPaidWeek, 2) ?></div>
-                <div class="small text-soft mt-1"><?= count($weekPaidRows) ?> payment<?= count($weekPaidRows) === 1 ? '' : 's' ?></div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="summary-card">
-                <div class="stat-label">Paid This Month</div>
-                <div class="money-big" id="paid-month-value">₦<?= number_format($totalPaidMonth, 2) ?></div>
-                <div class="small text-soft mt-1"><?= count($monthPaidRows) ?> payment<?= count($monthPaidRows) === 1 ? '' : 's' ?></div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="summary-card">
-                <div class="stat-label">Outstanding Earnings</div>
-                <div class="money-big" id="outstanding-value">₦<?= number_format($totalOutstanding, 2) ?></div>
-                <div class="small text-soft mt-1"><?= count($unpaidEarningRows) ?> unpaid delivery<?= count($unpaidEarningRows) === 1 ? '' : 'ies' ?></div>
-            </div>
+            <p class="text-soft mb-0">Track your current job, or stay online for new offers.</p>
         </div>
     </div>
 
     <div class="row g-4 mb-4">
-        <div class="col-lg-7">
+        <div class="col-12">
             <div class="cardx p-3 p-md-4">
                 <?php if ($activeBooking): ?>
                     <div class="stats-bar d-flex justify-content-between align-items-center flex-wrap">
@@ -885,275 +850,46 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             </div>
         </div>
 
-        <div class="col-lg-5">
-            <div class="cardx p-4 h-100">
-                <h2 class="h5 fw-bold mb-3">Quick Summary</h2>
-
-                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="offers" role="button">
-                    <div>
-                        <div class="small text-soft">Pending Offers</div>
-                        <div class="fw-bold" id="pending-offers-count"><?= count($pendingOffers) ?></div>
-                    </div>
-                    <span class="badge bg-warning text-dark">Awaiting response</span>
-                </div>
-
-                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
-                    <div>
-                        <div class="small text-soft">Ongoing Orders</div>
-                        <div class="fw-bold" id="quick-ongoing-count"><?= count($ongoingBookings) ?></div>
-                    </div>
-                    <span class="badge bg-info text-dark">In progress</span>
-                </div>
-
-                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
-                    <div>
-                        <div class="small text-soft">Completed Orders</div>
-                        <div class="fw-bold" id="quick-delivered-count"><?= count($deliveredBookings) ?></div>
-                    </div>
-                    <span class="badge bg-success">Delivered</span>
-                </div>
-
-                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
-                    <div>
-                        <div class="small text-soft">Cancelled Orders</div>
-                        <div class="fw-bold" id="quick-cancelled-count"><?= count($cancelledBookings) ?></div>
-                    </div>
-                    <span class="badge bg-danger">Cancelled</span>
-                </div>
-
-                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="payments" role="button">
-                    <div>
-                        <div class="small text-soft">Paid Earnings</div>
-                        <div class="fw-bold" id="quick-paid-overall">₦<?= number_format($totalPaidOverall, 2) ?></div>
-                    </div>
-                    <span class="badge bg-success">Received</span>
-                </div>
-
-                <div class="pt-3">
-                    <div class="small text-soft mb-2">Workflow distribution</div>
-                    <div class="d-flex flex-wrap gap-2">
-                        <span class="pill"><i class="fa-solid fa-user-check text-info"></i><span id="matched-count"><?= count($matchedBookings) ?></span> matched</span>
-                        <span class="pill"><i class="fa-solid fa-thumbs-up text-primary"></i><span id="accepted-count"><?= count($acceptedBookings) ?></span> accepted</span>
-                        <span class="pill"><i class="fa-solid fa-location-crosshairs text-warning"></i><span id="pickup-count"><?= count($pickupBookings) ?></span> at pickup</span>
-                        <span class="pill"><i class="fa-solid fa-box text-secondary"></i><span id="package-received-count"><?= count($packageReceivedBookings) ?></span> package received</span>
-                        <span class="pill"><i class="fa-solid fa-truck-fast text-info"></i><span id="in-transit-count"><?= count($inTransitBookings) ?></span> in transit</span>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
-    <ul class="nav nav-tabs mb-4" id="riderDashboardTabs">
-        <li class="nav-item">
-            <button class="nav-link active position-relative" data-bs-toggle="tab" data-bs-target="#offers" type="button">
-                New Offers
-                <span class="request-indicator d-inline-flex" id="new-request-indicator"><?= count($pendingOffers) ?></span>
-            </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#orders" type="button">Orders</button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#payments" type="button">Payments</button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history" type="button">History</button>
-        </li>
-    </ul>
-
-    <div class="tab-content">
-        <div class="tab-pane fade show active" id="offers">
-            <div class="cardx p-4">
-                <h2 class="h5 fw-bold mb-3">New Offers</h2>
-                <div id="offers-list-wrap">
-                    <?php if (empty($pendingOffers)): ?>
-                        <div class="text-center py-5 text-soft">
-                            <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
-                            <p class="mb-0">Scanning for nearby orders...</p>
-                        </div>
-                    <?php else: ?>
-                        <div class="row g-3">
-                            <?php foreach ($pendingOffers as $req): ?>
-                                <div class="col-lg-6">
-                                    <div class="req-card p-3 border-warning h-100">
-                                        <div class="d-flex justify-content-between align-items-start mb-2">
-                                            <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
-                                            <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
-                                        </div>
-                                        <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
-                                        <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
-                                        <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
-                                        <form class="offer-action-form d-flex gap-2" method="post" action="#">
-                                            <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
-                                            <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
-                                            <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
-                                        </form>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
+    <?php if (!$activeBooking): ?>
+    <div class="cardx p-4 mb-4" id="offers">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h2 class="h5 fw-bold mb-0">New Offers</h2>
+            <span class="request-indicator d-inline-flex" id="new-request-indicator"><?= count($pendingOffers) ?></span>
         </div>
-
-        <div class="tab-pane fade" id="orders">
-            <div class="row g-4">
-                <div class="col-lg-4">
-                    <div class="cardx p-4 h-100">
-                        <h2 class="h5 fw-bold mb-3">Order Status Summary</h2>
-                        <div class="mini-row d-flex justify-content-between"><span>Matched</span><strong><?= count($matchedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Accepted</span><strong><?= count($acceptedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Arrived at pickup</span><strong><?= count($pickupBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Package received</span><strong><?= count($packageReceivedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>In transit</span><strong><?= count($inTransitBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Delivered</span><strong><?= count($deliveredBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Cancelled</span><strong><?= count($cancelledBookings) ?></strong></div>
-                    </div>
+        <div id="offers-list-wrap">
+            <?php if (empty($pendingOffers)): ?>
+                <div class="text-center py-5 text-soft">
+                    <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
+                    <p class="mb-0">Scanning for nearby orders...</p>
                 </div>
-
-                <div class="col-lg-8">
-                    <div class="cardx p-4">
-                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                            <h2 class="h5 fw-bold mb-0">All Assigned Orders</h2>
-                            <?php if (!empty($allAssignedBookings)): ?>
-                            <div class="order-search-wrap">
-                                <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="search" class="form-control form-control-sm bg-dark text-white border-secondary" id="assigned-orders-search" placeholder="Search by code, item, sender...">
+            <?php else: ?>
+                <div class="row g-3">
+                    <?php foreach ($pendingOffers as $req): ?>
+                        <div class="col-lg-6">
+                            <div class="req-card p-3 border-warning h-100">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                                    <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
+                                </div>
+                                <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
+                                <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
+                                <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
+                                <form class="offer-action-form d-flex gap-2" method="post" action="#">
+                                    <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
+                                    <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                                    <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
+                                </form>
                             </div>
-                            <?php endif; ?>
-                        </div>
-                        <?php if (empty($allAssignedBookings)): ?>
-                            <div class="text-soft">No assigned orders yet.</div>
-                        <?php else: ?>
-                            <div id="assigned-orders-list">
-                            <?php foreach ($allAssignedBookings as $b): ?>
-                                <div class="req-card p-3">
-                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                                        <div>
-                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
-                                            <div class="small text-soft"><?= e($b['item_name'] ?? 'Package') ?></div>
-                                        </div>
-                                        <div class="d-flex gap-2 flex-wrap">
-                                            <span class="badge <?= e(badge_class((string)($b['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string)($b['booking_status'] ?? 'unknown'))) ?></span>
-                                            <span class="badge <?= e(badge_class((string)($b['payment_status'] ?? 'pending'))) ?>"><?= e((string)($b['payment_status'] ?? 'pending')) ?></span>
-                                        </div>
-                                    </div>
-                                    <div class="small text-soft mb-1">Sender: <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' · ' . e($b['sender_phone']) : '' ?></div>
-                                    <div class="small text-soft mb-1">Pickup: <?= e($b['pickup_address'] ?? '') ?></div>
-                                    <div class="small text-soft mb-2">Delivery: <?= e($b['delivery_address'] ?? '') ?></div>
-                                    <div class="price-tag">₦<?= number_format((float)($b['agreed_cost'] ?? 0), 2) ?></div>
-                                </div>
-                            <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-pane fade" id="payments">
-            <div class="row g-4 mb-4">
-                <div class="col-md-6 col-xl-3">
-                    <div class="summary-card">
-                        <div class="stat-label">Total Paid Today</div>
-                        <div class="money-big">₦<?= number_format($totalPaidToday, 2) ?></div>
-                    </div>
-                </div>
-                <div class="col-md-6 col-xl-3">
-                    <div class="summary-card">
-                        <div class="stat-label">Total Paid This Week</div>
-                        <div class="money-big">₦<?= number_format($totalPaidWeek, 2) ?></div>
-                    </div>
-                </div>
-                <div class="col-md-6 col-xl-3">
-                    <div class="summary-card">
-                        <div class="stat-label">Total Paid This Month</div>
-                        <div class="money-big">₦<?= number_format($totalPaidMonth, 2) ?></div>
-                    </div>
-                </div>
-                <div class="col-md-6 col-xl-3">
-                    <div class="summary-card">
-                        <div class="stat-label">Total Paid Overall</div>
-                        <div class="money-big">₦<?= number_format($totalPaidOverall, 2) ?></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row g-4">
-                <div class="col-lg-5">
-                    <div class="cardx p-4 h-100">
-                        <h2 class="h5 fw-bold mb-3">Payment Summary</h2>
-                        <div class="mini-row d-flex justify-content-between"><span>Paid deliveries</span><strong><?= count($paidEarningRows) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Unpaid deliveries</span><strong><?= count($unpaidEarningRows) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Outstanding amount</span><strong>₦<?= number_format($totalOutstanding, 2) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Total expected</span><strong>₦<?= number_format($totalExpectedOverall, 2) ?></strong></div>
-                    </div>
-                </div>
-
-                <div class="col-lg-7">
-                    <div class="cardx p-4">
-                        <h2 class="h5 fw-bold mb-3">Earnings Details</h2>
-                        <?php if (empty($deliveredEarningRows)): ?>
-                            <div class="text-soft">No delivered jobs yet.</div>
-                        <?php else: ?>
-                            <?php foreach ($deliveredEarningRows as $row): ?>
-                                <div class="req-card p-3">
-                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                                        <div>
-                                            <div class="fw-bold"><?= e($row['booking_code']) ?></div>
-                                            <div class="small text-soft"><?= e($row['sender_name'] ?? '') ?></div>
-                                        </div>
-                                        <div class="text-end">
-                                            <div class="price-tag">₦<?= number_format((float)($row['agreed_cost'] ?? 0), 2) ?></div>
-                                            <span class="badge <?= e(badge_class((string)($row['payment_status'] ?? 'pending'))) ?>">
-                                                <?= e((string)($row['payment_status'] ?? 'pending')) ?>
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div class="small text-soft mt-2">
-                                        Delivered on <?= e((string)($row['updated_at'] ?? $row['created_at'] ?? '')) ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-pane fade" id="history">
-            <div class="cardx p-4">
-                <h2 class="h5 fw-bold mb-3">Request / Order History</h2>
-                <?php
-                $historyRows = array_filter($allRequests, fn($req) =>
-                    ($req['request_status'] ?? '') !== 'pending' || in_array(($req['booking_status'] ?? ''), ['delivered', 'cancelled'], true)
-                );
-                ?>
-                <?php if (empty($historyRows)): ?>
-                    <div class="text-soft">No request history yet.</div>
-                <?php else: ?>
-                    <?php foreach ($historyRows as $req): ?>
-                        <div class="req-card p-3">
-                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                                <div>
-                                    <div class="fw-bold"><?= e($req['booking_code']) ?></div>
-                                    <div class="small text-soft"><?= e($req['item_name'] ?? '') ?></div>
-                                </div>
-                                <div class="d-flex gap-2 flex-wrap">
-                                    <span class="badge <?= e(badge_class((string)($req['request_status'] ?? 'pending'))) ?>"><?= e((string)($req['request_status'] ?? 'pending')) ?></span>
-                                    <span class="badge <?= e(badge_class((string)($req['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string)($req['booking_status'] ?? 'unknown'))) ?></span>
-                                </div>
-                            </div>
-                            <div class="small text-soft mb-1">Pickup: <?= e($req['pickup_address'] ?? '') ?></div>
-                            <div class="small text-soft mb-1">Delivery: <?= e($req['delivery_address'] ?? '') ?></div>
-                            <div class="small text-soft">Offer / Value: ₦<?= number_format((float)($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0), 2) ?></div>
                         </div>
                     <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
+    <?php endif; ?>
+
 </div>
 
 <div class="modal fade" id="newRequestModal" tabindex="-1" aria-hidden="true">

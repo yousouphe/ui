@@ -7,14 +7,6 @@ $user = current_user();
 $success = flash('success');
 $error = flash('error');
 
-function respond_json(array $payload, int $statusCode = 200): void
-{
-    http_response_code($statusCode);
-    header('Content-Type: application/json');
-    echo json_encode($payload);
-    exit;
-}
-
 function sum_amount(array $rows): float
 {
     $total = 0.0;
@@ -534,8 +526,9 @@ $stmt->execute([$user['id']]);
 $profile = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $isOnline = ($profile['availability_status'] ?? 'offline') === 'available';
-$initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 12.0022;
-$initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.5920;
+// Fall back to Nigeria's geographic centroid (not any specific city) when a rider has no saved fix yet.
+$initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 9.0820;
+$initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.6753;
 
 $ajaxUpdateLocationUrl = url_path('rider/ajax_update_location.php');
 $ajaxUpdateStatusUrl = url_path('rider/ajax_update_status.php');
@@ -670,6 +663,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .system-msg { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:12px 14px; font-size:.9rem; color:#cfe0ff; margin-bottom:1rem; }
         .mini-row { border-bottom:1px solid rgba(255,255,255,.06); padding:10px 0; }
         .mini-row:last-child { border-bottom:none; }
+        .glance-row { cursor:pointer; transition:.15s ease; border-radius:.5rem; padding-left:8px; padding-right:8px; margin:0 -8px; }
+        .glance-row:hover { background:rgba(56,189,248,.08); }
+        .order-search-wrap { position:relative; max-width:320px; }
+        .order-search-wrap input { padding-left:2.25rem; }
+        .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#9fb0d6; }
         .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
         .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
         .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(8,17,33,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.10); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
@@ -682,7 +680,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .chat-status { display:block; font-size:.70rem; color:#7dd3fc; margin-top:4px; text-align:right; }
         .chat-footer { padding:12px; border-top:1px solid rgba(255,255,255,.08); }
         .chat-footer textarea { resize:none; min-height:54px; max-height:100px; }
-        .chat-action-row{display:flex;gap:8px;margin-bottom:10px}
+        .chat-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+        .chat-action-row>*{min-width:105px}
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
@@ -890,7 +889,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3">Quick Summary</h2>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="offers" role="button">
                     <div>
                         <div class="small text-soft">Pending Offers</div>
                         <div class="fw-bold" id="pending-offers-count"><?= count($pendingOffers) ?></div>
@@ -898,7 +897,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-warning text-dark">Awaiting response</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Ongoing Orders</div>
                         <div class="fw-bold" id="quick-ongoing-count"><?= count($ongoingBookings) ?></div>
@@ -906,7 +905,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-info text-dark">In progress</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Completed Orders</div>
                         <div class="fw-bold" id="quick-delivered-count"><?= count($deliveredBookings) ?></div>
@@ -914,7 +913,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-success">Delivered</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Cancelled Orders</div>
                         <div class="fw-bold" id="quick-cancelled-count"><?= count($cancelledBookings) ?></div>
@@ -922,7 +921,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-danger">Cancelled</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="payments" role="button">
                     <div>
                         <div class="small text-soft">Paid Earnings</div>
                         <div class="fw-bold" id="quick-paid-overall">₦<?= number_format($totalPaidOverall, 2) ?></div>
@@ -1015,10 +1014,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
                 <div class="col-lg-8">
                     <div class="cardx p-4">
-                        <h2 class="h5 fw-bold mb-3">All Assigned Orders</h2>
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h2 class="h5 fw-bold mb-0">All Assigned Orders</h2>
+                            <?php if (!empty($allAssignedBookings)): ?>
+                            <div class="order-search-wrap">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" class="form-control form-control-sm bg-dark text-white border-secondary" id="assigned-orders-search" placeholder="Search by code, item, sender...">
+                            </div>
+                            <?php endif; ?>
+                        </div>
                         <?php if (empty($allAssignedBookings)): ?>
                             <div class="text-soft">No assigned orders yet.</div>
                         <?php else: ?>
+                            <div id="assigned-orders-list">
                             <?php foreach ($allAssignedBookings as $b): ?>
                                 <div class="req-card p-3">
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
@@ -1037,6 +1045,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <div class="price-tag">₦<?= number_format((float)($b['agreed_cost'] ?? 0), 2) ?></div>
                                 </div>
                             <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1194,6 +1203,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
             <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
             <div class="chat-action-row">
+                <?php if (!empty($activeBooking['sender_phone'])): ?>
+                <a class="btn btn-outline-info flex-fill" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="Call the sender's phone number directly">
+                    <i class="fa-solid fa-phone me-2"></i>Call Sender
+                </a>
+                <?php endif; ?>
                 <button type="button" class="btn btn-outline-success flex-fill" id="chat-call-btn"><i class="fa-solid fa-phone-volume me-2"></i>Internet Call</button>
                 <button type="button" class="btn btn-outline-warning flex-fill" id="chat-voice-btn"><i class="fa-solid fa-microphone me-2"></i><span class="voice-btn-label">Record Voice</span></button>
             </div>
@@ -1771,7 +1785,7 @@ function startTracking() {
             const fallbackLng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
             updateMapAndTargetUI(fallbackLat, fallbackLng);
         },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
     );
 }
 
@@ -2413,6 +2427,25 @@ window.addEventListener('resize', function () {
     if (state.map) {
         state.map.invalidateSize();
     }
+});
+
+// ---------------- QUICK SUMMARY: JUMP TO TAB ----------------
+document.querySelectorAll('.glance-row').forEach(row => {
+    row.addEventListener('click', function () {
+        const tabButton = document.querySelector(`#riderDashboardTabs button[data-bs-target="#${this.dataset.gotoTab}"]`);
+        if (tabButton && window.bootstrap) {
+            window.bootstrap.Tab.getOrCreateInstance(tabButton).show();
+        }
+    });
+});
+
+// ---------------- ASSIGNED ORDERS SEARCH ----------------
+document.getElementById('assigned-orders-search')?.addEventListener('input', function () {
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll('#assigned-orders-list > .req-card').forEach(card => {
+        const matches = query === '' || card.textContent.toLowerCase().includes(query);
+        card.style.display = matches ? '' : 'none';
+    });
 });
 </script>
 </body>

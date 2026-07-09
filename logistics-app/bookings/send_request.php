@@ -14,14 +14,6 @@ function is_ajax_request(): bool
         || strpos($accept, 'application/json') !== false;
 }
 
-function respond_json(array $payload, int $statusCode = 200): void
-{
-    http_response_code($statusCode);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload);
-    exit;
-}
-
 function fail_request(string $message, int $statusCode = 422, bool $ajax = false, ?int $bookingId = null, ?string $debug = null): void
 {
     if ($ajax) {

@@ -28,6 +28,10 @@ $booking = $stmt->fetch();
 if (!$booking) exit('Tracking link not found.');
 
 $canPay = $booking['booking_status'] === 'delivered' && $booking['payment_status'] !== 'paid';
+$hasRouteCoords = $booking['pickup_latitude'] !== null
+    && $booking['pickup_longitude'] !== null
+    && $booking['delivery_latitude'] !== null
+    && $booking['delivery_longitude'] !== null;
 ?>
 <!doctype html>
 <html lang="en">
@@ -56,7 +60,14 @@ $canPay = $booking['booking_status'] === 'delivered' && $booking['payment_status
   <div class="row g-4">
     <div class="col-lg-8">
       <div class="cardx p-4">
+        <?php if ($hasRouteCoords): ?>
+        <div class="stats-bar d-flex gap-3 mb-3">
+          <span class="badge text-bg-primary" id="distance_display">Calculating route...</span>
+        </div>
         <div id="tracking_map"></div>
+        <?php else: ?>
+        <div class="alert alert-info mb-0">Pickup/delivery coordinates aren't available for this booking yet, so the live map can't be shown. Status and payment details are still up to date on the right.</div>
+        <?php endif; ?>
       </div>
     </div>
 
@@ -98,26 +109,27 @@ $canPay = $booking['booking_status'] === 'delivered' && $booking['payment_status
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
 <script>
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+</script>
+
+<?php if ($hasRouteCoords): ?>
+<script>
 let map, riderMarker, routingControl;
 let currentRouteTarget = null;
 
 const bookingId = <?= (int)$booking['id'] ?>;
-const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+const pickupPoint = <?= json_encode([(float)$booking['pickup_latitude'], (float)$booking['pickup_longitude']]) ?>;
+const deliveryPoint = <?= json_encode([(float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']]) ?>;
 
 // INIT MAP
-map = L.map('tracking_map').setView(
-    [<?= $booking['pickup_latitude'] ?>, <?= $booking['pickup_longitude'] ?>],
-    13
-);
+map = L.map('tracking_map').setView(pickupPoint, 13);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 // MARKERS
-const pickupMarker = L.marker([<?= $booking['pickup_latitude'] ?>, <?= $booking['pickup_longitude'] ?>])
-    .addTo(map).bindPopup("Pickup");
-
-const deliveryMarker = L.marker([<?= $booking['delivery_latitude'] ?>, <?= $booking['delivery_longitude'] ?>])
-    .addTo(map).bindPopup("Delivery");
+const pickupMarker = L.marker(pickupPoint).addTo(map).bindPopup("Pickup");
+const deliveryMarker = L.marker(deliveryPoint).addTo(map).bindPopup("Delivery");
+const distanceDisplay = document.getElementById('distance_display');
 
 // ROUTE + TRACKING FUNCTION
 async function updateTracking() {
@@ -145,13 +157,14 @@ async function updateTracking() {
             riderMarker.setLatLng(riderLatLng);
         }
 
-        // DETERMINE TARGET BASED ON STATUS
+        // DETERMINE TARGET BASED ON STATUS - matches rider-side logic: pickup while
+        // matched/accepted (not yet picked up), delivery from arrived_at_pickup onward.
         let target;
 
-        if (d.booking_status === 'accepted') {
-            target = [d.pickup_lat, d.pickup_lng];
+        if (d.booking_status === 'matched' || d.booking_status === 'accepted') {
+            target = [parseFloat(d.pickup_lat), parseFloat(d.pickup_lng)];
         } else {
-            target = [d.delivery_lat, d.delivery_lng];
+            target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
         }
 
         // UPDATE ROUTE ONLY IF TARGET CHANGED OR FIRST LOAD
@@ -176,17 +189,7 @@ async function updateTracking() {
                 const route = e.routes[0];
                 const distKm = (route.summary.totalDistance / 1000).toFixed(2);
                 const etaMin = Math.round(route.summary.totalTime / 60);
-
-                document.getElementById('distance_display').innerText = distKm + ' km';
-                
-                if (!document.getElementById('eta_display')) {
-                    const el = document.createElement('div');
-                    el.id = 'eta_display';
-                    el.className = 'stat-value text-warning';
-                    document.querySelector('.stats-bar').appendChild(el);
-                }
-
-                document.getElementById('eta_display').innerText = etaMin + ' min ETA';
+                if (distanceDisplay) distanceDisplay.innerText = `${distKm} km · ~${etaMin} min`;
             });
 
             currentRouteTarget = target;
@@ -203,6 +206,7 @@ setInterval(updateTracking, 5000);
 // FIRST LOAD
 updateTracking();
 </script>
+<?php endif; ?>
 
 <script>
 

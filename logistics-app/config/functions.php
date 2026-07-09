@@ -11,6 +11,17 @@ function config_app(): array {
     return $config;
 }
 
+function respond_json(array $payload, int $statusCode = 200): void {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($payload);
+    exit;
+}
+
+function mapbox_token(): string {
+    return trim((string)(config_app()['mapbox_token'] ?? ''));
+}
+
 function base_url(): string {
     $configured = trim((string)(config_app()['base_url'] ?? ''));
     if ($configured !== '') {
@@ -110,8 +121,8 @@ function require_role(array $roles): void {
 function require_guest(): void {
     if (is_logged_in()) {
         $user = current_user();
-        if (($user['role'] ?? '') === 'rider') redirect_to('rider/dashboard.php');
-        redirect_to('dashboard.php');
+        if (($user['role'] ?? '') === 'rider') redirect_to('rider/index.php');
+        redirect_to('bookings/index.php');
     }
 }
 

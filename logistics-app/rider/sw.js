@@ -1,0 +1,7 @@
+// sw.js - Service Worker
+self.addEventListener('install', (e) => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+
+self.addEventListener('fetch', (event) => {
+    // Keeps the service worker alive during network requests
+});

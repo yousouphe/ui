@@ -1,0 +1,1889 @@
+<?php
+require_once __DIR__ . '/../config/functions.php';
+require_role(['sender', 'admin']);
+require_once __DIR__ . '/../config/db.php';
+
+$user = current_user();
+$errors = [];
+$success = flash('success');
+$error = flash('error');
+
+$requestedBookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
+$selectedBookingId = $requestedBookingId;
+$showNewOrderForm = isset($_GET['new']) && $_GET['new'] === '1';
+
+// ---------------- CREATE BOOKING ----------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $errors = validate_required([
+        'recipient_name'   => 'Recipient name',
+        'recipient_phone'  => 'Recipient phone',
+        'pickup_address'   => 'Pickup address',
+        'delivery_address' => 'Delivery address',
+        'item_name'        => 'Item name',
+        'item_category'    => 'Item category',
+    ], $_POST);
+
+    $saveAsDraft = isset($_POST['save_draft']);
+    if (!$saveAsDraft && empty($_FILES['item_image']['name'])) {
+        $errors['item_image'] = 'Item image is required when submitting a booking.';
+    }
+
+    $trackingToken = bin2hex(random_bytes(16));
+
+    $payload = [
+        'sender_user_id'        => $user['id'],
+        'booking_code'          => 'BK-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3))),
+        'recipient_name'        => trim($_POST['recipient_name'] ?? ''),
+        'recipient_phone'       => trim($_POST['recipient_phone'] ?? ''),
+        'pickup_address'        => trim($_POST['pickup_address'] ?? ''),
+        'pickup_latitude'       => ($_POST['pickup_latitude'] ?? '') !== '' ? (float) $_POST['pickup_latitude'] : null,
+        'pickup_longitude'      => ($_POST['pickup_longitude'] ?? '') !== '' ? (float) $_POST['pickup_longitude'] : null,
+        'delivery_address'      => trim($_POST['delivery_address'] ?? ''),
+        'delivery_latitude'     => ($_POST['delivery_latitude'] ?? '') !== '' ? (float) $_POST['delivery_latitude'] : null,
+        'delivery_longitude'    => ($_POST['delivery_longitude'] ?? '') !== '' ? (float) $_POST['delivery_longitude'] : null,
+        'item_name'             => trim($_POST['item_name'] ?? ''),
+        'item_category'         => trim($_POST['item_category'] ?? ''),
+        'item_description'      => trim($_POST['item_description'] ?? ''),
+        'estimated_value'       => ($_POST['estimated_value'] ?? '') !== '' ? (float) $_POST['estimated_value'] : null,
+        'special_instructions'  => trim($_POST['special_instructions'] ?? ''),
+        'booking_status'        => $saveAsDraft ? 'draft' : 'submitted',
+        'sender_tracking_token' => $trackingToken,
+    ];
+
+    if (!$errors) {
+        try {
+            $payload['item_image_path'] = save_item_image($_FILES['item_image'] ?? []);
+
+            $stmt = $pdo->prepare('
+                INSERT INTO bookings (
+                    sender_user_id, booking_code, recipient_name, recipient_phone,
+                    pickup_address, pickup_latitude, pickup_longitude,
+                    delivery_address, delivery_latitude, delivery_longitude,
+                    item_name, item_category, item_description, item_image_path,
+                    estimated_value, special_instructions, booking_status, sender_tracking_token
+                ) VALUES (
+                    :sender_user_id, :booking_code, :recipient_name, :recipient_phone,
+                    :pickup_address, :pickup_latitude, :pickup_longitude,
+                    :delivery_address, :delivery_latitude, :delivery_longitude,
+                    :item_name, :item_category, :item_description, :item_image_path,
+                    :estimated_value, :special_instructions, :booking_status, :sender_tracking_token
+                )
+            ');
+            $stmt->execute($payload);
+
+            $selectedBookingId = (int) $pdo->lastInsertId();
+
+            if ($saveAsDraft) {
+                flash('success', 'Booking saved as draft.');
+                redirect_to('bookings/index.php');
+            }
+
+            flash('success', 'Booking submitted successfully. Choose a rider below.');
+            redirect_to('bookings/index.php?booking_id=' . $selectedBookingId);
+        } catch (Throwable $e) {
+            $errors['general'] = $e->getMessage();
+            $showNewOrderForm = true;
+        }
+    } else {
+        $showNewOrderForm = true;
+    }
+}
+
+// ---------------- LOAD BOOKINGS ----------------
+$stmt = $pdo->prepare("
+    SELECT
+        b.*,
+        r.full_name AS rider_name,
+        r.phone AS rider_phone,
+        rp.last_latitude,
+        rp.last_longitude,
+        rp.availability_status
+    FROM bookings b
+    LEFT JOIN users r ON r.id = b.selected_rider_user_id
+    LEFT JOIN rider_profiles rp ON rp.user_id = b.selected_rider_user_id
+    WHERE b.sender_user_id = ?
+    ORDER BY b.id DESC
+");
+$stmt->execute([$user['id']]);
+$allBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$activeBookings = [];
+$unpaidBookings = [];
+$historyBookings = [];
+
+foreach ($allBookings as $b) {
+    $paymentStatus = $b['payment_status'] ?? 'unpaid';
+    $bookingStatus = $b['booking_status'] ?? '';
+
+    if ($bookingStatus === 'draft') {
+        continue;
+    }
+
+    if ($paymentStatus === 'paid') {
+        $historyBookings[] = $b;
+    } elseif (in_array($bookingStatus, ['delivered', 'cancelled'], true)) {
+        $unpaidBookings[] = $b;
+    } else {
+        $activeBookings[] = $b;
+    }
+}
+
+$selectedBooking = null;
+if ($selectedBookingId > 0) {
+    foreach ($allBookings as $b) {
+        if ((int) $b['id'] === $selectedBookingId) {
+            $selectedBooking = $b;
+            break;
+        }
+    }
+}
+if (!$selectedBooking && !empty($activeBookings)) {
+    $selectedBooking = $activeBookings[0];
+    $selectedBookingId = (int) $selectedBooking['id'];
+} elseif (!$selectedBooking && !empty($unpaidBookings)) {
+    $selectedBooking = $unpaidBookings[0];
+    $selectedBookingId = (int) $selectedBooking['id'];
+} elseif (!$selectedBooking && !empty($historyBookings)) {
+    $selectedBooking = $historyBookings[0];
+    $selectedBookingId = (int) $selectedBooking['id'];
+}
+
+function haversine_distance($lat1, $lon1, $lat2, $lon2)
+{
+    $earthRadius = 6371;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
+    $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
+    return $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
+}
+
+function booking_exists_in_list(array $list, int $bookingId): bool
+{
+    foreach ($list as $item) {
+        if ((int)($item['id'] ?? 0) === $bookingId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+$selectedDistanceKm = null;
+if (
+    $selectedBooking &&
+    $selectedBooking['pickup_latitude'] !== null &&
+    $selectedBooking['pickup_longitude'] !== null &&
+    $selectedBooking['delivery_latitude'] !== null &&
+    $selectedBooking['delivery_longitude'] !== null
+) {
+    $selectedDistanceKm = haversine_distance(
+        (float) $selectedBooking['pickup_latitude'],
+        (float) $selectedBooking['pickup_longitude'],
+        (float) $selectedBooking['delivery_latitude'],
+        (float) $selectedBooking['delivery_longitude']
+    );
+}
+
+$canTrack = $selectedBooking && !empty($selectedBooking['selected_rider_user_id']);
+$needsRider = $selectedBooking
+    && empty($selectedBooking['selected_rider_user_id'])
+    && in_array($selectedBooking['booking_status'], ['submitted'], true);
+$canPay = $selectedBooking && $selectedBooking['booking_status'] === 'delivered' && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
+
+$canCancel = $selectedBooking
+    && !empty($selectedBooking['selected_rider_user_id'])
+    && in_array($selectedBooking['booking_status'], ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit'], true)
+    && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
+
+$canRebook = $selectedBooking
+    && ($selectedBooking['booking_status'] ?? '') === 'cancelled'
+    && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
+
+$canIssueItem = $selectedBooking
+    && ($selectedBooking['booking_status'] ?? '') === 'arrived_at_pickup'
+    && !empty($selectedBooking['selected_rider_user_id'])
+    && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 0;
+
+$canChat = $selectedBooking && (int)($selectedBooking['selected_rider_user_id'] ?? 0) > 0;
+$chatReceiverId = $canChat ? (int)$selectedBooking['selected_rider_user_id'] : 0;
+$cancellationReason = trim((string)($selectedBooking['cancellation_reason'] ?? ''));
+
+$selectedBookingIsActive = $selectedBooking ? booking_exists_in_list($activeBookings, (int) $selectedBooking['id']) : false;
+$selectedBookingIsUnpaid = $selectedBooking ? booking_exists_in_list($unpaidBookings, (int) $selectedBooking['id']) : false;
+$selectedBookingIsHistory = $selectedBooking ? booking_exists_in_list($historyBookings, (int) $selectedBooking['id']) : false;
+
+$selectedBookingTab = 'active-orders';
+if ($selectedBookingIsUnpaid) {
+    $selectedBookingTab = 'unpaid-orders';
+} elseif ($selectedBookingIsHistory) {
+    $selectedBookingTab = 'history-orders';
+}
+
+$displayActiveBookings = $activeBookings;
+$displayUnpaidBookings = $unpaidBookings;
+$displayHistoryBookings = $historyBookings;
+
+$shouldAutoOpenSelectedTab = false;
+if ($requestedBookingId > 0 && $selectedBooking) {
+    $shouldAutoOpenSelectedTab = true;
+} elseif (empty($activeBookings) && $selectedBooking && ($selectedBookingIsUnpaid || $selectedBookingIsHistory)) {
+    $shouldAutoOpenSelectedTab = true;
+}
+
+$selectedPickupLat = $selectedBooking['pickup_latitude'] ?? '';
+$selectedPickupLng = $selectedBooking['pickup_longitude'] ?? '';
+$selectedDeliveryLat = $selectedBooking['delivery_latitude'] ?? '';
+$selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Sender Hub | SwiftDrop</title>
+    <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:100vh;color:#eef4ff}
+        .navx{background:rgba(8,17,33,.88);border-bottom:1px solid rgba(255,255,255,.08)}
+        .cardx{background:rgba(17,27,51,.92);border:1px solid rgba(255,255,255,.08);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+        .text-soft{color:#9fb0d6}
+        .form-control,.form-select{background:#0b1430;color:#eef4ff;border-color:rgba(255,255,255,.1)}
+        .form-control:focus,.form-select:focus{background:#0b1430;color:#eef4ff;border-color:#6ea8fe;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
+        .leaflet-container{height:100%;width:100%}
+        .map-wrap{height:380px;border-radius:1rem;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+        #booking_map{height:380px !important;width:100% !important}
+        #detail_map{height:480px;border-radius:1.25rem;border:2px solid rgba(110,168,254,.2)}
+        .detail-map-small #detail_map{height:280px}
+        .rider-card{background:#0b1430;border:1px solid rgba(255,255,255,.08);border-radius:1rem}
+        .order-card{cursor:pointer;transition:.2s ease}
+        .order-card:hover{transform:translateY(-2px);border-color:rgba(110,168,254,.4)}
+        .order-card.active{border-color:#38bdf8;box-shadow:0 0 0 1px rgba(56,189,248,.35)}
+        .badge-soft{background:rgba(56,189,248,.12);color:#9ddcff;border:1px solid rgba(56,189,248,.3)}
+        #routing-directions{background:rgba(11,20,48,.95);border:1px solid rgba(56,189,248,.3);border-radius:1rem;color:#fff;display:none}
+        .routing-instructions-list{background:transparent!important;color:#fff!important;border:none!important}
+        .leaflet-routing-alt{background:transparent!important;color:#fff!important;max-height:260px!important;overflow-y:auto}
+        .leaflet-routing-alt table{color:#fff!important;width:100%}
+        .leaflet-routing-alt tr:hover{background:rgba(255,255,255,.05)}
+        .leaflet-routing-container{width:100%!important;background:transparent!important;border:none!important;box-shadow:none!important}
+        .info-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.9rem}
+        .sticky-chat-btn{position:fixed;right:20px;bottom:20px;z-index:99999;width:60px;height:60px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;box-shadow:0 12px 24px rgba(0,0,0,.35);font-size:1.25rem;display:flex;align-items:center;justify-content:center}
+        .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(8,17,33,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.10);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;overflow:hidden}
+        .chat-header{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;justify-content:space-between;align-items:center}
+        .chat-messages{height:360px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+        .chat-bubble{max-width:80%;padding:10px 12px;border-radius:14px;font-size:.92rem;line-height:1.35;word-wrap:break-word}
+        .chat-bubble.me{align-self:flex-end;background:rgba(56,189,248,.18);border:1px solid rgba(56,189,248,.30);color:#eef4ff}
+        .chat-bubble.them{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10);color:#eef4ff}
+        .chat-time{display:block;font-size:.72rem;color:#9fb0d6;margin-top:6px}
+        .chat-status{display:block;font-size:.70rem;color:#7dd3fc;margin-top:4px;text-align:right}
+        .chat-footer{padding:12px;border-top:1px solid rgba(255,255,255,.08)}
+        .chat-footer textarea{resize:none;min-height:54px;max-height:100px}
+        .cancel-reason-box{margin-top:12px;padding:12px;border-radius:12px;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.25);color:#ffd5d5}
+        .action-stack{display:flex;flex-direction:column;gap:10px}
+        @media (max-width:576px){
+            .sticky-chat-btn{right:14px;bottom:14px}
+            .chat-panel{right:12px;left:12px;width:auto;bottom:84px}
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark navx">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="<?= e(url_path('dashboard.php')) ?>">Dashboard</a>
+            <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-5">
+    <div
+        id="sender-workspace-content"
+        data-selected-booking-id="<?= (int) $selectedBookingId ?>"
+        data-selected-booking-status="<?= e((string) ($selectedBooking['booking_status'] ?? '')) ?>"
+        data-selected-has-rider="<?= !empty($selectedBooking['selected_rider_user_id']) ? '1' : '0' ?>"
+        data-selected-booking-tab="<?= e($selectedBookingTab) ?>"
+        data-should-auto-open-selected-tab="<?= $shouldAutoOpenSelectedTab ? '1' : '0' ?>"
+        data-needs-rider="<?= $needsRider ? '1' : '0' ?>"
+        data-can-track="<?= $canTrack ? '1' : '0' ?>"
+        data-can-pay="<?= $canPay ? '1' : '0' ?>"
+        data-can-chat="<?= $canChat ? '1' : '0' ?>"
+        data-chat-receiver-id="<?= (int)$chatReceiverId ?>"
+        data-pickup-lat="<?= e((string) $selectedPickupLat) ?>"
+        data-pickup-lng="<?= e((string) $selectedPickupLng) ?>"
+        data-delivery-lat="<?= e((string) $selectedDeliveryLat) ?>"
+        data-delivery-lng="<?= e((string) $selectedDeliveryLng) ?>"
+    >
+        <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
+        <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
+        <?php if (!empty($errors['general'])): ?><div class="alert alert-danger"><?= e($errors['general']) ?></div><?php endif; ?>
+        <div id="alert-container"></div>
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+            <div>
+                <h1 class="h3 fw-bold mb-1">Sender Workspace</h1>
+                <p class="text-soft mb-0">Manage active deliveries, view history, and place a new order only when needed.</p>
+            </div>
+            <button class="btn btn-primary" id="toggle-new-order">
+                <i class="fa-solid fa-plus me-2"></i>New Order
+            </button>
+        </div>
+
+        <div class="cardx p-4 p-lg-5 mb-5" id="new-order-panel" style="<?= $showNewOrderForm ? '' : 'display:none;' ?>">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
+                <div>
+                    <h2 class="h4 fw-bold mb-1">Create Booking</h2>
+                    <p class="text-soft mb-0">Fill in parcel details, set pickup and delivery, then submit to start rider matching.</p>
+                </div>
+                <button class="btn btn-outline-light" type="button" id="close-new-order">
+                    <i class="fa-solid fa-xmark me-1"></i>Close
+                </button>
+            </div>
+
+            <form method="post" enctype="multipart/form-data" id="booking-form">
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <label class="form-label">Recipient name</label>
+                        <input class="form-control" name="recipient_name" value="<?= e(old('recipient_name')) ?>">
+                        <?php if (!empty($errors['recipient_name'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_name']) ?></div><?php endif; ?>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Recipient phone</label>
+                        <input class="form-control" name="recipient_phone" value="<?= e(old('recipient_phone')) ?>">
+                        <?php if (!empty($errors['recipient_phone'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_phone']) ?></div><?php endif; ?>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="cardx p-3">
+                            <h3 class="h5">Pickup location</h3>
+                            <div class="row g-3">
+                                <div class="col-lg-6">
+                                    <label class="form-label">Pickup address</label>
+                                    <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>">
+                                </div>
+                                <div class="col-lg-6 d-flex align-items-end gap-2 flex-wrap">
+                                    <button class="btn btn-outline-light" type="button" id="use_current_pickup">Use Current Location</button>
+                                    <button class="btn btn-outline-info" type="button" id="select_pickup_mode">Pick From Map</button>
+                                </div>
+                                <div class="col-md-6" style="display:none;">
+                                    <label class="form-label">Pickup latitude</label>
+                                    <input class="form-control" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>" readonly>
+                                </div>
+                                <div class="col-md-6" style="display:none;">
+                                    <label class="form-label">Pickup longitude</label>
+                                    <input class="form-control" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>" readonly>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="cardx p-3">
+                            <h3 class="h5">Delivery location</h3>
+                            <div class="row g-3">
+                                <div class="col-lg-6">
+                                    <label class="form-label">Delivery address</label>
+                                    <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>">
+                                </div>
+                                <div class="col-lg-6 d-flex align-items-end gap-2 flex-wrap">
+                                    <button class="btn btn-outline-light" type="button" id="use_current_delivery">Use Current Location</button>
+                                    <button class="btn btn-outline-info" type="button" id="select_delivery_mode">Pick From Map</button>
+                                </div>
+                                <div class="col-md-6" style="display:none;">
+                                    <label class="form-label">Delivery latitude</label>
+                                    <input class="form-control" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>" readonly>
+                                </div>
+                                <div class="col-md-6" style="display:none;">
+                                    <label class="form-label">Delivery longitude</label>
+                                    <input class="form-control" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>" readonly>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="cardx p-3">
+                            <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+                                <h3 class="h5 mb-0">Map selection</h3>
+                                <span class="badge text-bg-primary" id="map_mode_label">Mode: none</span>
+                            </div>
+                            <div id="booking_map" class="map-wrap"></div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Item name</label>
+                        <input class="form-control" name="item_name" value="<?= e(old('item_name')) ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Item category</label>
+                        <?php $selectedCategory = old('item_category'); ?>
+                        <select class="form-select" name="item_category">
+                            <option value="">Select category</option>
+                            <option value="document" <?= $selectedCategory === 'document' ? 'selected' : '' ?>>Document</option>
+                            <option value="food" <?= $selectedCategory === 'food' ? 'selected' : '' ?>>Food</option>
+                            <option value="parcel" <?= $selectedCategory === 'parcel' ? 'selected' : '' ?>>Parcel</option>
+                            <option value="fragile" <?= $selectedCategory === 'fragile' ? 'selected' : '' ?>>Fragile</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Item description</label>
+                        <textarea class="form-control" name="item_description" rows="4"><?= e(old('item_description')) ?></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Estimated value</label>
+                        <input class="form-control" name="estimated_value" value="<?= e(old('estimated_value')) ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Item image</label>
+                        <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                        <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Special instructions</label>
+                        <textarea class="form-control" name="special_instructions" rows="3"><?= e(old('special_instructions')) ?></textarea>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap mt-4">
+                    <button class="btn btn-primary" type="submit" name="submit_booking">Submit Booking & Find Riders</button>
+                    <button class="btn btn-outline-light" type="submit" name="save_draft">Save as Draft</button>
+                </div>
+            </form>
+        </div>
+
+        <ul class="nav nav-tabs mb-4" id="hubTabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#active-orders" type="button">Active Orders</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#unpaid-orders" type="button">Unpaid</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-orders" type="button">History</button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="active-orders">
+                <div class="row g-4">
+                    <div class="col-lg-4">
+                        <div class="cardx p-4">
+                            <h2 class="h5 mb-3">Active Orders</h2>
+                            <?php if (empty($displayActiveBookings)): ?>
+                                <div class="text-soft">No active orders yet.</div>
+                            <?php else: ?>
+                                <div class="d-grid gap-3">
+                                    <?php foreach ($displayActiveBookings as $b): ?>
+                                        <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
+                                            <div class="order-card cardx p-3 <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div>
+                                                        <div class="fw-bold"><?= e($b['booking_code']) ?></div>
+                                                        <div class="small text-soft"><?= e($b['item_name']) ?></div>
+                                                    </div>
+                                                    <span class="badge badge-soft"><?= e($b['booking_status']) ?></span>
+                                                </div>
+                                                <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
+                                                <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
+                                                <div class="small mt-2 text-info">
+                                                    <?= !empty($b['rider_name']) ? 'Rider: ' . e($b['rider_name']) : 'Awaiting rider selection' ?>
+                                                </div>
+                                            </div>
+                                        </a>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-8">
+                        <?php if ($selectedBooking && $selectedBookingIsActive): ?>
+                            <div class="cardx p-4 mb-4">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                                    <div>
+                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
+                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
+                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
+                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
+                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-4 mb-4">
+                                <div class="col-lg-8">
+                                    <div class="cardx p-4">
+                                        <div id="detail_map"></div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-4">
+                                    <div class="cardx p-4 h-100">
+                                        <h3 class="h5 mb-3">Booking Info</h3>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+
+                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
+                                            <div class="mt-3">
+                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
+                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <div class="mt-4 action-stack">
+                                            <?php if ($canPay): ?>
+                                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
+                                                    Pay ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($canIssueItem): ?>
+                                                <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
+                                                    <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
+                                                </button>
+                                            <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
+                                                <div class="alert alert-info mb-0">
+                                                    <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
+                                                </div>
+                                            <?php endif; ?>
+
+                                            <?php if ($canCancel): ?>
+                                                <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
+                                                    <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($canRebook): ?>
+                                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
+                                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <?php if ($cancellationReason !== ''): ?>
+                                            <div class="cancel-reason-box">
+                                                <div class="fw-bold mb-1">Cancellation Reason</div>
+                                                <div class="small"><?= e($cancellationReason) ?></div>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="routing-directions" class="p-3 mb-4"></div>
+
+                            <?php if ($needsRider): ?>
+                                <div class="cardx p-4 mb-4">
+                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <div>
+                                            <h3 class="h5 mb-1">Nearby Riders</h3>
+                                            <p class="text-soft mb-0">Select a rider and send a request for this booking.</p>
+                                        </div>
+                                        <button id="clear-route-btn" class="btn btn-sm btn-outline-warning" style="display:none;" onclick="clearActiveRoute()">
+                                            <i class="fa-solid fa-xmark me-1"></i> Clear Route
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="row g-4" id="rider-list-container">
+                                    <div class="col-12 text-center py-5">
+                                        <div class="spinner-border text-info" role="status"></div>
+                                        <p class="mt-2 text-soft">Scanning for nearby riders...</p>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="cardx p-5 text-center text-soft">Select an active order to view details.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="unpaid-orders">
+                <div class="row g-4">
+                    <div class="col-lg-4">
+                        <div class="cardx p-4">
+                            <h2 class="h5 mb-3">Unpaid Orders</h2>
+                            <?php if (empty($displayUnpaidBookings)): ?>
+                                <div class="text-soft">No unpaid orders.</div>
+                            <?php else: ?>
+                                <div class="row g-3">
+                                    <?php foreach ($displayUnpaidBookings as $b): ?>
+                                        <div class="col-12">
+                                            <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
+                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
+                                                    <div class="d-flex justify-content-between align-items-start">
+                                                        <div>
+                                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
+                                                            <div class="small text-soft"><?= e($b['item_name']) ?></div>
+                                                        </div>
+                                                        <span class="badge bg-warning text-dark"><?= e($b['payment_status'] ?? 'unpaid') ?></span>
+                                                    </div>
+                                                    <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
+                                                    <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
+                                                    <div class="small mt-2 text-info">Status: <?= e($b['booking_status']) ?></div>
+                                                    <?php if (($b['booking_status'] ?? '') === 'cancelled' && !empty($b['cancellation_reason'])): ?>
+                                                        <div class="small mt-2 text-danger">Reason: <?= e($b['cancellation_reason']) ?></div>
+                                                    <?php endif; ?>
+                                                    <div class="small mt-1 text-warning">Amount: ₦<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></div>
+                                                </div>
+                                            </a>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-8">
+                        <?php if ($selectedBooking && $selectedBookingIsUnpaid): ?>
+                            <div class="cardx p-4 mb-4">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                                    <div>
+                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
+                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
+                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
+                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
+                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-4 mb-4">
+                                <div class="col-12">
+                                    <div class="cardx p-4">
+                                        <h3 class="h5 mb-3">Booking Info</h3>
+                                        <div class="row g-3">
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
+                                            <div class="col-md-6 small text-soft"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+                                        </div>
+
+                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
+                                            <div class="mt-3">
+                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
+                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <div class="mt-4 action-stack">
+                                            <?php if ($canPay): ?>
+                                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
+                                                    Pay ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                                                </button>
+                                            <?php endif; ?>
+
+                                            <?php if ($canRebook): ?>
+                                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
+                                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <?php if ($cancellationReason !== ''): ?>
+                                            <div class="cancel-reason-box">
+                                                <div class="fw-bold mb-1">Cancellation Reason</div>
+                                                <div class="small"><?= e($cancellationReason) ?></div>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-4 mb-4">
+                                <div class="col-12">
+                                    <div class="cardx p-4 detail-map-small">
+                                        <div id="detail_map"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="routing-directions" class="p-3 mb-4"></div>
+                        <?php else: ?>
+                            <div class="cardx p-5 text-center text-soft">Select an unpaid order to view details.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="history-orders">
+                <div class="row g-4">
+                    <div class="col-lg-4">
+                        <div class="cardx p-4">
+                            <h2 class="h5 mb-3">Completed / Historical Orders</h2>
+                            <?php if (empty($displayHistoryBookings)): ?>
+                                <div class="text-soft">No completed bookings yet.</div>
+                            <?php else: ?>
+                                <div class="row g-3">
+                                    <?php foreach ($displayHistoryBookings as $b): ?>
+                                        <div class="col-12">
+                                            <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
+                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
+                                                    <div class="d-flex justify-content-between align-items-start">
+                                                        <div>
+                                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
+                                                            <div class="small text-soft"><?= e($b['item_name']) ?></div>
+                                                        </div>
+                                                        <span class="badge badge-soft"><?= e($b['booking_status']) ?></span>
+                                                    </div>
+                                                    <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
+                                                    <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
+                                                    <div class="small mt-2 text-info">Payment: <?= e($b['payment_status'] ?? 'unpaid') ?></div>
+                                                    <?php if (($b['booking_status'] ?? '') === 'cancelled' && !empty($b['cancellation_reason'])): ?>
+                                                        <div class="small mt-2 text-danger">Reason: <?= e($b['cancellation_reason']) ?></div>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </a>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-8">
+                        <?php if ($selectedBooking && $selectedBookingIsHistory): ?>
+                            <div class="cardx p-4 mb-4">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                                    <div>
+                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
+                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
+                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
+                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
+                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-4 mb-4">
+                                <div class="col-lg-8">
+                                    <div class="cardx p-4">
+                                        <div id="detail_map"></div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-4">
+                                    <div class="cardx p-4 h-100">
+                                        <h3 class="h5 mb-3">Booking Info</h3>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
+                                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+
+                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
+                                            <div class="mt-3">
+                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
+                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <?php if ($cancellationReason !== ''): ?>
+                                            <div class="cancel-reason-box">
+                                                <div class="fw-bold mb-1">Cancellation Reason</div>
+                                                <div class="small"><?= e($cancellationReason) ?></div>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="routing-directions" class="p-3 mb-4"></div>
+                        <?php else: ?>
+                            <div class="cardx p-5 text-center text-soft">Select a completed order to view details.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <?php if ($selectedBooking): ?>
+        <div class="modal fade" id="cancelBookingModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-white border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title">Cancel Order</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-soft">Are you sure you want to cancel this order? Please provide a reason.</p>
+                        <input type="hidden" id="cancel-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
+                        <label class="form-label">Reason for cancellation</label>
+                        <textarea id="cancel-reason" class="form-control" rows="4" placeholder="State why you want to cancel this order"></textarea>
+                        <div class="small text-danger mt-2 d-none" id="cancel-reason-error">Cancellation reason is required.</div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-danger" id="confirm-cancel-booking-btn">Confirm Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="issueItemModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-white border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title">Issue Item To Rider</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-0 text-soft">Confirm that you have physically handed over the item to the rider.</p>
+                        <input type="hidden" id="issue-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">No</button>
+                        <button type="button" class="btn btn-info fw-bold" id="confirm-issue-item-btn">Yes, Issue Item</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($canChat): ?>
+        <button type="button" class="sticky-chat-btn" id="open-chat-btn" title="Open chat">
+            <i class="fa-solid fa-comments"></i>
+        </button>
+
+        <div class="chat-panel" id="chat-panel">
+            <div class="chat-header">
+                <div>
+                    <div class="fw-bold">Chat with Rider</div>
+                    <div class="small text-soft"><?= e((string)($selectedBooking['rider_name'] ?? 'Rider')) ?></div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-light" id="close-chat-btn">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="chat-messages" id="chat-messages"></div>
+
+            <div class="chat-footer">
+                <form id="chat-form">
+                    <input type="hidden" id="chat-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
+                    <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
+                    <textarea id="chat-message-input" class="form-control mb-2" placeholder="Type your message..."></textarea>
+                    <button type="submit" class="btn btn-info w-100 fw-bold">
+                        <i class="fa-solid fa-paper-plane me-2"></i>Send
+                    </button>
+                </form>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script src="https://js.paystack.co/v1/inline.js"></script>
+
+<script>
+const workspaceState = {
+    bookingMap: null,
+    detailMap: null,
+    routingControl: null,
+    trackingMarker: null,
+    riderMarkers: {},
+    knownRiderIds: new Set(),
+    pingSound: null,
+    ridersInterval: null,
+    trackingInterval: null,
+    chatInterval: null
+};
+
+function cleanupWorkspace() {
+    if (workspaceState.ridersInterval) {
+        clearInterval(workspaceState.ridersInterval);
+        workspaceState.ridersInterval = null;
+    }
+    if (workspaceState.trackingInterval) {
+        clearInterval(workspaceState.trackingInterval);
+        workspaceState.trackingInterval = null;
+    }
+    if (workspaceState.chatInterval) {
+        clearInterval(workspaceState.chatInterval);
+        workspaceState.chatInterval = null;
+    }
+    if (workspaceState.routingControl && workspaceState.detailMap) {
+        try { workspaceState.detailMap.removeControl(workspaceState.routingControl); } catch (e) {}
+        workspaceState.routingControl = null;
+    }
+    if (workspaceState.bookingMap) {
+        try { workspaceState.bookingMap.remove(); } catch (e) {}
+        workspaceState.bookingMap = null;
+    }
+    if (workspaceState.detailMap) {
+        try { workspaceState.detailMap.remove(); } catch (e) {}
+        workspaceState.detailMap = null;
+    }
+    workspaceState.trackingMarker = null;
+    workspaceState.riderMarkers = {};
+    workspaceState.knownRiderIds = new Set();
+    workspaceState.pingSound = null;
+    window.clearActiveRoute = function () {};
+}
+
+async function ajaxLoadWorkspace(url, pushToHistory = true) {
+    try {
+        const response = await fetch(url, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        });
+
+        if (!response.ok) {
+            window.location.href = url;
+            return;
+        }
+
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const incoming = doc.getElementById('sender-workspace-content');
+        const current = document.getElementById('sender-workspace-content');
+
+        if (!incoming || !current) {
+            window.location.href = url;
+            return;
+        }
+
+        cleanupWorkspace();
+        current.replaceWith(incoming);
+
+        if (pushToHistory) {
+            window.history.pushState({ url }, '', url);
+        }
+
+        initSenderWorkspace();
+    } catch (err) {
+        console.error('AJAX workspace load failed:', err);
+        window.location.href = url;
+    }
+}
+
+function initSenderWorkspace() {
+    const root = document.getElementById('sender-workspace-content');
+    if (!root) return;
+
+    const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
+    const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
+    const selectedHasRider = root.dataset.selectedHasRider === '1';
+    const selectedBookingTabId = root.dataset.selectedBookingTab || 'active-orders';
+    const shouldAutoOpenSelectedTab = root.dataset.shouldAutoOpenSelectedTab === '1';
+    const shouldSearchRiders = root.dataset.needsRider === '1';
+    const canTrack = root.dataset.canTrack === '1';
+    const canPay = root.dataset.canPay === '1';
+    const canChat = root.dataset.canChat === '1';
+    const chatReceiverIdFromRoot = parseInt(root.dataset.chatReceiverId || '0', 10);
+
+    const newOrderPanel = root.querySelector('#new-order-panel');
+    const toggleNewOrderBtn = root.querySelector('#toggle-new-order');
+    const closeNewOrderBtn = root.querySelector('#close-new-order');
+
+    toggleNewOrderBtn?.addEventListener('click', function () {
+        newOrderPanel.style.display = '';
+        newOrderPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    closeNewOrderBtn?.addEventListener('click', function () {
+        newOrderPanel.style.display = 'none';
+    });
+
+    if (shouldAutoOpenSelectedTab && selectedBookingTabId && window.bootstrap?.Tab) {
+        const tabTrigger = root.querySelector(`#hubTabs button[data-bs-target="#${selectedBookingTabId}"]`);
+        if (tabTrigger) {
+            bootstrap.Tab.getOrCreateInstance(tabTrigger).show();
+        }
+    }
+
+    root.querySelectorAll('#hubTabs button[data-bs-toggle="tab"]').forEach(btn => {
+        btn.addEventListener('shown.bs.tab', function () {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('booking_id');
+            window.history.replaceState({ url: url.toString() }, '', url.toString());
+
+            setTimeout(() => {
+                if (workspaceState.detailMap) {
+                    workspaceState.detailMap.invalidateSize();
+                }
+            }, 200);
+        });
+    });
+
+    root.querySelectorAll('.order-select-link').forEach(link => {
+        link.addEventListener('click', function (e) {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            ajaxLoadWorkspace(this.href, true);
+        });
+    });
+
+    const pickupAddress = root.querySelector('#pickup_address');
+    const pickupLat = root.querySelector('#pickup_latitude');
+    const pickupLng = root.querySelector('#pickup_longitude');
+    const deliveryAddress = root.querySelector('#delivery_address');
+    const deliveryLat = root.querySelector('#delivery_latitude');
+    const deliveryLng = root.querySelector('#delivery_longitude');
+    const modeLabel = root.querySelector('#map_mode_label');
+    const bookingMapEl = root.querySelector('#booking_map');
+
+    let mapMode = null;
+    let pickupMarker = null;
+    let deliveryMarker = null;
+
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    });
+
+    if (bookingMapEl) {
+        workspaceState.bookingMap = L.map(bookingMapEl, { tap: false }).setView([
+            parseFloat(pickupLat?.value) || 6.5244,
+            parseFloat(pickupLng?.value) || 3.3792
+        ], 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(workspaceState.bookingMap);
+
+        setTimeout(() => workspaceState.bookingMap && workspaceState.bookingMap.invalidateSize(), 500);
+
+        function setMode(mode) {
+            mapMode = mode;
+            if (modeLabel) {
+                modeLabel.textContent = 'Mode: Selecting ' + mode.toUpperCase();
+                modeLabel.className = mode === 'pickup' ? 'badge text-bg-warning' : 'badge text-bg-info';
+            }
+            bookingMapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        async function reverseGeocode(lat, lng, targetInput) {
+            if (!targetInput) return;
+            targetInput.value = "Locating address...";
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
+                    headers: { 'Accept-Language': 'en' }
+                });
+                const data = await res.json();
+                targetInput.value = data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            } catch (e) {
+                targetInput.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            }
+        }
+
+        function updateFormMarker(type, lat, lng) {
+            if (type === 'pickup') {
+                if (pickupMarker) workspaceState.bookingMap.removeLayer(pickupMarker);
+                pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(workspaceState.bookingMap).bindPopup('Pickup').openPopup();
+                if (pickupLat) pickupLat.value = lat.toFixed(7);
+                if (pickupLng) pickupLng.value = lng.toFixed(7);
+                pickupMarker.on('dragend', async (e) => {
+                    const p = e.target.getLatLng();
+                    updateFormMarker('pickup', p.lat, p.lng);
+                    await reverseGeocode(p.lat, p.lng, pickupAddress);
+                });
+            } else {
+                if (deliveryMarker) workspaceState.bookingMap.removeLayer(deliveryMarker);
+                deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(workspaceState.bookingMap).bindPopup('Delivery').openPopup();
+                if (deliveryLat) deliveryLat.value = lat.toFixed(7);
+                if (deliveryLng) deliveryLng.value = lng.toFixed(7);
+                deliveryMarker.on('dragend', async (e) => {
+                    const p = e.target.getLatLng();
+                    updateFormMarker('delivery', p.lat, p.lng);
+                    await reverseGeocode(p.lat, p.lng, deliveryAddress);
+                });
+            }
+        }
+
+        workspaceState.bookingMap.on('click', async function (e) {
+            if (!mapMode) {
+                alert("Please choose Pickup or Delivery map mode first.");
+                return;
+            }
+            const { lat, lng } = e.latlng;
+            updateFormMarker(mapMode, lat, lng);
+            await reverseGeocode(lat, lng, mapMode === 'pickup' ? pickupAddress : deliveryAddress);
+        });
+
+        async function useCurrentLocation(target, btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Locating...';
+            btn.disabled = true;
+
+            if (!navigator.geolocation) {
+                alert('Geolocation not supported');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    const { latitude, longitude } = pos.coords;
+                    workspaceState.bookingMap.setView([latitude, longitude], 16);
+                    updateFormMarker(target, latitude, longitude);
+                    await reverseGeocode(latitude, longitude, target === 'pickup' ? pickupAddress : deliveryAddress);
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                },
+                (err) => {
+                    alert(`Error (${err.code}): ${err.message}. Ensure HTTPS is enabled.`);
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                },
+                { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 }
+            );
+        }
+
+        root.querySelector('#select_pickup_mode')?.addEventListener('click', () => setMode('pickup'));
+        root.querySelector('#select_delivery_mode')?.addEventListener('click', () => setMode('delivery'));
+        root.querySelector('#use_current_pickup')?.addEventListener('click', function () { useCurrentLocation('pickup', this); });
+        root.querySelector('#use_current_delivery')?.addEventListener('click', function () { useCurrentLocation('delivery', this); });
+
+        if (pickupLat?.value && pickupLng?.value) updateFormMarker('pickup', parseFloat(pickupLat.value), parseFloat(pickupLng.value));
+        if (deliveryLat?.value && deliveryLng?.value) updateFormMarker('delivery', parseFloat(deliveryLat.value), parseFloat(deliveryLng.value));
+    }
+
+    const detailMapEl = root.querySelector('#detail_map');
+    const pickupLatVal = parseFloat(root.dataset.pickupLat || '');
+    const pickupLngVal = parseFloat(root.dataset.pickupLng || '');
+    const deliveryLatVal = parseFloat(root.dataset.deliveryLat || '');
+    const deliveryLngVal = parseFloat(root.dataset.deliveryLng || '');
+
+    if (
+        detailMapEl &&
+        !Number.isNaN(pickupLatVal) &&
+        !Number.isNaN(pickupLngVal) &&
+        !Number.isNaN(deliveryLatVal) &&
+        !Number.isNaN(deliveryLngVal)
+    ) {
+        const pickupCoords = [pickupLatVal, pickupLngVal];
+        const deliveryCoords = [deliveryLatVal, deliveryLngVal];
+
+        workspaceState.detailMap = L.map(detailMapEl).setView(pickupCoords, 13);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(workspaceState.detailMap);
+
+        L.marker(pickupCoords).addTo(workspaceState.detailMap).bindPopup("Pickup");
+        L.marker(deliveryCoords).addTo(workspaceState.detailMap).bindPopup("Delivery");
+
+        setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
+
+        function clearRouteInternal() {
+            if (workspaceState.routingControl && workspaceState.detailMap) {
+                try { workspaceState.detailMap.removeControl(workspaceState.routingControl); } catch (e) {}
+                workspaceState.routingControl = null;
+            }
+            const rd = root.querySelector('#routing-directions');
+            if (rd) {
+                rd.style.display = 'none';
+                rd.innerHTML = '';
+            }
+            const btn = root.querySelector('#clear-route-btn');
+            if (btn) btn.style.display = 'none';
+            root.querySelectorAll('.eta-badge').forEach(el => el.style.display = 'none');
+        }
+
+        window.clearActiveRoute = function () {
+            clearRouteInternal();
+            if (workspaceState.detailMap) workspaceState.detailMap.flyTo(pickupCoords, 13);
+        };
+
+        function stopRiderSearch() {
+            if (workspaceState.ridersInterval) {
+                clearInterval(workspaceState.ridersInterval);
+                workspaceState.ridersInterval = null;
+            }
+        }
+
+        if (shouldSearchRiders) {
+            workspaceState.pingSound = new Audio('assets/sounds/notification.mp3');
+
+            async function updateRiders() {
+                if (!shouldSearchRiders || selectedHasRider || ['matched', 'accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'arrived_at_pickup', 'package_received'].includes(String(selectedBookingStatus))) {
+                    stopRiderSearch();
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`);
+                    const riders = await response.json();
+
+                    const listContainer = root.querySelector('#rider-list-container');
+                    if (!listContainer) {
+                        stopRiderSearch();
+                        return;
+                    }
+
+                    let html = '';
+                    let activeIds = new Set();
+                    let newRiderFound = false;
+
+                    riders.forEach(rider => {
+                        activeIds.add(rider.id);
+                        const latlng = [parseFloat(rider.last_latitude), parseFloat(rider.last_longitude)];
+
+                        if (!workspaceState.knownRiderIds.has(rider.id) && workspaceState.knownRiderIds.size > 0) {
+                            newRiderFound = true;
+                        }
+
+                        if (workspaceState.riderMarkers[rider.id]) {
+                            workspaceState.riderMarkers[rider.id].setLatLng(latlng);
+                        } else {
+                            const icon = L.divIcon({
+                                html: `<div style="color:${rider.vehicle_type === 'car' ? '#38bdf8' : '#fbbf24'};font-size:24px;text-shadow:0 0 5px #000;"><i class="fa-solid ${rider.vehicle_type === 'car' ? 'fa-car-side' : 'fa-motorcycle'}"></i></div>`,
+                                className: '',
+                                iconSize: [30, 30],
+                                iconAnchor: [15, 15]
+                            });
+                            workspaceState.riderMarkers[rider.id] = L.marker(latlng, { icon }).addTo(workspaceState.detailMap).bindPopup(`<b>${rider.full_name}</b>`);
+                        }
+
+                        html += `
+                            <div class="col-lg-6" id="rider-card-${rider.id}">
+                                <div class="cardx p-4 h-100">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <h2 class="h5 mb-1">${rider.full_name}</h2>
+                                            <div class="text-soft small">
+                                                <span>${rider.vehicle_type === 'car' ? '🚗' : '🏍️'} ${rider.vehicle_type.toUpperCase()}</span> | ⭐ ${parseFloat(rider.rating).toFixed(1)}
+                                            </div>
+                                            <div class="d-flex gap-2 mt-2 flex-wrap">
+                                                <span class="badge bg-info">${parseFloat(rider.distance_km).toFixed(2)} km away</span>
+                                                <span class="badge bg-dark border border-info text-info eta-badge" id="eta-${rider.id}" style="display:none;"></span>
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-info rider-route-btn" data-rider-lat="${rider.last_latitude}" data-rider-lng="${rider.last_longitude}" data-rider-id="${rider.id}">
+                                            <i class="fa-solid fa-route me-1"></i> Route
+                                        </button>
+                                    </div>
+                                    <div class="rider-card p-3 mt-3">
+                                        <form class="rider-request-form">
+                                            <input type="hidden" name="booking_id" value="${selectedBookingId}">
+                                            <input type="hidden" name="rider_user_id" value="${rider.id}">
+                                            <div class="row g-2 align-items-end">
+                                                <div class="col">
+                                                    <label class="form-label small text-soft">Proposed Fee (₦)</label>
+                                                    <input class="form-control fw-bold text-info" type="number" name="proposed_cost" value="${rider.suggested_fee}">
+                                                </div>
+                                                <div class="col-auto">
+                                                    <button class="btn btn-primary" type="submit">Request</button>
+                                                </div>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>`;
+                    });
+
+                    if (newRiderFound && workspaceState.pingSound) {
+                        workspaceState.pingSound.play().catch(() => {});
+                    }
+
+                    workspaceState.knownRiderIds = activeIds;
+                    listContainer.innerHTML = html || '<div class="col-12 text-center text-soft py-5">No active riders found in range.</div>';
+
+                    listContainer.querySelectorAll('.rider-route-btn').forEach(btn => {
+                        btn.addEventListener('click', function () {
+                            const rLat = parseFloat(this.dataset.riderLat);
+                            const rLng = parseFloat(this.dataset.riderLng);
+                            const rId = this.dataset.riderId;
+
+                            clearRouteInternal();
+                            const directionsDiv = root.querySelector('#routing-directions');
+                            if (directionsDiv) {
+                                directionsDiv.style.display = 'block';
+                                directionsDiv.innerHTML = '<div class="text-center p-3 text-info"><i class="fa-solid fa-spinner fa-spin me-2"></i>Analyzing route...</div>';
+                            }
+
+                            const clearBtn = root.querySelector('#clear-route-btn');
+                            if (clearBtn) clearBtn.style.display = 'inline-block';
+
+                            workspaceState.routingControl = L.Routing.control({
+                                waypoints: [
+                                    L.latLng(rLat, rLng),
+                                    L.latLng(pickupCoords[0], pickupCoords[1]),
+                                    L.latLng(deliveryCoords[0], deliveryCoords[1])
+                                ],
+                                lineOptions: { styles: [{ color: '#38bdf8', opacity: 0.7, weight: 8 }] },
+                                createMarker: () => null,
+                                addWaypoints: false,
+                                itineraryClassName: 'routing-instructions-list',
+                                show: true
+                            }).addTo(workspaceState.detailMap);
+
+                            workspaceState.routingControl.on('routesfound', function (e) {
+                                const summary = e.routes[0].summary;
+                                const mins = Math.round(summary.totalTime / 60);
+
+                                const badge = root.querySelector(`#eta-${rId}`);
+                                if (badge) {
+                                    badge.style.display = 'inline-block';
+                                    badge.innerHTML = `<i class="fa-regular fa-clock me-1"></i> ${mins}m ETA`;
+                                }
+
+                                if (directionsDiv) {
+                                    const container = workspaceState.routingControl.getItinerary().getContainer();
+                                    directionsDiv.innerHTML = '<h6 class="text-info fw-bold mb-3"><i class="fa-solid fa-diamond-turn-right me-2"></i>Route Details</h6>';
+                                    directionsDiv.appendChild(container);
+                                }
+                            });
+
+                            workspaceState.detailMap.fitBounds([[rLat, rLng], pickupCoords, deliveryCoords], { padding: [50, 50] });
+                        });
+                    });
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+
+listContainer.querySelectorAll('.rider-request-form').forEach(form => {
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+
+        const btn = form.querySelector('button[type="submit"]');
+        const originalHtml = btn.innerHTML;
+        const container = root.querySelector('#alert-container');
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        if (container) {
+            container.innerHTML = '';
+        }
+
+        try {
+            const formData = new FormData(form);
+
+            const response = await fetch('bookings/send_request.php', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            });
+
+            const rawText = await response.text();
+            let result = null;
+
+            try {
+                result = JSON.parse(rawText);
+            } catch (parseErr) {
+                throw new Error('Server did not return valid JSON. Response: ' + rawText);
+            }
+
+            if (!response.ok || !result.success) {
+                throw new Error(
+                    result.error ||
+                    result.debug ||
+                    result.message ||
+                    'Failed to send request.'
+                );
+            }
+
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        ${result.message || 'Rider request sent successfully.'}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+            }
+
+            ajaxLoadWorkspace(`<?= e(url_path('bookings/index.php')) ?>?booking_id=${selectedBookingId}`, false);
+
+        } catch (err) {
+            console.error('send_request error:', err);
+
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+
+            if (container) {
+                container.innerHTML = `
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        ${String(err.message || 'Failed to send request.')}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+            }
+        }
+    });
+});
+
+
+
+
+
+
+
+
+
+
+
+                } catch (err) {
+                    console.error("Update Error:", err);
+                }
+            }
+
+            updateRiders();
+            workspaceState.ridersInterval = setInterval(updateRiders, 10000);
+        }
+
+        if (canTrack) {
+            async function pollTracking() {
+                try {
+                    const res = await fetch(`bookings/ajax_track_status.php?booking_id=${selectedBookingId}`);
+                    const json = await res.json();
+                    if (!json.status) return;
+
+                    const d = json.data;
+                    const bookingStatusText = root.querySelector('#booking_status_text');
+                    const paymentStatusText = root.querySelector('#payment_status_text');
+
+                    if (bookingStatusText) bookingStatusText.innerText = d.booking_status;
+                    if (paymentStatusText) paymentStatusText.innerText = d.payment_status;
+
+                    if (!d.rider_lat || !d.rider_lng) return;
+
+                    const riderLatLng = [parseFloat(d.rider_lat), parseFloat(d.rider_lng)];
+
+                    if (!workspaceState.trackingMarker) {
+                        workspaceState.trackingMarker = L.marker(riderLatLng).addTo(workspaceState.detailMap).bindPopup('Rider');
+                    } else {
+                        workspaceState.trackingMarker.setLatLng(riderLatLng);
+                    }
+
+                    let target;
+                    if (d.booking_status === 'accepted' || d.booking_status === 'matched' || d.booking_status === 'arrived_at_pickup') {
+                        target = [parseFloat(d.pickup_lat), parseFloat(d.pickup_lng)];
+                    } else {
+                        target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
+                    }
+
+                    clearRouteInternal();
+
+                    workspaceState.routingControl = L.Routing.control({
+                        waypoints: [
+                            L.latLng(riderLatLng[0], riderLatLng[1]),
+                            L.latLng(target[0], target[1])
+                        ],
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        createMarker: () => null,
+                        lineOptions: { styles: [{ color: '#38bdf8', weight: 6 }] },
+                        show: true,
+                        itineraryClassName: 'routing-instructions-list'
+                    }).addTo(workspaceState.detailMap);
+
+                    workspaceState.routingControl.on('routesfound', function (e) {
+                        const route = e.routes[0];
+                        const distKm = (route.summary.totalDistance / 1000).toFixed(2);
+                        const etaMin = Math.round(route.summary.totalTime / 60);
+                        const etaText = root.querySelector('#eta_text');
+                        if (etaText) etaText.innerText = `${etaMin} min · ${distKm} km`;
+
+                        const directionsDiv = root.querySelector('#routing-directions');
+                        if (directionsDiv) {
+                            directionsDiv.style.display = 'block';
+                            directionsDiv.innerHTML = '<h6 class="text-info fw-bold mb-3"><i class="fa-solid fa-diamond-turn-right me-2"></i>Live Route Details</h6>';
+                            directionsDiv.appendChild(workspaceState.routingControl.getItinerary().getContainer());
+                        }
+                    });
+
+                } catch (e) {
+                    console.log('Tracking error', e);
+                }
+            }
+
+            pollTracking();
+            workspaceState.trackingInterval = setInterval(pollTracking, 5000);
+        }
+    }
+
+    if (canPay) {
+        const payNowBtn = root.querySelector('#pay-now-btn');
+
+        payNowBtn?.addEventListener('click', async function () {
+            const btn = this;
+            const originalHtml = btn.innerHTML;
+            const bookingId = btn.dataset.bookingId;
+            const alertContainer = root.querySelector('#alert-container');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Initializing payment...';
+
+            if (alertContainer) alertContainer.innerHTML = '';
+
+            try {
+                const response = await fetch('<?= e(url_path('payments/initialize.php')) ?>', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    cache: 'no-store',
+                    body: JSON.stringify({ booking_id: bookingId })
+                });
+
+                const rawText = await response.text();
+                let result;
+
+                try {
+                    result = JSON.parse(rawText);
+                } catch (e) {
+                    console.error('Invalid JSON from initialize:', rawText);
+                    throw new Error('Payment initialization returned an invalid response.');
+                }
+
+                if (!response.ok) {
+                    throw new Error(result?.message || `Payment initialization failed with HTTP ${response.status}`);
+                }
+
+                if (!result || result.status !== true || !result.data) {
+                    throw new Error(result?.message || 'Unable to initialize payment.');
+                }
+
+                const payload = result.data;
+
+                if (!payload.public_key || !payload.email || !payload.amount || !payload.reference) {
+                    throw new Error('Payment initialization payload is incomplete.');
+                }
+
+                const handler = PaystackPop.setup({
+                    key: payload.public_key,
+                    email: payload.email,
+                    amount: parseInt(payload.amount, 10),
+                    ref: payload.reference,
+                    currency: payload.currency || 'NGN',
+                    metadata: payload.metadata || {},
+                    callback: function (transaction) {
+                        let verifyUrl;
+
+                        if (payload.callback_url) {
+                            verifyUrl = payload.callback_url + (payload.callback_url.includes('?') ? '&' : '?') + 'reference=' + encodeURIComponent(transaction.reference);
+                        } else {
+                            verifyUrl = '<?= e(url_path('payments/callback.php')) ?>?reference=' + encodeURIComponent(transaction.reference);
+                        }
+
+                        window.location.href = verifyUrl;
+                    },
+                    onClose: function () {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+
+                        if (alertContainer) {
+                            alertContainer.innerHTML = `
+                                <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                                    Payment popup was closed before completion.
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                </div>
+                            `;
+                        }
+                    }
+                });
+
+                handler.openIframe();
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+
+            } catch (err) {
+                console.error('Payment initialization error:', err);
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+
+                if (alertContainer) {
+                    alertContainer.innerHTML = `
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            ${String(err.message || 'Payment initialization failed.')}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+                } else {
+                    alert(err.message || 'Payment initialization failed.');
+                }
+            }
+        });
+    }
+
+    const confirmCancelBookingBtn = root.querySelector('#confirm-cancel-booking-btn');
+    confirmCancelBookingBtn?.addEventListener('click', async function () {
+        const bookingId = root.querySelector('#cancel-booking-id')?.value;
+        const reasonInput = root.querySelector('#cancel-reason');
+        const reasonError = root.querySelector('#cancel-reason-error');
+        const reason = (reasonInput?.value || '').trim();
+
+        if (!reason) {
+            reasonError?.classList.remove('d-none');
+            return;
+        } else {
+            reasonError?.classList.add('d-none');
+        }
+
+        const btn = this;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Cancelling...';
+
+        try {
+            const response = await fetch('<?= e(url_path('bookings/ajax_cancel_booking.php')) ?>', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ booking_id: bookingId, reason })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to cancel booking.');
+            }
+
+            window.location.reload();
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            alert(err.message || 'Unable to cancel booking.');
+        }
+    });
+
+    const rebookRiderBtn = root.querySelector('#rebook-rider-btn');
+    rebookRiderBtn?.addEventListener('click', async function () {
+        const bookingId = this.dataset.bookingId;
+        const btn = this;
+        const originalHtml = btn.innerHTML;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Rebooking...';
+
+        try {
+            const response = await fetch('<?= e(url_path('bookings/ajax_rebook.php')) ?>', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ booking_id: bookingId })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to book another rider.');
+            }
+
+            ajaxLoadWorkspace('<?= e(url_path('bookings/index.php')) ?>?booking_id=' + encodeURIComponent(bookingId), true);
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            alert(err.message || 'Unable to book another rider.');
+        }
+    });
+
+    const confirmIssueItemBtn = root.querySelector('#confirm-issue-item-btn');
+    confirmIssueItemBtn?.addEventListener('click', async function () {
+        const bookingId = root.querySelector('#issue-booking-id')?.value;
+        const btn = this;
+        const originalHtml = btn.innerHTML;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Confirming...';
+
+        try {
+            const response = await fetch('<?= e(url_path('bookings/ajax_confirm_handover.php')) ?>', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ booking_id: bookingId })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to issue item to rider.');
+            }
+
+            window.location.reload();
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            alert(err.message || 'Unable to issue item to rider.');
+        }
+    });
+
+    if (canChat) {
+        const openChatBtn = root.querySelector('#open-chat-btn');
+        const closeChatBtn = root.querySelector('#close-chat-btn');
+        const chatPanel = root.querySelector('#chat-panel');
+        const chatMessages = root.querySelector('#chat-messages');
+        const chatForm = root.querySelector('#chat-form');
+        const chatBookingId = root.querySelector('#chat-booking-id')?.value;
+        const chatReceiverId = root.querySelector('#chat-receiver-id')?.value || chatReceiverIdFromRoot;
+        const chatMessageInput = root.querySelector('#chat-message-input');
+
+        function escapeHtml(str) {
+            return String(str)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function buildStatusText(msg) {
+            if (!msg.is_me) return '';
+            if (msg.read_at_formatted) return `Read ${escapeHtml(msg.read_at_formatted)}`;
+            if (msg.delivered_at_formatted) return `Delivered ${escapeHtml(msg.delivered_at_formatted)}`;
+            return 'Sent';
+        }
+
+        function renderChatMessages(messages) {
+            if (!chatMessages) return;
+
+            if (!messages || !messages.length) {
+                chatMessages.innerHTML = '<div class="text-soft small text-center py-4">No messages yet.</div>';
+                return;
+            }
+
+            chatMessages.innerHTML = messages.map(msg => `
+                <div class="chat-bubble ${msg.is_me ? 'me' : 'them'}">
+                    ${escapeHtml(msg.message)}
+                    <span class="chat-time">${escapeHtml(msg.created_at_formatted || msg.created_at || '')}</span>
+                    ${msg.is_me ? `<span class="chat-status">${buildStatusText(msg)}</span>` : ''}
+                </div>
+            `).join('');
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        async function fetchChatMessages() {
+            if (!chatBookingId || !chatMessages) return;
+
+            try {
+                const response = await fetch(`<?= e(url_path('chat/ajax_fetch_messages.php')) ?>?booking_id=${encodeURIComponent(chatBookingId)}`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    renderChatMessages(result.messages || []);
+                }
+            } catch (err) {
+                console.error('Chat fetch error:', err);
+            }
+        }
+
+        openChatBtn?.addEventListener('click', function () {
+            if (!chatPanel) return;
+            chatPanel.style.display = 'block';
+            fetchChatMessages();
+
+            if (!workspaceState.chatInterval) {
+                workspaceState.chatInterval = setInterval(fetchChatMessages, 3000);
+            }
+        });
+
+        closeChatBtn?.addEventListener('click', function () {
+            if (!chatPanel) return;
+            chatPanel.style.display = 'none';
+
+            if (workspaceState.chatInterval) {
+                clearInterval(workspaceState.chatInterval);
+                workspaceState.chatInterval = null;
+            }
+        });
+
+        chatMessageInput?.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatForm?.requestSubmit();
+            }
+        });
+
+        chatForm?.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const message = (chatMessageInput?.value || '').trim();
+            if (!message) return;
+
+            const submitBtn = chatForm.querySelector('button[type="submit"]');
+            const originalHtml = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
+
+            try {
+                const response = await fetch('<?= e(url_path('chat/ajax_send_message.php')) ?>', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        booking_id: chatBookingId,
+                        receiver_user_id: chatReceiverId,
+                        message: message
+                    })
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Unable to send message.');
+                }
+
+                chatMessageInput.value = '';
+                await fetchChatMessages();
+            } catch (err) {
+                alert(err.message || 'Unable to send message.');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalHtml;
+            }
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    initSenderWorkspace();
+
+    window.addEventListener('popstate', function () {
+        ajaxLoadWorkspace(window.location.href, false);
+    });
+});
+</script>
+</body>
+</html>

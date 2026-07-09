@@ -1,0 +1,10 @@
+
+RewriteEngine on
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# This domain inherits the “PHP” package.
+# php -- END cPanel-generated handler, do not edit
+RewriteCond %{HTTP_HOST} ^nasfat\.entrepoints\.ng$ [OR]
+RewriteCond %{HTTP_HOST} ^www\.nasfat\.entrepoints\.ng$
+RewriteRule ^/?$ "https\:\/\/nasfat\.entrepoints\.ng\/nasfat\/app\/register" [R=301,L]
+

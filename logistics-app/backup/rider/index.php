@@ -1,0 +1,1957 @@
+<?php
+require_once __DIR__ . '/../config/functions.php';
+require_role(['rider']);
+require_once __DIR__ . '/../config/db.php';
+
+$user = current_user();
+$success = flash('success');
+$error = flash('error');
+
+function respond_json(array $payload, int $statusCode = 200): void
+{
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($payload);
+    exit;
+}
+
+function sum_amount(array $rows): float
+{
+    $total = 0.0;
+    foreach ($rows as $row) {
+        $total += (float)($row['agreed_cost'] ?? $row['proposed_cost'] ?? 0);
+    }
+    return $total;
+}
+
+function badge_class(string $status): string
+{
+    return match ($status) {
+        'matched' => 'bg-info text-dark',
+        'accepted' => 'bg-primary',
+        'arrived_at_pickup' => 'bg-warning text-dark',
+        'package_received' => 'bg-secondary',
+        'in_transit' => 'bg-info',
+        'delivered' => 'bg-success',
+        'cancelled' => 'bg-danger',
+        'paid' => 'bg-success',
+        'pending' => 'bg-warning text-dark',
+        'rejected' => 'bg-danger',
+        default => 'bg-dark border border-secondary'
+    };
+}
+
+// ---------------- AJAX: RESPOND TO REQUEST ----------------
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        respond_json(['success' => false, 'message' => 'Invalid request method.'], 405);
+    }
+
+    $requestId = (int)($_POST['request_id'] ?? 0);
+    $action = trim((string)($_POST['action'] ?? ''));
+
+    if ($requestId <= 0 || !in_array($action, ['accepted', 'rejected'], true)) {
+        respond_json(['success' => false, 'message' => 'Invalid request details.'], 422);
+    }
+
+    try {
+        $stmt = $pdo->prepare('
+            SELECT 
+                rr.*,
+                b.id AS booking_id,
+                b.booking_status,
+                b.selected_rider_user_id,
+                b.agreed_cost,
+                b.payment_status
+            FROM rider_requests rr
+            INNER JOIN bookings b ON b.id = rr.booking_id
+            WHERE rr.id = ?
+              AND rr.rider_user_id = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$requestId, $user['id']]);
+        $requestRow = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$requestRow) {
+            respond_json(['success' => false, 'message' => 'Request not found.'], 404);
+        }
+
+        if (($requestRow['request_status'] ?? '') !== 'pending') {
+            respond_json(['success' => false, 'message' => 'This request has already been processed.'], 409);
+        }
+
+        if ($action === 'accepted') {
+            $stmt = $pdo->prepare('
+                SELECT COUNT(*) 
+                FROM bookings
+                WHERE selected_rider_user_id = ?
+                  AND booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
+                  AND id <> ?
+            ');
+            $stmt->execute([$user['id'], (int)$requestRow['booking_id']]);
+            $hasOtherActive = (int)$stmt->fetchColumn() > 0;
+
+            if ($hasOtherActive) {
+                respond_json(['success' => false, 'message' => 'You already have another active delivery. Complete it before accepting a new one.'], 409);
+            }
+        }
+
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+        }
+
+        if ($action === 'accepted') {
+            $stmt = $pdo->prepare('
+                UPDATE rider_requests
+                SET request_status = "accepted"
+                WHERE id = ?
+            ');
+            $stmt->execute([$requestId]);
+
+            $stmt = $pdo->prepare('
+                UPDATE rider_requests
+                SET request_status = "rejected"
+                WHERE booking_id = ?
+                  AND id <> ?
+                  AND request_status = "pending"
+            ');
+            $stmt->execute([(int)$requestRow['booking_id'], $requestId]);
+
+            $stmt = $pdo->prepare('
+                UPDATE bookings
+                SET selected_rider_user_id = ?,
+                    agreed_cost = CASE
+                        WHEN agreed_cost IS NULL OR agreed_cost = 0 THEN ?
+                        ELSE agreed_cost
+                    END,
+                    booking_status = CASE
+                        WHEN booking_status = "submitted" THEN "matched"
+                        ELSE booking_status
+                    END
+                WHERE id = ?
+            ');
+            $stmt->execute([
+                $user['id'],
+                (float)($requestRow['proposed_cost'] ?? 0),
+                (int)$requestRow['booking_id']
+            ]);
+
+            $message = 'Offer accepted successfully.';
+        } else {
+            $stmt = $pdo->prepare('
+                UPDATE rider_requests
+                SET request_status = "rejected"
+                WHERE id = ?
+            ');
+            $stmt->execute([$requestId]);
+            $message = 'Offer rejected successfully.';
+        }
+
+        if ($pdo->inTransaction()) {
+            $pdo->commit();
+        }
+
+        respond_json([
+            'success' => true,
+            'message' => $message,
+            'action' => $action,
+            'request_id' => $requestId,
+            'booking_id' => (int)$requestRow['booking_id']
+        ]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        respond_json(['success' => false, 'message' => 'Unable to process request: ' . $e->getMessage()], 500);
+    }
+}
+
+// ---------------- ACTIVE BOOKING ----------------
+$stmt = $pdo->prepare('
+    SELECT 
+        b.*, 
+        s.full_name AS sender_name, 
+        s.phone AS sender_phone 
+    FROM bookings b 
+    INNER JOIN users s ON s.id = b.sender_user_id
+    WHERE b.selected_rider_user_id = ? 
+      AND b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
+    ORDER BY b.id DESC
+    LIMIT 1
+');
+$stmt->execute([$user['id']]);
+$activeBooking = $stmt->fetch(PDO::FETCH_ASSOC);
+
+$pickupLat = ($activeBooking && $activeBooking['pickup_latitude'] !== null) ? (float)$activeBooking['pickup_latitude'] : null;
+$pickupLng = ($activeBooking && $activeBooking['pickup_longitude'] !== null) ? (float)$activeBooking['pickup_longitude'] : null;
+$destLat   = ($activeBooking && $activeBooking['delivery_latitude'] !== null) ? (float)$activeBooking['delivery_latitude'] : null;
+$destLng   = ($activeBooking && $activeBooking['delivery_longitude'] !== null) ? (float)$activeBooking['delivery_longitude'] : null;
+
+$bookingAmount = $activeBooking ? (float)($activeBooking['agreed_cost'] ?? 0) : 0;
+$currentStatus = $activeBooking['booking_status'] ?? null;
+
+$senderConfirmedHandover =
+    (bool)(
+        $activeBooking['sender_handover_confirmed'] ??
+        $activeBooking['package_handover_confirmed_by_sender'] ??
+        $activeBooking['sender_package_confirmed'] ??
+        false
+    );
+
+// ---------------- TARGET SWITCHING ----------------
+$targetLat = null;
+$targetLng = null;
+$targetLabel = 'Destination';
+$targetAddress = '';
+
+if ($activeBooking) {
+    if (in_array($currentStatus, ['matched', 'accepted'], true)) {
+        $targetLat = $pickupLat;
+        $targetLng = $pickupLng;
+        $targetLabel = 'Pickup';
+        $targetAddress = (string)($activeBooking['pickup_address'] ?? '');
+    } else {
+        $targetLat = $destLat;
+        $targetLng = $destLng;
+        $targetLabel = 'Destination';
+        $targetAddress = (string)($activeBooking['delivery_address'] ?? '');
+    }
+}
+
+$mapLink = ($targetLat !== null && $targetLng !== null)
+    ? "https://www.google.com/maps/dir/?api=1&destination={$targetLat},{$targetLng}&travelmode=driving"
+    : "#";
+
+// ---------------- REQUESTS / ORDERS ----------------
+$stmt = $pdo->prepare('
+    SELECT 
+        rr.*, 
+        b.booking_code, 
+        b.pickup_address, 
+        b.delivery_address, 
+        b.item_name,
+        b.booking_status,
+        b.agreed_cost,
+        b.payment_status,
+        b.sender_user_id,
+        u.full_name AS sender_name
+    FROM rider_requests rr
+    INNER JOIN bookings b ON b.id = rr.booking_id
+    LEFT JOIN users u ON u.id = b.sender_user_id
+    WHERE rr.rider_user_id = ? 
+    ORDER BY FIELD(rr.request_status, "pending","accepted","rejected"), rr.id DESC
+');
+$stmt->execute([$user['id']]);
+$allRequests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$pendingOffers = array_values(array_filter($allRequests, fn($r) => ($r['request_status'] ?? '') === 'pending'));
+$acceptedRequests = array_values(array_filter($allRequests, fn($r) => ($r['request_status'] ?? '') === 'accepted'));
+$rejectedRequests = array_values(array_filter($allRequests, fn($r) => ($r['request_status'] ?? '') === 'rejected'));
+
+// ---------------- ORDER SUMMARY DATA ----------------
+$stmt = $pdo->prepare('
+    SELECT 
+        b.*,
+        s.full_name AS sender_name,
+        s.phone AS sender_phone
+    FROM bookings b
+    INNER JOIN users s ON s.id = b.sender_user_id
+    WHERE b.selected_rider_user_id = ?
+    ORDER BY b.id DESC
+');
+$stmt->execute([$user['id']]);
+$allAssignedBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$matchedBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'matched'));
+$acceptedBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'accepted'));
+$pickupBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'arrived_at_pickup'));
+$packageReceivedBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'package_received'));
+$inTransitBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'in_transit'));
+$deliveredBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'delivered'));
+$cancelledBookings = array_values(array_filter($allAssignedBookings, fn($b) => ($b['booking_status'] ?? '') === 'cancelled'));
+
+$ongoingBookings = array_values(array_filter(
+    $allAssignedBookings,
+    fn($b) => in_array(($b['booking_status'] ?? ''), ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit'], true)
+));
+
+// ---------------- EARNINGS / PAYMENTS ----------------
+$stmt = $pdo->prepare('
+    SELECT 
+        b.id,
+        b.booking_code,
+        b.agreed_cost,
+        b.payment_status,
+        b.booking_status,
+        b.updated_at,
+        b.created_at,
+        s.full_name AS sender_name
+    FROM bookings b
+    LEFT JOIN users s ON s.id = b.sender_user_id
+    WHERE b.selected_rider_user_id = ?
+      AND b.booking_status = "delivered"
+    ORDER BY b.id DESC
+');
+$stmt->execute([$user['id']]);
+$deliveredEarningRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$paidEarningRows = array_values(array_filter($deliveredEarningRows, fn($r) => ($r['payment_status'] ?? '') === 'paid'));
+$unpaidEarningRows = array_values(array_filter($deliveredEarningRows, fn($r) => ($r['payment_status'] ?? '') !== 'paid'));
+
+$todayStart = (new DateTime('today'))->format('Y-m-d H:i:s');
+$weekStart = (new DateTime('monday this week'))->format('Y-m-d H:i:s');
+$monthStart = (new DateTime('first day of this month'))->format('Y-m-d H:i:s');
+
+$todayPaidRows = array_values(array_filter($paidEarningRows, function ($r) use ($todayStart) {
+    $dt = $r['updated_at'] ?? $r['created_at'] ?? null;
+    return $dt && $dt >= $todayStart;
+}));
+
+$weekPaidRows = array_values(array_filter($paidEarningRows, function ($r) use ($weekStart) {
+    $dt = $r['updated_at'] ?? $r['created_at'] ?? null;
+    return $dt && $dt >= $weekStart;
+}));
+
+$monthPaidRows = array_values(array_filter($paidEarningRows, function ($r) use ($monthStart) {
+    $dt = $r['updated_at'] ?? $r['created_at'] ?? null;
+    return $dt && $dt >= $monthStart;
+}));
+
+$totalPaidToday = sum_amount($todayPaidRows);
+$totalPaidWeek = sum_amount($weekPaidRows);
+$totalPaidMonth = sum_amount($monthPaidRows);
+$totalPaidOverall = sum_amount($paidEarningRows);
+$totalOutstanding = sum_amount($unpaidEarningRows);
+$totalExpectedOverall = sum_amount($deliveredEarningRows);
+
+// ---------------- PROFILE ----------------
+$stmt = $pdo->prepare('
+    SELECT availability_status, last_latitude, last_longitude
+    FROM rider_profiles
+    WHERE user_id = ?
+    LIMIT 1
+');
+$stmt->execute([$user['id']]);
+$profile = $stmt->fetch(PDO::FETCH_ASSOC);
+
+$isOnline = ($profile['availability_status'] ?? 'offline') === 'available';
+$initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 12.0022;
+$initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.5920;
+
+$ajaxUpdateLocationUrl = url_path('rider/ajax_update_location.php');
+$ajaxUpdateStatusUrl = url_path('rider/ajax_update_status.php');
+$ajaxWorkflowUrl = url_path('rider/ajax_workflow_action.php');
+$logoutUrl = url_path('logout.php');
+
+$canChat = $activeBooking && (int)($activeBooking['sender_user_id'] ?? 0) > 0;
+$chatReceiverId = $canChat ? (int)$activeBooking['sender_user_id'] : 0;
+
+// ---------------- AJAX SNAPSHOT ----------------
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
+    $pendingIds = array_map(fn($r) => (int)$r['id'], $pendingOffers);
+
+    $popupRequest = null;
+    if (!empty($pendingOffers)) {
+        $firstPending = $pendingOffers[0];
+        $popupRequest = [
+            'id' => (int)$firstPending['id'],
+            'booking_id' => (int)$firstPending['booking_id'],
+            'booking_code' => (string)$firstPending['booking_code'],
+            'pickup_address' => (string)$firstPending['pickup_address'],
+            'delivery_address' => (string)$firstPending['delivery_address'],
+            'sender_name' => (string)($firstPending['sender_name'] ?? 'Unknown'),
+            'item_name' => (string)($firstPending['item_name'] ?? 'Package'),
+            'proposed_cost' => (float)($firstPending['proposed_cost'] ?? 0),
+        ];
+    }
+
+    ob_start();
+    ?>
+    <?php if (empty($pendingOffers)): ?>
+        <div class="text-center py-5 text-soft">
+            <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
+            <p class="mb-0">Scanning for nearby orders...</p>
+        </div>
+    <?php else: ?>
+        <div class="row g-3">
+            <?php foreach ($pendingOffers as $req): ?>
+                <div class="col-lg-6">
+                    <div class="req-card p-3 border-warning h-100">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                            <span class="small text-soft">#<?= htmlspecialchars($req['booking_code']) ?></span>
+                        </div>
+                        <div class="small text-soft mb-2">Sender: <?= htmlspecialchars($req['sender_name'] ?? 'Unknown') ?></div>
+                        <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= htmlspecialchars($req['pickup_address']) ?></p>
+                        <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= htmlspecialchars($req['delivery_address']) ?></p>
+                        <form class="offer-action-form d-flex gap-2" method="post" action="#">
+                            <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
+                            <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                            <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+    <?php
+    $offersHtml = ob_get_clean();
+
+    respond_json([
+        'success' => true,
+        'pending_offers_count' => count($pendingOffers),
+        'pending_offer_ids' => $pendingIds,
+        'popup_request' => $popupRequest,
+        'offers_html' => $offersHtml,
+        'summaries' => [
+            'ongoing' => count($ongoingBookings),
+            'delivered' => count($deliveredBookings),
+            'cancelled' => count($cancelledBookings),
+            'matched' => count($matchedBookings),
+            'accepted' => count($acceptedBookings),
+            'pickup' => count($pickupBookings),
+            'package_received' => count($packageReceivedBookings),
+            'in_transit' => count($inTransitBookings),
+            'paid_today' => $totalPaidToday,
+            'paid_week' => $totalPaidWeek,
+            'paid_month' => $totalPaidMonth,
+            'paid_overall' => $totalPaidOverall,
+            'outstanding' => $totalOutstanding,
+            'expected_overall' => $totalExpectedOverall,
+        ],
+        'active_booking' => $activeBooking ? [
+            'id' => (int)$activeBooking['id'],
+            'status' => (string)($activeBooking['booking_status'] ?? ''),
+            'sender_handover_confirmed' => (bool)$senderConfirmedHandover,
+            'payment_status' => (string)($activeBooking['payment_status'] ?? ''),
+        ] : null,
+    ]);
+}
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Rider Dashboard | SwiftDrop</title>
+    <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css">
+    <style>
+        body { background:#09101d; min-height:100vh; color:#eef4ff; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        .navx { background:rgba(8,17,33,.88); border-bottom:1px solid rgba(255,255,255,.08); }
+        .cardx { background:rgba(17,27,51,.95); border-radius:1.5rem; border:1px solid rgba(255,255,255,.08); box-shadow:0 10px 40px rgba(0,0,0,0.4); }
+        #nav_map { height:400px; width:100%; border-radius:1.25rem; border:1px solid rgba(255,255,255,0.1); margin-bottom:1rem; overflow:hidden; }
+        #route_details { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:14px; color:#cfe0ff; font-size:.92rem; margin-bottom:1.5rem; max-height:220px; overflow-y:auto; }
+        #route_details .route-title { font-weight:700; margin-bottom:8px; color:#fff; }
+        #route_details .route-step { padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+        #route_details .route-step:last-child { border-bottom:none; }
+        .stats-bar { background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.2); border-radius:1rem; padding:12px; margin-bottom:1.5rem; }
+        .summary-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:16px; height:100%; }
+        .stat-label { font-size:.65rem; color:#9fb0d6; text-transform:uppercase; letter-spacing:1px; }
+        .stat-value { font-size:1rem; font-weight:800; color:#fff; }
+        .money-big { font-size:1.4rem; font-weight:800; color:#38bdf8; }
+        .swipe-container { width:100%; height:54px; background:#16203a; border-radius:27px; position:relative; cursor:pointer; border:2px solid rgba(255,255,255,0.1); transition:0.4s; user-select:none; }
+        .swipe-handle { width:46px; height:46px; background:#9fb0d6; border-radius:50%; position:absolute; top:2px; left:3px; transition:0.4s; display:flex; align-items:center; justify-content:center; color:#09101d; z-index:2; }
+        .swipe-text { position:absolute; width:100%; text-align:center; line-height:50px; font-size:.85rem; font-weight:800; letter-spacing:1px; z-index:1; pointer-events:none; }
+        .swipe-container.active { background:#10b981; border-color:#10b981; }
+        .swipe-container.active .swipe-handle { left:calc(100% - 49px); background:#fff; color:#10b981; }
+        .req-card { background:rgba(255,255,255,0.03); border-radius:1rem; border:1px solid rgba(255,255,255,0.08); margin-bottom:1rem; }
+        .price-tag { color:#38bdf8; font-weight:800; font-size:1.1rem; }
+        .pulse-btn { animation:pulse-green 2s infinite; border-radius:12px; }
+        @keyframes pulse-green { 0% { box-shadow:0 0 0 0 rgba(16,185,129,0.7);} 70% { box-shadow:0 0 0 15px rgba(16,185,129,0);} 100% { box-shadow:0 0 0 0 rgba(16,185,129,0);} }
+        .nav-tabs { border:none; gap:8px; }
+        .nav-link { color:#9fb0d6; border:none !important; border-radius:10px !important; font-weight:600; padding:10px 20px; }
+        .nav-link.active { background:#38bdf8 !important; color:#09101d !important; }
+        .text-soft { color:#9fb0d6; }
+        .map-legend { position:absolute; left:12px; bottom:12px; background:rgba(8,17,33,.82); border:1px solid rgba(255,255,255,.08); border-radius:.75rem; padding:.6rem .8rem; color:#cfe0ff; font-size:.82rem; z-index:3; }
+        .system-msg { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:12px 14px; font-size:.9rem; color:#cfe0ff; margin-bottom:1rem; }
+        .mini-row { border-bottom:1px solid rgba(255,255,255,.06); padding:10px 0; }
+        .mini-row:last-child { border-bottom:none; }
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
+        .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
+        .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(8,17,33,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.10); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
+        .chat-header { padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center; }
+        .chat-messages { height:360px; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+        .chat-bubble { max-width:80%; padding:10px 12px; border-radius:14px; font-size:.92rem; line-height:1.35; word-wrap:break-word; }
+        .chat-bubble.me { align-self:flex-end; background:rgba(56,189,248,.18); border:1px solid rgba(56,189,248,.30); color:#eef4ff; }
+        .chat-bubble.them { align-self:flex-start; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.10); color:#eef4ff; }
+        .chat-time { display:block; font-size:.72rem; color:#9fb0d6; margin-top:6px; }
+        .chat-status { display:block; font-size:.70rem; color:#7dd3fc; margin-top:4px; text-align:right; }
+        .chat-footer { padding:12px; border-top:1px solid rgba(255,255,255,.08); }
+        .chat-footer textarea { resize:none; min-height:54px; max-height:100px; }
+        .request-indicator { position:absolute; top:-4px; right:-4px; min-width:22px; height:22px; border-radius:999px; background:#ef4444; color:#fff; font-size:.72rem; font-weight:700; display:none; align-items:center; justify-content:center; padding:0 6px; }
+        .toast-container-custom { position:fixed; top:16px; right:16px; z-index:110000; width:min(360px, calc(100vw - 24px)); }
+        @media (max-width:576px){ .sticky-chat-btn{right:14px;bottom:14px} .chat-panel{right:12px;left:12px;width:auto;bottom:84px} }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark navx">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</a>
+        </div>
+    </div>
+</nav>
+
+<div class="toast-container-custom" id="toast-container"></div>
+
+<div
+    class="container py-4"
+    id="rider-dashboard-root"
+    data-user-id="<?= (int)$user['id'] ?>"
+    data-booking-id="<?= $activeBooking ? (int)$activeBooking['id'] : 0 ?>"
+    data-chat-enabled="<?= $canChat ? '1' : '0' ?>"
+    data-chat-receiver-id="<?= (int)$chatReceiverId ?>"
+    data-snapshot-url="<?= e(url_path('rider/index.php?ajax=snapshot')) ?>"
+    data-respond-url="<?= e(url_path('rider/index.php?ajax=respond_request')) ?>"
+    data-chat-fetch-url="<?= e(url_path('chat/ajax_fetch_messages.php')) ?>"
+    data-chat-send-url="<?= e(url_path('chat/ajax_send_message.php')) ?>"
+>
+    <?php if ($success): ?><div class="alert alert-success border-0 mb-4"><?= e($success) ?></div><?php endif; ?>
+    <?php if ($error): ?><div class="alert alert-danger border-0 mb-4"><?= e($error) ?></div><?php endif; ?>
+    <div id="alert-container"></div>
+
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+        <div>
+            <h1 class="h3 fw-bold mb-1">Rider Dashboard</h1>
+            <p class="text-soft mb-0">Track jobs, manage requests, monitor earnings, and update delivery workflow.</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <span class="pill"><i class="fa-solid fa-box-open text-info"></i><span id="top-ongoing-count"><?= count($ongoingBookings) ?></span> ongoing</span>
+            <span class="pill"><i class="fa-solid fa-circle-check text-success"></i><span id="top-delivered-count"><?= count($deliveredBookings) ?></span> completed</span>
+            <span class="pill"><i class="fa-solid fa-wallet text-warning"></i>₦<span id="top-outstanding-amount"><?= number_format($totalOutstanding, 2) ?></span> unpaid</span>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="summary-card">
+                <div class="stat-label">Paid Today</div>
+                <div class="money-big" id="paid-today-value">₦<?= number_format($totalPaidToday, 2) ?></div>
+                <div class="small text-soft mt-1"><?= count($todayPaidRows) ?> payment<?= count($todayPaidRows) === 1 ? '' : 's' ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="summary-card">
+                <div class="stat-label">Paid This Week</div>
+                <div class="money-big" id="paid-week-value">₦<?= number_format($totalPaidWeek, 2) ?></div>
+                <div class="small text-soft mt-1"><?= count($weekPaidRows) ?> payment<?= count($weekPaidRows) === 1 ? '' : 's' ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="summary-card">
+                <div class="stat-label">Paid This Month</div>
+                <div class="money-big" id="paid-month-value">₦<?= number_format($totalPaidMonth, 2) ?></div>
+                <div class="small text-soft mt-1"><?= count($monthPaidRows) ?> payment<?= count($monthPaidRows) === 1 ? '' : 's' ?></div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="summary-card">
+                <div class="stat-label">Outstanding Earnings</div>
+                <div class="money-big" id="outstanding-value">₦<?= number_format($totalOutstanding, 2) ?></div>
+                <div class="small text-soft mt-1"><?= count($unpaidEarningRows) ?> unpaid delivery<?= count($unpaidEarningRows) === 1 ? '' : 'ies' ?></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-lg-7">
+            <div class="cardx p-3 p-md-4">
+                <?php if ($activeBooking): ?>
+                    <div class="stats-bar d-flex justify-content-between align-items-center flex-wrap">
+                        <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
+                            <div class="stat-label">Current Job Value</div>
+                            <div class="stat-value text-info">₦<?= number_format($bookingAmount, 2) ?></div>
+                        </div>
+                        <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
+                            <div class="stat-label">Distance</div>
+                            <div class="stat-value" id="distance_display">--</div>
+                        </div>
+                        <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
+                            <div class="stat-label">ETA</div>
+                            <div class="stat-value" id="eta_display">--</div>
+                        </div>
+                        <div class="text-center flex-fill px-2">
+                            <div class="stat-label">System</div>
+                            <div id="sync_status" class="stat-value small text-success">READY</div>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="h5 fw-bold mb-0">Rider Radar</h2>
+                        <span id="sync_status" class="badge bg-dark border border-secondary text-info">OFFLINE</span>
+                    </div>
+                <?php endif; ?>
+
+                <div id="nav_map">
+                    <div class="map-legend">
+                        <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#38bdf8;margin-right:6px"></span>Rider</div>
+                        <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:6px"></span><span id="target_label"><?= e($targetLabel) ?></span></div>
+                    </div>
+                </div>
+
+                <div id="route_details">
+                    <div class="route-title">Route Details</div>
+                    <div id="route_details_body">Waiting for route...</div>
+                </div>
+
+                <div class="system-msg" id="geo_message">
+                    <?php if ($activeBooking): ?>
+                        Current target: <strong><?= e($targetLabel) ?></strong> — <?= e($targetAddress) ?>
+                    <?php else: ?>
+                        Tap the slider to go online. If GPS is unavailable, the map still shows your last known saved position.
+                    <?php endif; ?>
+                </div>
+
+                <div class="mb-4">
+                    <div id="swipe-btn" class="swipe-container <?= $isOnline ? 'active' : '' ?>" onclick="toggleStatus()">
+                        <div class="swipe-handle"><i class="fa-solid fa-motorcycle"></i></div>
+                        <span class="swipe-text"><?= $isOnline ? 'TRACKING ONLINE' : 'SWIPE TO START WORKING' ?></span>
+                    </div>
+                </div>
+
+                <?php if ($activeBooking): ?>
+                    <div class="req-card p-3 border-info shadow-sm">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <span class="badge <?= e(badge_class($currentStatus)) ?>" id="active-booking-status-badge"><?= e(strtoupper(str_replace('_', ' ', (string)$currentStatus))) ?></span>
+                            <div class="d-flex gap-2">
+                                <a href="tel:<?= e($activeBooking['sender_phone']) ?>" class="btn btn-sm btn-dark border-secondary rounded-pill px-3">
+                                    <i class="fa-solid fa-phone"></i>
+                                </a>
+                                <?php if ($targetLat !== null && $targetLng !== null): ?>
+                                    <a href="<?= e($mapLink) ?>" target="_blank" class="btn btn-sm btn-primary rounded-pill px-3 fw-bold">
+                                        <i class="fa-solid fa-diamond-turn-right me-1"></i> NAVIGATE
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <div class="small text-soft">Booking</div>
+                                <div class="fw-bold"><?= e($activeBooking['booking_code'] ?? '') ?></div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="small text-soft">Sender</div>
+                                <div class="fw-bold"><?= e($activeBooking['sender_name'] ?? '') ?></div>
+                            </div>
+                        </div>
+
+                        <p class="fw-bold mb-1 small text-truncate">
+                            <i class="fa-solid fa-location-dot me-2 text-danger"></i>
+                            <span id="target_address_text"><?= e($targetAddress) ?></span>
+                        </p>
+                        <p class="small text-soft mb-3">Item: <?= e($activeBooking['item_name'] ?? '') ?></p>
+
+                        <?php if ($currentStatus === 'arrived_at_pickup'): ?>
+                            <div class="system-msg mb-3" id="sender_handover_notice">
+                                <?php if ($senderConfirmedHandover): ?>
+                                    <i class="fa-solid fa-circle-check text-success me-2"></i>
+                                    Sender has confirmed package handover. You can now mark package received.
+                                <?php else: ?>
+                                    <i class="fa-solid fa-handshake-angle text-warning me-2"></i>
+                                    Waiting for sender confirmation before you can select <strong>Received Package</strong>.
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+
+                        <button
+                            type="button"
+                            id="btn_workflow"
+                            class="btn btn-secondary w-100 py-3 fw-bold pulse-btn"
+                            disabled
+                            data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
+                        >
+                            CHECKING LOCATION...
+                        </button>
+                    </div>
+                <?php else: ?>
+                    <div class="system-msg mb-0">
+                        <i class="fa-solid fa-satellite-dish me-2 text-info"></i>
+                        No active delivery right now. Stay online to receive new offers.
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="cardx p-4 h-100">
+                <h2 class="h5 fw-bold mb-3">Quick Summary</h2>
+
+                <div class="mini-row d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-soft">Pending Offers</div>
+                        <div class="fw-bold" id="pending-offers-count"><?= count($pendingOffers) ?></div>
+                    </div>
+                    <span class="badge bg-warning text-dark">Awaiting response</span>
+                </div>
+
+                <div class="mini-row d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-soft">Ongoing Orders</div>
+                        <div class="fw-bold" id="quick-ongoing-count"><?= count($ongoingBookings) ?></div>
+                    </div>
+                    <span class="badge bg-info text-dark">In progress</span>
+                </div>
+
+                <div class="mini-row d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-soft">Completed Orders</div>
+                        <div class="fw-bold" id="quick-delivered-count"><?= count($deliveredBookings) ?></div>
+                    </div>
+                    <span class="badge bg-success">Delivered</span>
+                </div>
+
+                <div class="mini-row d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-soft">Cancelled Orders</div>
+                        <div class="fw-bold" id="quick-cancelled-count"><?= count($cancelledBookings) ?></div>
+                    </div>
+                    <span class="badge bg-danger">Cancelled</span>
+                </div>
+
+                <div class="mini-row d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-soft">Paid Earnings</div>
+                        <div class="fw-bold" id="quick-paid-overall">₦<?= number_format($totalPaidOverall, 2) ?></div>
+                    </div>
+                    <span class="badge bg-success">Received</span>
+                </div>
+
+                <div class="pt-3">
+                    <div class="small text-soft mb-2">Workflow distribution</div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="pill"><i class="fa-solid fa-user-check text-info"></i><span id="matched-count"><?= count($matchedBookings) ?></span> matched</span>
+                        <span class="pill"><i class="fa-solid fa-thumbs-up text-primary"></i><span id="accepted-count"><?= count($acceptedBookings) ?></span> accepted</span>
+                        <span class="pill"><i class="fa-solid fa-location-crosshairs text-warning"></i><span id="pickup-count"><?= count($pickupBookings) ?></span> at pickup</span>
+                        <span class="pill"><i class="fa-solid fa-box text-secondary"></i><span id="package-received-count"><?= count($packageReceivedBookings) ?></span> package received</span>
+                        <span class="pill"><i class="fa-solid fa-truck-fast text-info"></i><span id="in-transit-count"><?= count($inTransitBookings) ?></span> in transit</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mb-4" id="riderDashboardTabs">
+        <li class="nav-item">
+            <button class="nav-link active position-relative" data-bs-toggle="tab" data-bs-target="#offers" type="button">
+                New Offers
+                <span class="request-indicator d-inline-flex" id="new-request-indicator"><?= count($pendingOffers) ?></span>
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#orders" type="button">Orders</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#payments" type="button">Payments</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history" type="button">History</button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <div class="tab-pane fade show active" id="offers">
+            <div class="cardx p-4">
+                <h2 class="h5 fw-bold mb-3">New Offers</h2>
+                <div id="offers-list-wrap">
+                    <?php if (empty($pendingOffers)): ?>
+                        <div class="text-center py-5 text-soft">
+                            <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
+                            <p class="mb-0">Scanning for nearby orders...</p>
+                        </div>
+                    <?php else: ?>
+                        <div class="row g-3">
+                            <?php foreach ($pendingOffers as $req): ?>
+                                <div class="col-lg-6">
+                                    <div class="req-card p-3 border-warning h-100">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                                            <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
+                                        </div>
+                                        <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
+                                        <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
+                                        <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
+                                        <form class="offer-action-form d-flex gap-2" method="post" action="#">
+                                            <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
+                                            <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                                            <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
+                                        </form>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="orders">
+            <div class="row g-4">
+                <div class="col-lg-4">
+                    <div class="cardx p-4 h-100">
+                        <h2 class="h5 fw-bold mb-3">Order Status Summary</h2>
+                        <div class="mini-row d-flex justify-content-between"><span>Matched</span><strong><?= count($matchedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Accepted</span><strong><?= count($acceptedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Arrived at pickup</span><strong><?= count($pickupBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Package received</span><strong><?= count($packageReceivedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>In transit</span><strong><?= count($inTransitBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Delivered</span><strong><?= count($deliveredBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Cancelled</span><strong><?= count($cancelledBookings) ?></strong></div>
+                    </div>
+                </div>
+
+                <div class="col-lg-8">
+                    <div class="cardx p-4">
+                        <h2 class="h5 fw-bold mb-3">All Assigned Orders</h2>
+                        <?php if (empty($allAssignedBookings)): ?>
+                            <div class="text-soft">No assigned orders yet.</div>
+                        <?php else: ?>
+                            <?php foreach ($allAssignedBookings as $b): ?>
+                                <div class="req-card p-3">
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                        <div>
+                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
+                                            <div class="small text-soft"><?= e($b['item_name'] ?? 'Package') ?></div>
+                                        </div>
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <span class="badge <?= e(badge_class((string)($b['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string)($b['booking_status'] ?? 'unknown'))) ?></span>
+                                            <span class="badge <?= e(badge_class((string)($b['payment_status'] ?? 'pending'))) ?>"><?= e((string)($b['payment_status'] ?? 'pending')) ?></span>
+                                        </div>
+                                    </div>
+                                    <div class="small text-soft mb-1">Sender: <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' · ' . e($b['sender_phone']) : '' ?></div>
+                                    <div class="small text-soft mb-1">Pickup: <?= e($b['pickup_address'] ?? '') ?></div>
+                                    <div class="small text-soft mb-2">Delivery: <?= e($b['delivery_address'] ?? '') ?></div>
+                                    <div class="price-tag">₦<?= number_format((float)($b['agreed_cost'] ?? 0), 2) ?></div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="payments">
+            <div class="row g-4 mb-4">
+                <div class="col-md-6 col-xl-3">
+                    <div class="summary-card">
+                        <div class="stat-label">Total Paid Today</div>
+                        <div class="money-big">₦<?= number_format($totalPaidToday, 2) ?></div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-xl-3">
+                    <div class="summary-card">
+                        <div class="stat-label">Total Paid This Week</div>
+                        <div class="money-big">₦<?= number_format($totalPaidWeek, 2) ?></div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-xl-3">
+                    <div class="summary-card">
+                        <div class="stat-label">Total Paid This Month</div>
+                        <div class="money-big">₦<?= number_format($totalPaidMonth, 2) ?></div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-xl-3">
+                    <div class="summary-card">
+                        <div class="stat-label">Total Paid Overall</div>
+                        <div class="money-big">₦<?= number_format($totalPaidOverall, 2) ?></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-4">
+                <div class="col-lg-5">
+                    <div class="cardx p-4 h-100">
+                        <h2 class="h5 fw-bold mb-3">Payment Summary</h2>
+                        <div class="mini-row d-flex justify-content-between"><span>Paid deliveries</span><strong><?= count($paidEarningRows) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Unpaid deliveries</span><strong><?= count($unpaidEarningRows) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Outstanding amount</span><strong>₦<?= number_format($totalOutstanding, 2) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span>Total expected</span><strong>₦<?= number_format($totalExpectedOverall, 2) ?></strong></div>
+                    </div>
+                </div>
+
+                <div class="col-lg-7">
+                    <div class="cardx p-4">
+                        <h2 class="h5 fw-bold mb-3">Earnings Details</h2>
+                        <?php if (empty($deliveredEarningRows)): ?>
+                            <div class="text-soft">No delivered jobs yet.</div>
+                        <?php else: ?>
+                            <?php foreach ($deliveredEarningRows as $row): ?>
+                                <div class="req-card p-3">
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                                        <div>
+                                            <div class="fw-bold"><?= e($row['booking_code']) ?></div>
+                                            <div class="small text-soft"><?= e($row['sender_name'] ?? '') ?></div>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="price-tag">₦<?= number_format((float)($row['agreed_cost'] ?? 0), 2) ?></div>
+                                            <span class="badge <?= e(badge_class((string)($row['payment_status'] ?? 'pending'))) ?>">
+                                                <?= e((string)($row['payment_status'] ?? 'pending')) ?>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="small text-soft mt-2">
+                                        Delivered on <?= e((string)($row['updated_at'] ?? $row['created_at'] ?? '')) ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="history">
+            <div class="cardx p-4">
+                <h2 class="h5 fw-bold mb-3">Request / Order History</h2>
+                <?php
+                $historyRows = array_filter($allRequests, fn($req) =>
+                    ($req['request_status'] ?? '') !== 'pending' || in_array(($req['booking_status'] ?? ''), ['delivered', 'cancelled'], true)
+                );
+                ?>
+                <?php if (empty($historyRows)): ?>
+                    <div class="text-soft">No request history yet.</div>
+                <?php else: ?>
+                    <?php foreach ($historyRows as $req): ?>
+                        <div class="req-card p-3">
+                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                <div>
+                                    <div class="fw-bold"><?= e($req['booking_code']) ?></div>
+                                    <div class="small text-soft"><?= e($req['item_name'] ?? '') ?></div>
+                                </div>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <span class="badge <?= e(badge_class((string)($req['request_status'] ?? 'pending'))) ?>"><?= e((string)($req['request_status'] ?? 'pending')) ?></span>
+                                    <span class="badge <?= e(badge_class((string)($req['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string)($req['booking_status'] ?? 'unknown'))) ?></span>
+                                </div>
+                            </div>
+                            <div class="small text-soft mb-1">Pickup: <?= e($req['pickup_address'] ?? '') ?></div>
+                            <div class="small text-soft mb-1">Delivery: <?= e($req['delivery_address'] ?? '') ?></div>
+                            <div class="small text-soft">Offer / Value: ₦<?= number_format((float)($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0), 2) ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="newRequestModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">New Delivery Request</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="new-request-modal-body">
+                Waiting for request details...
+            </div>
+            <div class="modal-footer border-secondary">
+                <form id="new-request-reject-form" class="me-2">
+                    <input type="hidden" name="request_id" id="modal-request-id-reject">
+                    <button class="btn btn-outline-danger" type="submit">Reject</button>
+                </form>
+                <form id="new-request-accept-form">
+                    <input type="hidden" name="request_id" id="modal-request-id-accept">
+                    <button class="btn btn-success" type="submit">Accept</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php if ($canChat): ?>
+<button type="button" class="sticky-chat-btn" id="open-chat-btn" title="Open chat">
+    <i class="fa-solid fa-comments"></i>
+</button>
+
+<div class="chat-panel" id="chat-panel">
+    <div class="chat-header">
+        <div>
+            <div class="fw-bold">Chat with Sender</div>
+            <div class="small text-soft"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-light" id="close-chat-btn">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <div class="chat-messages" id="chat-messages"></div>
+
+    <div class="chat-footer">
+        <form id="chat-form">
+            <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
+            <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
+            <textarea id="chat-message-input" class="form-control mb-2" placeholder="Type your message..."></textarea>
+            <button type="submit" class="btn btn-info w-100 fw-bold">
+                <i class="fa-solid fa-paper-plane me-2"></i>Send
+            </button>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+<script>
+const dashboardRoot = document.getElementById('rider-dashboard-root');
+const swipeBtn = document.getElementById('swipe-btn');
+const btnWorkflow = document.getElementById('btn_workflow');
+const distDisplay = document.getElementById('distance_display');
+const etaDisplay = document.getElementById('eta_display');
+const syncStatus = document.getElementById('sync_status');
+const geoMessage = document.getElementById('geo_message');
+const routeDetailsBody = document.getElementById('route_details_body');
+
+const ajaxUpdateLocationUrl = <?= json_encode($ajaxUpdateLocationUrl) ?>;
+const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
+const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
+
+let watchId = null;
+let lastKnownPosition = null;
+let currentStatus = <?= json_encode($currentStatus) ?>;
+const bookingId = <?= $activeBooking ? (int)$activeBooking['id'] : 'null' ?>;
+let senderHandoverConfirmed = <?= json_encode($senderConfirmedHandover) ?>;
+
+const pickup = {
+    lat: <?= $pickupLat !== null ? json_encode($pickupLat) : 'null' ?>,
+    lng: <?= $pickupLng !== null ? json_encode($pickupLng) : 'null' ?>
+};
+
+const dest = {
+    lat: <?= $destLat !== null ? json_encode($destLat) : 'null' ?>,
+    lng: <?= $destLng !== null ? json_encode($destLng) : 'null' ?>
+};
+
+const initialRider = {
+    lat: <?= json_encode($initialLat) ?>,
+    lng: <?= json_encode($initialLng) ?>
+};
+
+const state = {
+    map: null,
+    riderMarker: null,
+    targetMarker: null,
+    routingControl: null,
+    latestRouteDistanceMeters: null,
+    latestRouteDurationSeconds: null,
+    knownPendingIds: <?= json_encode(array_map(fn($r) => (int)$r['id'], $pendingOffers)) ?>,
+    snapshotInterval: null,
+    chatInterval: null,
+    requestModal: null,
+    requestAudio: null,
+    audioUnlocked: false
+};
+
+const snapshotUrl = dashboardRoot?.dataset.snapshotUrl || '';
+const respondUrl = dashboardRoot?.dataset.respondUrl || '';
+const chatEnabled = dashboardRoot?.dataset.chatEnabled === '1';
+const chatFetchUrl = dashboardRoot?.dataset.chatFetchUrl || '';
+const chatSendUrl = dashboardRoot?.dataset.chatSendUrl || '';
+
+function safeAbsoluteUrl(url) {
+    try {
+        return new URL(url, window.location.origin).toString();
+    } catch (e) {
+        console.error('Invalid URL:', url, e);
+        return '';
+    }
+}
+
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function requestNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+    }
+}
+
+function unlockAudio() {
+    if (state.audioUnlocked) return;
+    state.audioUnlocked = true;
+
+    try {
+        state.requestAudio = new Audio(safeAbsoluteUrl('assets/sounds/request-alert.wav'));
+        state.requestAudio.preload = 'auto';
+        state.requestAudio.volume = 1;
+        state.requestAudio.muted = true;
+
+        state.requestAudio.play().then(() => {
+            state.requestAudio.pause();
+            state.requestAudio.currentTime = 0;
+            state.requestAudio.muted = false;
+        }).catch(() => {});
+    } catch (e) {
+        console.warn('Audio init failed:', e);
+    }
+}
+
+document.addEventListener('click', unlockAudio, { once: true });
+document.addEventListener('touchstart', unlockAudio, { once: true });
+document.addEventListener('keydown', unlockAudio, { once: true });
+
+function playFallbackBeep() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+
+        const ctx = new AudioCtx();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.frequency.setValueAtTime(988, ctx.currentTime + 0.12);
+
+        gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.45);
+    } catch (e) {
+        console.warn('Fallback beep failed', e);
+    }
+}
+
+function playNewRequestSound() {
+    if (!state.requestAudio) {
+        playFallbackBeep();
+        return;
+    }
+
+    try {
+        state.requestAudio.pause();
+        state.requestAudio.currentTime = 0;
+        state.requestAudio.play().catch(err => {
+            console.warn('Uploaded sound failed, using fallback beep:', err);
+            playFallbackBeep();
+        });
+    } catch (e) {
+        playFallbackBeep();
+    }
+}
+
+function showBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    try {
+        new Notification(title, { body });
+    } catch (e) {
+        console.log('Browser notification failed', e);
+    }
+}
+
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast align-items-center text-bg-${type} border-0 mb-2`;
+    toastEl.setAttribute('role', 'alert');
+    toastEl.setAttribute('aria-live', 'assertive');
+    toastEl.setAttribute('aria-atomic', 'true');
+
+    const toastBodyId = 'toast-body-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+
+    toastEl.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body" id="${toastBodyId}"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+
+    container.appendChild(toastEl);
+    const bodyEl = document.getElementById(toastBodyId);
+    if (bodyEl) {
+        bodyEl.textContent = String(message || '');
+    }
+
+    const toast = bootstrap.Toast.getOrCreateInstance(toastEl, { delay: 3500 });
+    toast.show();
+
+    toastEl.addEventListener('hidden.bs.toast', () => {
+        toastEl.remove();
+    });
+}
+
+function getCurrentTarget() {
+    if (!bookingId) return null;
+
+    if (currentStatus === 'matched' || currentStatus === 'accepted') {
+        return {
+            type: 'pickup',
+            lat: pickup.lat,
+            lng: pickup.lng,
+            label: 'Pickup',
+            address: <?= json_encode((string)($activeBooking['pickup_address'] ?? '')) ?>
+        };
+    }
+
+    if (currentStatus === 'arrived_at_pickup' || currentStatus === 'package_received' || currentStatus === 'in_transit') {
+        return {
+            type: 'delivery',
+            lat: dest.lat,
+            lng: dest.lng,
+            label: 'Destination',
+            address: <?= json_encode((string)($activeBooking['delivery_address'] ?? '')) ?>
+        };
+    }
+
+    return null;
+}
+
+function explainGeoError(err) {
+    if (!err) return 'Unable to fetch current location.';
+    if (err.code === 1) return 'Location permission was denied.';
+    if (err.code === 2) return 'Position unavailable. The device could not get a reliable fix.';
+    if (err.code === 3) return 'Location request timed out.';
+    return 'Unable to fetch current location.';
+}
+
+function formatDistance(meters) {
+    if (meters === null || meters === undefined) return '--';
+    return meters >= 1000 ? (meters / 1000).toFixed(1) + ' km' : Math.round(meters) + ' m';
+}
+
+function formatDuration(seconds) {
+    if (seconds === null || seconds === undefined) return '--';
+    const mins = Math.round(seconds / 60);
+    if (mins < 60) return mins + ' min';
+    const hrs = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return hrs + 'h ' + rem + 'm';
+}
+
+function initMap() {
+    const navMap = document.getElementById('nav_map');
+    if (!navMap) return;
+
+    state.map = L.map('nav_map', { zoomControl: true }).setView([initialRider.lat, initialRider.lng], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(state.map);
+
+    state.riderMarker = L.marker([initialRider.lat, initialRider.lng], { title: 'Rider' }).addTo(state.map);
+
+    const target = getCurrentTarget();
+    if (target && target.lat !== null && target.lng !== null) {
+        state.targetMarker = L.marker([target.lat, target.lng], { title: target.label }).addTo(state.map);
+        buildRoute(initialRider.lat, initialRider.lng, target.lat, target.lng);
+    }
+
+    setTimeout(() => state.map && state.map.invalidateSize(), 250);
+}
+
+function clearRoute() {
+    if (state.routingControl && state.map) {
+        state.map.removeControl(state.routingControl);
+        state.routingControl = null;
+    }
+}
+
+function renderRouteDetails(route, target) {
+    if (!route) {
+        if (routeDetailsBody) routeDetailsBody.textContent = 'No route details available.';
+        return;
+    }
+
+    const summary = `
+        <div class="mb-2"><strong>Target:</strong> ${escapeHtml(target.label)}</div>
+        <div class="mb-2"><strong>Address:</strong> ${escapeHtml(target.address || '-')}</div>
+        <div class="mb-2"><strong>Road distance:</strong> ${escapeHtml(formatDistance(route.summary.totalDistance))}</div>
+        <div class="mb-3"><strong>Estimated time:</strong> ${escapeHtml(formatDuration(route.summary.totalTime))}</div>
+    `;
+
+    const instructions = (route.instructions || []).slice(0, 8).map(step => {
+        return `<div class="route-step">${escapeHtml(step.text)} <span class="text-soft">(${escapeHtml(formatDistance(step.distance))})</span></div>`;
+    }).join('');
+
+    if (routeDetailsBody) {
+        routeDetailsBody.innerHTML = summary + (instructions || '<div>No turn-by-turn instructions.</div>');
+    }
+}
+
+function updateStatsFromRoute(route) {
+    if (!route) return;
+
+    state.latestRouteDistanceMeters = route.summary.totalDistance;
+    state.latestRouteDurationSeconds = route.summary.totalTime;
+
+    if (distDisplay) distDisplay.textContent = formatDistance(state.latestRouteDistanceMeters);
+    if (etaDisplay) etaDisplay.textContent = formatDuration(state.latestRouteDurationSeconds);
+
+    updateWorkflowButton(state.latestRouteDistanceMeters);
+}
+
+function buildRoute(fromLat, fromLng, toLat, toLng) {
+    const target = getCurrentTarget();
+    if (!target || !state.map) return;
+
+    clearRoute();
+
+    state.routingControl = L.Routing.control({
+        waypoints: [
+            L.latLng(fromLat, fromLng),
+            L.latLng(toLat, toLng)
+        ],
+        router: L.Routing.osrmv1({
+            serviceUrl: 'https://router.project-osrm.org/route/v1'
+        }),
+        addWaypoints: false,
+        draggableWaypoints: false,
+        routeWhileDragging: false,
+        fitSelectedRoutes: true,
+        show: false,
+        lineOptions: {
+            styles: [{ color: '#38bdf8', opacity: 0.9, weight: 5 }]
+        },
+        createMarker: function(i, wp) {
+            if (i === 0) {
+                state.riderMarker = L.marker(wp.latLng, { title: 'Rider' });
+                return state.riderMarker;
+            } else {
+                state.targetMarker = L.marker(wp.latLng, { title: target.label });
+                return state.targetMarker;
+            }
+        }
+    }).addTo(state.map);
+
+    state.routingControl.on('routesfound', function(e) {
+        const route = e.routes[0];
+        updateStatsFromRoute(route);
+        renderRouteDetails(route, target);
+
+        const bounds = L.latLngBounds(route.coordinates);
+        state.map.fitBounds(bounds, {
+            padding: [40, 40],
+            animate: true,
+            duration: 0.75
+        });
+    });
+
+    state.routingControl.on('routingerror', function() {
+        if (routeDetailsBody) routeDetailsBody.textContent = 'Unable to fetch road route details right now.';
+        if (geoMessage) geoMessage.textContent = 'Routing service is temporarily unavailable.';
+    });
+}
+
+function updateMapAndTargetUI(lat, lng) {
+    if (!state.map || !state.riderMarker) return;
+
+    const target = getCurrentTarget();
+    if (!target || target.lat === null || target.lng === null) return;
+
+    const currentTargetLabel = document.getElementById('target_label');
+    if (currentTargetLabel) currentTargetLabel.textContent = target.label;
+
+    const targetText = document.getElementById('target_address_text');
+    if (targetText) targetText.textContent = target.address;
+
+    buildRoute(lat, lng, target.lat, target.lng);
+}
+
+function updateWorkflowButton(distance) {
+    if (!btnWorkflow || !bookingId) return;
+
+    btnWorkflow.classList.remove('btn-success', 'btn-warning', 'btn-primary', 'btn-secondary', 'btn-danger');
+
+    if (currentStatus === 'matched' || currentStatus === 'accepted') {
+        if (distance !== null && distance <= 300) {
+            btnWorkflow.disabled = false;
+            btnWorkflow.classList.add('btn-success');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-location-crosshairs me-2"></i>I HAVE ARRIVED';
+        } else {
+            btnWorkflow.disabled = true;
+            btnWorkflow.classList.add('btn-secondary');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-route me-2"></i>HEADING TO PICKUP';
+        }
+    } else if (currentStatus === 'arrived_at_pickup') {
+        if (senderHandoverConfirmed) {
+            btnWorkflow.disabled = false;
+            btnWorkflow.classList.add('btn-warning');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-box-open me-2"></i>CONFIRM PACKAGE RECEIVED';
+        } else {
+            btnWorkflow.disabled = true;
+            btnWorkflow.classList.add('btn-danger');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-handshake-angle me-2"></i>WAITING FOR SENDER CONFIRMATION';
+        }
+    } else if (currentStatus === 'package_received' || currentStatus === 'in_transit') {
+        if (distance !== null && distance <= 300) {
+            btnWorkflow.disabled = false;
+            btnWorkflow.classList.add('btn-success');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-circle-check me-2"></i>COMPLETE DELIVERY';
+        } else {
+            btnWorkflow.disabled = true;
+            btnWorkflow.classList.add('btn-secondary');
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-truck-fast me-2"></i>HEADING TO DELIVERY';
+        }
+    } else {
+        btnWorkflow.disabled = true;
+        btnWorkflow.classList.add('btn-secondary');
+        btnWorkflow.innerHTML = 'NO ACTIVE STEP';
+    }
+}
+
+async function runWorkflowAction() {
+    if (!bookingId || !btnWorkflow || btnWorkflow.disabled) return;
+
+    let action = null;
+
+    if (currentStatus === 'matched' || currentStatus === 'accepted') {
+        action = 'arrived_at_pickup';
+    } else if (currentStatus === 'arrived_at_pickup') {
+        if (!senderHandoverConfirmed) {
+            if (geoMessage) {
+                geoMessage.textContent = 'You cannot mark package received until the sender confirms handover.';
+            }
+            return;
+        }
+        action = 'package_received';
+    } else if (currentStatus === 'package_received' || currentStatus === 'in_transit') {
+        action = 'delivered';
+    }
+
+    if (!action) return;
+
+    btnWorkflow.disabled = true;
+
+    try {
+        const response = await fetch(safeAbsoluteUrl(ajaxWorkflowUrl), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                booking_id: bookingId,
+                action: action
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Workflow action failed.');
+        }
+
+        currentStatus = data.new_status;
+        if (geoMessage) geoMessage.textContent = data.message || 'Status updated.';
+
+        const activeBadge = document.getElementById('active-booking-status-badge');
+        if (activeBadge) {
+            activeBadge.textContent = String(currentStatus || '').replaceAll('_', ' ').toUpperCase();
+        }
+
+        if (currentStatus === 'delivered') {
+            window.location.reload();
+            return;
+        }
+
+        const lat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
+        const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
+        updateMapAndTargetUI(lat, lng);
+    } catch (err) {
+        if (geoMessage) geoMessage.textContent = err.message || 'Action failed.';
+        btnWorkflow.disabled = false;
+    }
+}
+
+async function toggleStatus() {
+    if (!swipeBtn) return;
+
+    const isActivating = !swipeBtn.classList.contains('active');
+
+    if (isActivating) {
+        if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            if (geoMessage) geoMessage.textContent = 'GPS may fail because browser location usually requires HTTPS or localhost.';
+        }
+
+        if (!navigator.geolocation) {
+            if (geoMessage) geoMessage.textContent = 'Geolocation is not supported on this browser.';
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            () => {
+                swipeBtn.classList.add('active');
+                const swipeText = swipeBtn.querySelector('.swipe-text');
+                if (swipeText) swipeText.innerText = 'TRACKING ONLINE';
+                startTracking();
+                updateServerStatus('available');
+            },
+            (err) => {
+                if (geoMessage) geoMessage.textContent = explainGeoError(err);
+            },
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+        );
+    } else {
+        swipeBtn.classList.remove('active');
+        const swipeText = swipeBtn.querySelector('.swipe-text');
+        if (swipeText) swipeText.innerText = 'SWIPE TO START WORKING';
+        stopTracking();
+        updateServerStatus('offline');
+        if (geoMessage) geoMessage.textContent = 'Tracking stopped.';
+    }
+}
+
+function startTracking() {
+    if (!navigator.geolocation) return;
+
+    if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+    }
+
+    if (syncStatus) syncStatus.innerText = 'LIVE';
+    if (geoMessage) geoMessage.textContent = 'Tracking started...';
+
+    watchId = navigator.geolocation.watchPosition(
+        async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            lastKnownPosition = { lat: latitude, lng: longitude };
+
+            updateMapAndTargetUI(latitude, longitude);
+
+            try {
+                await fetch(safeAbsoluteUrl(ajaxUpdateLocationUrl), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latitude, longitude, status: 'available' })
+                });
+            } catch (e) {
+                if (geoMessage) geoMessage.textContent = 'Live location updated on screen, but server sync failed.';
+            }
+        },
+        (err) => {
+            if (geoMessage) geoMessage.textContent = explainGeoError(err);
+            if (syncStatus) syncStatus.innerText = 'GPS ISSUE';
+
+            const fallbackLat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
+            const fallbackLng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
+            updateMapAndTargetUI(fallbackLat, fallbackLng);
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 3000 }
+    );
+}
+
+function stopTracking() {
+    if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+    if (syncStatus) syncStatus.innerText = 'OFFLINE';
+}
+
+async function updateServerStatus(status) {
+    try {
+        await fetch(safeAbsoluteUrl(ajaxUpdateStatusUrl), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+    } catch (e) {}
+}
+
+async function handleOfferAction(requestId, action, button) {
+    const originalHtml = button ? button.innerHTML : '';
+
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('request_id', String(requestId));
+        formData.append('action', action);
+
+        const response = await fetch(safeAbsoluteUrl(respondUrl), {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            throw new Error('Server did not return JSON for this async action.');
+        }
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Unable to process request.');
+        }
+
+        if (state.requestModal) {
+            state.requestModal.hide();
+        }
+
+        showToast(result.message || 'Request updated successfully.', 'success');
+        await refreshSnapshot();
+
+        if (action === 'accepted') {
+            window.location.reload();
+        }
+    } catch (err) {
+        showToast(err.message || 'Unable to process request.', 'danger');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+function bindOfferForms() {
+    document.querySelectorAll('.offer-action-form').forEach(form => {
+        if (form.dataset.bound === '1') return;
+        form.dataset.bound = '1';
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const submitter = e.submitter || form.querySelector('button[type="submit"]');
+            const requestId = form.querySelector('input[name="request_id"]')?.value;
+            const action = submitter?.value || 'accepted';
+            if (!requestId) return;
+            await handleOfferAction(requestId, action, submitter);
+        });
+    });
+}
+
+function updateSummaryUI(data) {
+    if (!data) return;
+
+    const summaries = data.summaries || {};
+
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    setText('pending-offers-count', data.pending_offers_count ?? 0);
+    setText('quick-ongoing-count', summaries.ongoing ?? 0);
+    setText('quick-delivered-count', summaries.delivered ?? 0);
+    setText('quick-cancelled-count', summaries.cancelled ?? 0);
+    setText('quick-paid-overall', '₦' + Number(summaries.paid_overall ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+    setText('top-ongoing-count', summaries.ongoing ?? 0);
+    setText('top-delivered-count', summaries.delivered ?? 0);
+    setText('top-outstanding-amount', Number(summaries.outstanding ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+    setText('matched-count', summaries.matched ?? 0);
+    setText('accepted-count', summaries.accepted ?? 0);
+    setText('pickup-count', summaries.pickup ?? 0);
+    setText('package-received-count', summaries.package_received ?? 0);
+    setText('in-transit-count', summaries.in_transit ?? 0);
+
+    setText('paid-today-value', '₦' + Number(summaries.paid_today ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setText('paid-week-value', '₦' + Number(summaries.paid_week ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setText('paid-month-value', '₦' + Number(summaries.paid_month ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setText('outstanding-value', '₦' + Number(summaries.outstanding ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+    const indicator = document.getElementById('new-request-indicator');
+    const pendingCount = data.pending_offers_count ?? 0;
+    if (indicator) {
+        indicator.textContent = pendingCount;
+        indicator.style.display = pendingCount > 0 ? 'inline-flex' : 'none';
+    }
+
+    const offersWrap = document.getElementById('offers-list-wrap');
+    if (offersWrap && typeof data.offers_html === 'string') {
+        offersWrap.innerHTML = data.offers_html;
+        bindOfferForms();
+    }
+
+    if (data.active_booking && bookingId && data.active_booking.id === Number(bookingId)) {
+        currentStatus = data.active_booking.status || currentStatus;
+        senderHandoverConfirmed = !!data.active_booking.sender_handover_confirmed;
+
+        const activeBadge = document.getElementById('active-booking-status-badge');
+        if (activeBadge && currentStatus) {
+            activeBadge.textContent = String(currentStatus).replaceAll('_', ' ').toUpperCase();
+        }
+
+        const handoverNotice = document.getElementById('sender_handover_notice');
+        if (handoverNotice && currentStatus === 'arrived_at_pickup') {
+            handoverNotice.innerHTML = senderHandoverConfirmed
+                ? '<i class="fa-solid fa-circle-check text-success me-2"></i>Sender has confirmed package handover. You can now mark package received.'
+                : '<i class="fa-solid fa-handshake-angle text-warning me-2"></i>Waiting for sender confirmation before you can select <strong>Received Package</strong>.';
+        }
+
+        updateWorkflowButton(state.latestRouteDistanceMeters);
+    }
+}
+
+function showNewRequestPopup(req) {
+    if (!req) return;
+
+    const modalBody = document.getElementById('new-request-modal-body');
+    const acceptInput = document.getElementById('modal-request-id-accept');
+    const rejectInput = document.getElementById('modal-request-id-reject');
+
+    if (modalBody) {
+        modalBody.innerHTML = `
+            <div class="mb-2"><strong>Booking:</strong> #${escapeHtml(req.booking_code)}</div>
+            <div class="mb-2"><strong>Sender:</strong> ${escapeHtml(req.sender_name)}</div>
+            <div class="mb-2"><strong>Item:</strong> ${escapeHtml(req.item_name)}</div>
+            <div class="mb-2"><strong>Pickup:</strong> ${escapeHtml(req.pickup_address)}</div>
+            <div class="mb-3"><strong>Delivery:</strong> ${escapeHtml(req.delivery_address)}</div>
+            <div class="price-tag">₦${Number(req.proposed_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        `;
+    }
+
+    if (acceptInput) acceptInput.value = req.id;
+    if (rejectInput) rejectInput.value = req.id;
+
+    const modalEl = document.getElementById('newRequestModal');
+    if (modalEl) {
+        state.requestModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        state.requestModal.show();
+    }
+}
+
+async function refreshSnapshot() {
+    if (!snapshotUrl) return;
+
+    try {
+        const response = await fetch(safeAbsoluteUrl(snapshotUrl), {
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin'
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            console.warn('Snapshot returned non-JSON response.');
+            return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) return;
+
+        const incomingIds = Array.isArray(data.pending_offer_ids) ? data.pending_offer_ids.map(Number) : [];
+        const knownIds = Array.isArray(state.knownPendingIds) ? state.knownPendingIds.map(Number) : [];
+        const newIds = incomingIds.filter(id => !knownIds.includes(id));
+
+        updateSummaryUI(data);
+
+        if (newIds.length > 0) {
+            playNewRequestSound();
+            if (data.popup_request) {
+                showNewRequestPopup(data.popup_request);
+                showBrowserNotification(
+                    'New delivery request',
+                    `Booking #${data.popup_request.booking_code} · ₦${Number(data.popup_request.proposed_cost || 0).toLocaleString()}`
+                );
+            }
+        }
+
+        state.knownPendingIds = incomingIds;
+    } catch (err) {
+        console.error('Snapshot refresh failed:', err);
+    }
+}
+
+function initAsyncRequestUpdates() {
+    bindOfferForms();
+    requestNotificationPermission();
+
+    if (state.snapshotInterval) {
+        clearInterval(state.snapshotInterval);
+    }
+
+    state.snapshotInterval = setInterval(() => refreshSnapshot(), 5000);
+}
+
+function initChat() {
+    if (!chatEnabled) return;
+
+    const openChatBtn = document.getElementById('open-chat-btn');
+    const closeChatBtn = document.getElementById('close-chat-btn');
+    const chatPanel = document.getElementById('chat-panel');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatForm = document.getElementById('chat-form');
+    const chatBookingId = document.getElementById('chat-booking-id')?.value;
+    const chatReceiverId = document.getElementById('chat-receiver-id')?.value;
+    const chatMessageInput = document.getElementById('chat-message-input');
+
+    function buildStatusText(msg) {
+        if (!msg.is_me) return '';
+        if (msg.read_at_formatted) return `Read ${escapeHtml(msg.read_at_formatted)}`;
+        if (msg.delivered_at_formatted) return `Delivered ${escapeHtml(msg.delivered_at_formatted)}`;
+        return 'Sent';
+    }
+
+    function renderChatMessages(messages) {
+        if (!chatMessages) return;
+
+        if (!messages || !messages.length) {
+            chatMessages.innerHTML = '<div class="text-soft small text-center py-4">No messages yet.</div>';
+            return;
+        }
+
+        chatMessages.innerHTML = messages.map(msg => `
+            <div class="chat-bubble ${msg.is_me ? 'me' : 'them'}">
+                ${escapeHtml(msg.message)}
+                <span class="chat-time">${escapeHtml(msg.created_at_formatted || msg.created_at || '')}</span>
+                ${msg.is_me ? `<span class="chat-status">${buildStatusText(msg)}</span>` : ''}
+            </div>
+        `).join('');
+
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function fetchChatMessages() {
+        if (!chatBookingId || !chatFetchUrl) return;
+
+        try {
+            const response = await fetch(
+                `${safeAbsoluteUrl(chatFetchUrl)}?booking_id=${encodeURIComponent(chatBookingId)}`,
+                { headers: { 'Accept': 'application/json' } }
+            );
+
+            const result = await response.json();
+            if (response.ok && result.success) {
+                renderChatMessages(result.messages || []);
+            }
+        } catch (err) {
+            console.error('Chat fetch error:', err);
+        }
+    }
+
+    openChatBtn?.addEventListener('click', function () {
+        if (!chatPanel) return;
+        chatPanel.style.display = 'block';
+        fetchChatMessages();
+
+        if (!state.chatInterval) {
+            state.chatInterval = setInterval(fetchChatMessages, 3000);
+        }
+    });
+
+    closeChatBtn?.addEventListener('click', function () {
+        if (!chatPanel) return;
+        chatPanel.style.display = 'none';
+
+        if (state.chatInterval) {
+            clearInterval(state.chatInterval);
+            state.chatInterval = null;
+        }
+    });
+
+    chatMessageInput?.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            chatForm?.requestSubmit();
+        }
+    });
+
+    chatForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        const message = (chatMessageInput?.value || '').trim();
+        if (!message) return;
+
+        const submitBtn = chatForm.querySelector('button[type="submit"]');
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
+
+        try {
+            const response = await fetch(safeAbsoluteUrl(chatSendUrl), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    booking_id: chatBookingId,
+                    receiver_user_id: chatReceiverId,
+                    message: message
+                })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to send message.');
+            }
+
+            chatMessageInput.value = '';
+            await fetchChatMessages();
+        } catch (err) {
+            showToast(err.message || 'Unable to send message.', 'danger');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHtml;
+        }
+    });
+}
+
+function initPage() {
+    initMap();
+    updateMapAndTargetUI(initialRider.lat, initialRider.lng);
+    initAsyncRequestUpdates();
+    initChat();
+
+    const acceptModalForm = document.getElementById('new-request-accept-form');
+    const rejectModalForm = document.getElementById('new-request-reject-form');
+
+    acceptModalForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const requestId = document.getElementById('modal-request-id-accept')?.value;
+        const btn = acceptModalForm.querySelector('button[type="submit"]');
+        if (!requestId || !btn) return;
+        await handleOfferAction(requestId, 'accepted', btn);
+    });
+
+    rejectModalForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const requestId = document.getElementById('modal-request-id-reject')?.value;
+        const btn = rejectModalForm.querySelector('button[type="submit"]');
+        if (!requestId || !btn) return;
+        await handleOfferAction(requestId, 'rejected', btn);
+    });
+
+    if (swipeBtn && swipeBtn.classList.contains('active')) {
+        startTracking();
+    }
+
+    const indicator = document.getElementById('new-request-indicator');
+    if (indicator) {
+        indicator.style.display = Number(indicator.textContent || 0) > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+if (btnWorkflow) {
+    btnWorkflow.addEventListener('click', runWorkflowAction);
+}
+
+initPage();
+
+window.addEventListener('resize', function () {
+    if (state.map) {
+        state.map.invalidateSize();
+    }
+});
+</script>
+</body>
+</html>

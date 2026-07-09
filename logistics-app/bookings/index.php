@@ -564,20 +564,20 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 </div>
 
+                <div id="route_map_card" style="display:none;">
+                    <div class="cardx p-3 mb-4">
+                        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+                            <h3 class="h5 mb-0">Route preview</h3>
+                            <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
+                            <span class="small text-soft" id="route_summary"></span>
+                        </div>
+                        <div id="booking_map" class="map-wrap"></div>
+                    </div>
+                </div>
+
                 <div class="wizard-pane" data-step="2">
                     <h2 class="h4 fw-bold mb-1">What are you sending?</h2>
                     <p class="text-soft mb-4">Recipient and item details, plus a quick look at the route.</p>
-
-                    <div class="col-12" id="route_map_card" style="display:none;">
-                        <div class="cardx p-3 mb-4">
-                            <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-                                <h3 class="h5 mb-0">Route preview</h3>
-                                <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
-                                <span class="small text-soft" id="route_summary"></span>
-                            </div>
-                            <div id="booking_map" class="map-wrap"></div>
-                        </div>
-                    </div>
 
                     <div class="row g-4">
                         <div class="col-md-6">

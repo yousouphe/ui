@@ -106,7 +106,7 @@ function current_user(): ?array {
 }
 
 function require_auth(): void {
-    if (!is_logged_in()) redirect_to('login.php');
+    if (!is_logged_in()) redirect_to('login');
 }
 
 function require_role(array $roles): void {
@@ -121,8 +121,8 @@ function require_role(array $roles): void {
 function require_guest(): void {
     if (is_logged_in()) {
         $user = current_user();
-        if (($user['role'] ?? '') === 'rider') redirect_to('rider/index.php');
-        redirect_to('bookings/index.php');
+        if (($user['role'] ?? '') === 'rider') redirect_to('rider/');
+        redirect_to('bookings/');
     }
 }
 

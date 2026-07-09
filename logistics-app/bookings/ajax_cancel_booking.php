@@ -19,7 +19,7 @@ if ($bookingId <= 0 || $reason === '') {
 }
 
 $stmt = $pdo->prepare("
-    SELECT id, sender_user_id, booking_status, payment_status
+    SELECT id, sender_user_id, booking_status, payment_status, sender_handover_confirmed
     FROM bookings
     WHERE id = ? AND sender_user_id = ?
     LIMIT 1
@@ -39,7 +39,13 @@ if (($booking['payment_status'] ?? 'unpaid') === 'paid') {
     exit;
 }
 
-if (!in_array(($booking['booking_status'] ?? ''), ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit'], true)) {
+if ((int)($booking['sender_handover_confirmed'] ?? 0) === 1) {
+    http_response_code(422);
+    echo json_encode(['success' => false, 'message' => 'This booking cannot be cancelled once the item has been handed to the rider.']);
+    exit;
+}
+
+if (!in_array(($booking['booking_status'] ?? ''), ['matched', 'accepted', 'arrived_at_pickup'], true)) {
     http_response_code(422);
     echo json_encode(['success' => false, 'message' => 'This booking cannot be cancelled at its current stage.']);
     exit;

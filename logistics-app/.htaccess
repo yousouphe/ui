@@ -8,3 +8,11 @@ RewriteCond %{HTTP_HOST} ^nasfat\.entrepoints\.ng$ [OR]
 RewriteCond %{HTTP_HOST} ^www\.nasfat\.entrepoints\.ng$
 RewriteRule ^/?$ "https\:\/\/nasfat\.entrepoints\.ng\/nasfat\/app\/register" [R=301,L]
 
+# Serve extensionless URLs (e.g. /login, /dashboard) from their matching .php
+# file without changing the visible URL. Internal rewrite only - no external
+# redirect - so this is safe for POST requests and JS fetch() calls too.
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteRule ^(.*)$ $1.php [L]
+

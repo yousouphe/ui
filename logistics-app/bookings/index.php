@@ -355,7 +355,17 @@ $canPay = $selectedBooking && $selectedBooking['booking_status'] === 'delivered'
 
 $canCancel = $selectedBooking
     && !empty($selectedBooking['selected_rider_user_id'])
-    && in_array($selectedBooking['booking_status'], ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit'], true)
+    && in_array($selectedBooking['booking_status'], ['matched', 'accepted', 'arrived_at_pickup'], true)
+    && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 0
+    && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
+
+$canEditDetails = $selectedBooking
+    && !in_array($selectedBooking['booking_status'], ['delivered', 'cancelled'], true)
+    && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 0
+    && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
+
+$canChangeDelivery = $selectedBooking
+    && !in_array($selectedBooking['booking_status'], ['delivered', 'cancelled'], true)
     && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
 
 $canRebook = $selectedBooking
@@ -392,77 +402,78 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:100vh;color:#eef4ff}
-        .navx{background:rgba(8,17,33,.88);border-bottom:1px solid rgba(255,255,255,.08)}
-        .cardx{background:rgba(17,27,51,.92);border:1px solid rgba(255,255,255,.08);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
-        .text-soft{color:#9fb0d6}
-        .form-control,.form-select{background:#0b1430;color:#eef4ff;border-color:rgba(255,255,255,.1)}
-        .form-control:focus,.form-select:focus{background:#0b1430;color:#eef4ff;border-color:#6ea8fe;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
+        body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:100vh;color:#0f2c44}
+        .navx{background:rgba(255,255,255,.85);border-bottom:1px solid rgba(15,42,68,.10)}
+        .cardx{background:rgba(255,255,255,.92);border:1px solid rgba(15,42,68,.10);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+        .text-soft{color:#5c7a91}
+        .form-control,.form-select{background:#ffffff;color:#0f2c44;border-color:rgba(15,42,68,.12)}
+        .form-control:focus,.form-select:focus{background:#ffffff;color:#0f2c44;border-color:#38bdf8;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
         .leaflet-container{height:100%;width:100%}
-        .map-wrap{height:380px;border-radius:1rem;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
+        .map-wrap{height:380px;border-radius:1rem;overflow:hidden;border:1px solid rgba(15,42,68,.10)}
         #booking_map{height:380px !important;width:100% !important}
         #detail_map{height:480px;border-radius:1.25rem;border:2px solid rgba(110,168,254,.2)}
         .detail-map-small #detail_map{height:280px}
-        .rider-card{background:#0b1430;border:1px solid rgba(255,255,255,.08);border-radius:1rem}
+        #detail_map_wrap.collapsed #detail_map{display:none}
+        .rider-card{background:#ffffff;border:1px solid rgba(15,42,68,.10);border-radius:1rem}
         .order-card{cursor:pointer;transition:.2s ease}
         .order-card:hover{transform:translateY(-2px);border-color:rgba(110,168,254,.4)}
         .order-card.active{border-color:#38bdf8;box-shadow:0 0 0 1px rgba(56,189,248,.35)}
-        .badge-soft{background:rgba(56,189,248,.12);color:#9ddcff;border:1px solid rgba(56,189,248,.3)}
-        #routing-directions{background:rgba(11,20,48,.95);border:1px solid rgba(56,189,248,.3);border-radius:1rem;color:#fff;display:none}
-        .routing-instructions-list{background:transparent!important;color:#fff!important;border:none!important}
-        .leaflet-routing-alt{background:transparent!important;color:#fff!important;max-height:260px!important;overflow-y:auto}
-        .leaflet-routing-alt table{color:#fff!important;width:100%}
-        .leaflet-routing-alt tr:hover{background:rgba(255,255,255,.05)}
-        .leaflet-routing-container{width:100%!important;background:transparent!important;border:none!important;box-shadow:none!important}
-        .info-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.9rem}
+        .badge-soft{background:rgba(56,189,248,.12);color:#0369a1;border:1px solid rgba(56,189,248,.3)}
+        .info-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,42,68,.06);border:1px solid rgba(15,42,68,.10);font-size:.9rem}
         .sticky-chat-btn{position:fixed;right:20px;bottom:20px;z-index:99999;width:60px;height:60px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;box-shadow:0 12px 24px rgba(0,0,0,.35);font-size:1.25rem;display:flex;align-items:center;justify-content:center}
-        .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(8,17,33,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.10);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;overflow:hidden}
-        .chat-header{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;justify-content:space-between;align-items:center}
-        .chat-messages{height:360px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-        .chat-bubble{max-width:80%;padding:10px 12px;border-radius:14px;font-size:.92rem;line-height:1.35;word-wrap:break-word}
-        .chat-bubble.me{align-self:flex-end;background:rgba(56,189,248,.18);border:1px solid rgba(56,189,248,.30);color:#eef4ff}
-        .chat-bubble.them{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10);color:#eef4ff}
-        .chat-time{display:block;font-size:.72rem;color:#9fb0d6;margin-top:6px}
-        .chat-status{display:block;font-size:.70rem;color:#7dd3fc;margin-top:4px;text-align:right}
-        .chat-footer{padding:12px;border-top:1px solid rgba(255,255,255,.08)}
-        .chat-footer textarea{resize:none;min-height:54px;max-height:100px}
-        .chat-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
-        .chat-action-row>*{min-width:105px}
+        .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(255,255,255,.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;overflow:hidden}
+        .chat-header{padding:14px 16px;border-bottom:1px solid rgba(15,42,68,.10);display:flex;justify-content:space-between;align-items:center}
+        .chat-header-info{display:flex;align-items:center;gap:10px}
+        .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
+        .chat-header-actions{display:flex;align-items:center;gap:4px}
+        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s ease;text-decoration:none}
+        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44}
+        .chat-icon-btn.recording-live{background:#ef4444;border-color:#ef4444;color:#fff}
+        .chat-messages{height:360px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:2px;background:rgba(0,0,0,.12)}
+        .chat-bubble{max-width:78%;padding:8px 12px;border-radius:16px;font-size:.9rem;line-height:1.35;word-wrap:break-word;margin:3px 0;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+        .chat-bubble.me{align-self:flex-end;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#062334;border-bottom-right-radius:4px}
+        .chat-bubble.them{align-self:flex-start;background:rgba(15,42,68,.10);color:#0f2c44;border-bottom-left-radius:4px}
+        .chat-time{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:4px}
+        .chat-status{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:2px;text-align:right}
+        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10)}
+        .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
+        .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
+        .chat-send-btn{width:38px;height:38px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
-        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(8,17,33,.88);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
+        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.85);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
         .call-panel .call-actions{display:flex;gap:8px;margin-top:12px}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
-        .cancel-reason-box{margin-top:12px;padding:12px;border-radius:12px;background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.25);color:#ffd5d5}
+        .cancel-reason-box{margin-top:12px;padding:12px;border-radius:12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#991b1b}
         .action-stack{display:flex;flex-direction:column;gap:10px}
         .address-search{position:relative}
-        .address-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:1500;background:#0b1430;border:1px solid rgba(255,255,255,.14);border-radius:.75rem;box-shadow:0 12px 30px rgba(0,0,0,.35);max-height:260px;overflow-y:auto;display:none}
+        .address-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:1500;background:#ffffff;border:1px solid rgba(15,42,68,.16);border-radius:.75rem;box-shadow:0 12px 30px rgba(0,0,0,.35);max-height:260px;overflow-y:auto;display:none}
         .address-suggestions.show{display:block}
-        .address-suggestion-item{padding:.6rem .9rem;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:.6rem;align-items:flex-start}
+        .address-suggestion-item{padding:.6rem .9rem;cursor:pointer;border-bottom:1px solid rgba(15,42,68,.08);display:flex;gap:.6rem;align-items:flex-start}
         .address-suggestion-item:last-child{border-bottom:none}
         .address-suggestion-item:hover,.address-suggestion-item.active{background:rgba(56,189,248,.14)}
-        .address-suggestion-item .main-text{font-weight:600;color:#eef4ff;font-size:.9rem}
-        .address-suggestion-item .sub-text{color:#9fb0d6;font-size:.78rem}
+        .address-suggestion-item .main-text{font-weight:600;color:#0f2c44;font-size:.9rem}
+        .address-suggestion-item .sub-text{color:#5c7a91;font-size:.78rem}
         .address-suggestion-item i{color:#38bdf8;margin-top:3px}
-        .address-suggestion-empty{padding:.75rem .9rem;color:#9fb0d6;font-size:.85rem}
+        .address-suggestion-empty{padding:.75rem .9rem;color:#5c7a91;font-size:.85rem}
         .location-confirmed{border-color:#22c55e!important}
         .wizard-steps{display:flex;align-items:center;gap:8px;margin-bottom:1.75rem}
-        .wizard-step-dot{display:flex;align-items:center;gap:8px;color:#9fb0d6;font-size:.85rem}
-        .wizard-step-dot .num{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-weight:700;color:#9fb0d6}
+        .wizard-step-dot{display:flex;align-items:center;gap:8px;color:#5c7a91;font-size:.85rem}
+        .wizard-step-dot .num{width:28px;height:28px;border-radius:50%;background:rgba(15,42,68,.08);border:1px solid rgba(15,42,68,.14);display:flex;align-items:center;justify-content:center;font-weight:700;color:#5c7a91}
         .wizard-step-dot.current .num{background:#38bdf8;border-color:#38bdf8;color:#09101d}
-        .wizard-step-dot.current{color:#eef4ff}
+        .wizard-step-dot.current{color:#0f2c44}
         .wizard-step-dot.done .num{background:rgba(34,197,94,.2);border-color:#22c55e;color:#22c55e}
-        .wizard-step-sep{flex:1;height:1px;background:rgba(255,255,255,.1);min-width:16px;max-width:60px}
+        .wizard-step-sep{flex:1;height:1px;background:rgba(15,42,68,.12);min-width:16px;max-width:60px}
         .wizard-pane{display:none}
         .wizard-pane.active{display:block}
-        .rider-float-bar{position:fixed;left:0;right:0;bottom:0;z-index:1040;background:rgba(9,16,33,.97);backdrop-filter:blur(10px);border-top:1px solid rgba(56,189,248,.25);box-shadow:0 -12px 30px rgba(0,0,0,.35)}
-        .rider-float-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(255,255,255,.08)}
+        .rider-float-bar{position:fixed;left:0;right:0;bottom:0;z-index:1040;background:rgba(255,255,255,.97);backdrop-filter:blur(10px);border-top:1px solid rgba(56,189,248,.25);box-shadow:0 -12px 30px rgba(0,0,0,.35)}
+        .rider-float-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(15,42,68,.10)}
         .rider-float-list{max-height:180px;overflow-y:auto;padding:.4rem .75rem}
-        .rider-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:.55rem .5rem;border-bottom:1px solid rgba(255,255,255,.06)}
+        .rider-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:.55rem .5rem;border-bottom:1px solid rgba(15,42,68,.08)}
         .rider-row:last-child{border-bottom:none}
         .rider-row-name{font-weight:600;font-size:.9rem}
         .rider-row-actions{display:flex;align-items:center;gap:6px}
@@ -480,13 +491,13 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark navx">
+<nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('dashboard.php')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
-            <a class="nav-link" href="<?= e(url_path('bookings/index.php?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
-            <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
+            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
+            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
         </div>
     </div>
 </nav>
@@ -535,7 +546,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                         <div class="address-search">
                             <div class="input-group">
                                 <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                <button class="btn btn-outline-light" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                <button class="btn btn-outline-secondary" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
                             <div class="address-suggestions" id="pickup_suggestions"></div>
                         </div>
@@ -552,7 +563,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                         <div class="address-search">
                             <div class="input-group">
                                 <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                <button class="btn btn-outline-light" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                <button class="btn btn-outline-secondary" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
                             <div class="address-suggestions" id="delivery_suggestions"></div>
                         </div>
@@ -625,7 +636,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
 
                     <div class="d-flex justify-content-between mt-4">
-                        <button class="btn btn-outline-light" type="button" data-wizard-back="1"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
+                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="1"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
                         <button class="btn btn-primary" type="button" data-wizard-next="3">Next<i class="fa-solid fa-arrow-right ms-2"></i></button>
                     </div>
                 </div>
@@ -639,9 +650,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
 
                     <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mt-4">
-                        <button class="btn btn-outline-light" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
+                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-outline-light flex-fill" type="submit" name="save_draft">Save as Draft</button>
+                            <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft">Save as Draft</button>
                             <button class="btn btn-primary flex-fill" type="submit" name="submit_booking">Send Package</button>
                         </div>
                     </div>
@@ -651,6 +662,34 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php endif; ?>
 
         <?php if (!$showWizard && $selectedBooking): ?>
+            <?php if ($needsRider): ?>
+                <div class="cardx p-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                        <div>
+                            <h2 class="h4 fw-bold mb-1">Sending from <?= e($selectedBooking['pickup_address']) ?></h2>
+                            <p class="text-soft mb-0">to <?= e($selectedBooking['delivery_address']) ?></p>
+                        </div>
+                        <span class="text-soft small"><?= e($selectedBooking['booking_code']) ?></span>
+                    </div>
+                    <div class="mt-3 d-flex flex-wrap gap-2 action-stack-inline">
+                        <?php if ($canEditDetails): ?>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
+                                <i class="fa-solid fa-pen me-2"></i>Edit Details
+                            </button>
+                        <?php endif; ?>
+                        <?php if ($canChangeDelivery): ?>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
+                                <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
+                            </button>
+                        <?php endif; ?>
+                        <?php if ($canCancel): ?>
+                            <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
+                                <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php else: ?>
             <div class="cardx p-4 mb-4">
                 <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
                     <div>
@@ -669,22 +708,36 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="row g-4 mb-4">
                 <div class="col-lg-8">
                     <div class="cardx p-4">
-                        <div id="detail_map"></div>
+                        <div class="d-flex justify-content-end mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="detail-map-toggle-btn">
+                                <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label">Show Map</span>
+                            </button>
+                        </div>
+                        <div id="detail_map_wrap" class="collapsed">
+                            <div id="detail_map"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="col-lg-4">
                     <div class="cardx p-4 h-100">
                         <h3 class="h5 mb-3">Booking Info</h3>
-                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
-                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
-                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
-                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
-                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
-                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+                        <div class="small text-soft mb-2"><strong>Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
+                        <div class="small text-soft mb-2"><strong>Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong>Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong>Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                        <div class="small text-soft mb-2"><strong>Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
+                        <div class="small text-soft mb-2"><strong>Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+
+                        <?php if ($selectedPickupLat !== '' && $selectedDeliveryLat !== ''): ?>
+                            <a class="btn btn-sm btn-outline-info w-100 mb-2" target="_blank" rel="noopener"
+                               href="https://www.google.com/maps/dir/?api=1&origin=<?= e((string) $selectedPickupLat) ?>,<?= e((string) $selectedPickupLng) ?>&destination=<?= e((string) $selectedDeliveryLat) ?>,<?= e((string) $selectedDeliveryLng) ?>&travelmode=driving">
+                                <i class="fa-solid fa-diamond-turn-right me-2"></i>View Route in Google Maps
+                            </a>
+                        <?php endif; ?>
 
                         <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
                             <div class="mt-3">
-                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
+                                <div class="small fw-bold mb-2">Proof of Delivery</div>
                                 <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
                             </div>
                         <?php endif; ?>
@@ -693,6 +746,18 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                             <?php if ($canPay): ?>
                                 <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
                                     Pay &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($canEditDetails): ?>
+                                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
+                                    <i class="fa-solid fa-pen me-2"></i>Edit Details
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($canChangeDelivery): ?>
+                                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
+                                    <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
                                 </button>
                             <?php endif; ?>
 
@@ -728,8 +793,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 </div>
             </div>
-
-            <div id="routing-directions" class="p-3 mb-4"></div>
+            <?php endif; ?>
 
             <?php if ($needsRider): ?>
                 <div class="rider-float-bar" id="rider-float-bar">
@@ -755,10 +819,10 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php if ($selectedBooking): ?>
         <div class="modal fade" id="cancelBookingModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content bg-dark text-white border-secondary">
-                    <div class="modal-header border-secondary">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <div class="modal-header border-bottom">
                         <h5 class="modal-title">Cancel Order</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-soft">Are you sure you want to cancel this order? Please provide a reason.</p>
@@ -767,8 +831,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                         <textarea id="cancel-reason" class="form-control" rows="4" placeholder="State why you want to cancel this order"></textarea>
                         <div class="small text-danger mt-2 d-none" id="cancel-reason-error">Cancellation reason is required.</div>
                     </div>
-                    <div class="modal-footer border-secondary">
-                        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Close</button>
+                    <div class="modal-footer border-top">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
                         <button type="button" class="btn btn-danger" id="confirm-cancel-booking-btn">Confirm Cancel</button>
                     </div>
                 </div>
@@ -777,22 +841,114 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
         <div class="modal fade" id="issueItemModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content bg-dark text-white border-secondary">
-                    <div class="modal-header border-secondary">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <div class="modal-header border-bottom">
                         <h5 class="modal-title">Issue Item To Rider</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="mb-0 text-soft">Confirm that you have physically handed over the item to the rider.</p>
                         <input type="hidden" id="issue-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
                     </div>
-                    <div class="modal-footer border-secondary">
-                        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">No</button>
+                    <div class="modal-footer border-top">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">No</button>
                         <button type="button" class="btn btn-info fw-bold" id="confirm-issue-item-btn">Yes, Issue Item</button>
                     </div>
                 </div>
             </div>
         </div>
+
+        <?php if ($canEditDetails): ?>
+        <div class="modal fade" id="editDetailsModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <div class="modal-header border-bottom">
+                        <h5 class="modal-title">Edit Booking Details</h5>
+                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form id="edit-details-form">
+                        <div class="modal-body">
+                            <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Recipient name</label>
+                                    <input class="form-control" name="recipient_name" value="<?= e($selectedBooking['recipient_name']) ?>" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Recipient phone</label>
+                                    <input class="form-control" name="recipient_phone" value="<?= e($selectedBooking['recipient_phone']) ?>" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Item name</label>
+                                    <input class="form-control" name="item_name" value="<?= e($selectedBooking['item_name']) ?>" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Item category</label>
+                                    <select class="form-select" name="item_category" required>
+                                        <?php foreach (['document' => 'Document', 'food' => 'Food', 'parcel' => 'Parcel', 'fragile' => 'Fragile'] as $val => $label): ?>
+                                            <option value="<?= $val ?>" <?= $selectedBooking['item_category'] === $val ? 'selected' : '' ?>><?= $label ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Item description</label>
+                                    <textarea class="form-control" name="item_description" rows="3"><?= e((string) ($selectedBooking['item_description'] ?? '')) ?></textarea>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Estimated value</label>
+                                    <input class="form-control" name="estimated_value" value="<?= e((string) ($selectedBooking['estimated_value'] ?? '')) ?>">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Replace photo (optional)</label>
+                                    <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Special instructions</label>
+                                    <textarea class="form-control" name="special_instructions" rows="2"><?= e((string) ($selectedBooking['special_instructions'] ?? '')) ?></textarea>
+                                </div>
+                            </div>
+                            <div class="small text-danger mt-2 d-none" id="edit-details-error"></div>
+                        </div>
+                        <div class="modal-footer border-top">
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary fw-bold">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($canChangeDelivery): ?>
+        <div class="modal fade" id="changeDeliveryModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <div class="modal-header border-bottom">
+                        <h5 class="modal-title">Change Delivery Address</h5>
+                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form id="change-delivery-form">
+                        <div class="modal-body">
+                            <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
+                            <p class="text-soft small">If a rider has already agreed a price, it will be recalculated based on the new distance.</p>
+                            <label class="form-label">New delivery address</label>
+                            <div class="address-search">
+                                <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="Search address, estate, market, landmark...">
+                                <div class="address-suggestions" id="edit_delivery_suggestions"></div>
+                            </div>
+                            <input type="hidden" id="edit_delivery_latitude" name="delivery_latitude" value="<?= e((string) $selectedDeliveryLat) ?>">
+                            <input type="hidden" id="edit_delivery_longitude" name="delivery_longitude" value="<?= e((string) $selectedDeliveryLng) ?>">
+                            <div class="small text-danger mt-2 d-none" id="change-delivery-error"></div>
+                        </div>
+                        <div class="modal-footer border-top">
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary fw-bold">Update Address</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php endif; ?>
 
         <?php if ($canChat): ?>
@@ -802,36 +958,42 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
         <div class="chat-panel" id="chat-panel">
             <div class="chat-header">
-                <div>
-                    <div class="fw-bold">Chat with Rider</div>
-                    <div class="small text-soft"><?= e((string)($selectedBooking['rider_name'] ?? 'Rider')) ?></div>
+                <div class="chat-header-info">
+                    <div class="chat-avatar"><i class="fa-solid fa-motorcycle"></i></div>
+                    <div>
+                        <div class="fw-bold"><?= e((string)($selectedBooking['rider_name'] ?? 'Rider')) ?></div>
+                        <div class="small text-soft">Your rider</div>
+                    </div>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-light" id="close-chat-btn">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
+                <div class="chat-header-actions">
+                    <?php if (!empty($selectedBooking['rider_phone'])): ?>
+                    <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $selectedBooking['rider_phone'])) ?>" title="Call rider's phone">
+                        <i class="fa-solid fa-phone"></i>
+                    </a>
+                    <?php endif; ?>
+                    <button type="button" class="chat-icon-btn" id="chat-call-btn" title="Internet call">
+                        <i class="fa-solid fa-phone-volume"></i>
+                    </button>
+                    <button type="button" class="chat-icon-btn" id="close-chat-btn" title="Close chat">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
             </div>
 
             <div class="chat-messages" id="chat-messages"></div>
 
-            <div class="chat-footer">
-                <form id="chat-form">
-                    <input type="hidden" id="chat-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
-                    <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
-                    <div class="chat-action-row">
-                        <?php if (!empty($selectedBooking['rider_phone'])): ?>
-                        <a class="btn btn-outline-info flex-fill" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $selectedBooking['rider_phone'])) ?>" title="Call the rider's phone number directly">
-                            <i class="fa-solid fa-phone me-2"></i>Call Rider
-                        </a>
-                        <?php endif; ?>
-                        <button type="button" class="btn btn-outline-success flex-fill" id="chat-call-btn"><i class="fa-solid fa-phone-volume me-2"></i>Internet Call</button>
-                        <button type="button" class="btn btn-outline-warning flex-fill" id="chat-voice-btn"><i class="fa-solid fa-microphone me-2"></i><span class="voice-btn-label">Record Voice</span></button>
-                    </div>
-                    <textarea id="chat-message-input" class="form-control mb-2" placeholder="Type your message..."></textarea>
-                    <button type="submit" class="btn btn-info w-100 fw-bold">
-                        <i class="fa-solid fa-paper-plane me-2"></i>Send
-                    </button>
-                </form>
-            </div>
+            <form id="chat-form" class="chat-input-row">
+                <input type="hidden" id="chat-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
+                <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
+                <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="Record voice note">
+                    <i class="fa-solid fa-microphone"></i>
+                    <span class="voice-btn-label visually-hidden">Record Voice</span>
+                </button>
+                <textarea id="chat-message-input" class="chat-text-input" placeholder="Type a message..." rows="1"></textarea>
+                <button type="submit" class="chat-send-btn" title="Send">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </form>
         </div>
         <div class="call-panel" id="call-panel">
             <div class="fw-bold mb-1">Internet Call</div>
@@ -848,12 +1010,31 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 <script src="https://js.paystack.co/v1/inline.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <script>
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
+
+async function fetchMapboxRoute(points) {
+    try {
+        const coordsParam = points.map(p => `${p[1]},${p[0]}`).join(';');
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordsParam}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const route = data.routes && data.routes[0];
+        if (!route) return null;
+        return {
+            durationSec: route.duration,
+            distanceMeters: route.distance,
+            latlngs: route.geometry.coordinates.map(c => [c[1], c[0]])
+        };
+    } catch (err) {
+        console.error('Mapbox directions request failed:', err);
+        return null;
+    }
+}
 const workspaceState = {
     bookingMap: null,
     detailMap: null,
@@ -1037,7 +1218,6 @@ function initSenderWorkspace() {
     });
 
     if (bookingMapEl) {
-        const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
         const NIGERIA_BBOX = '2.6,4.2,14.7,14.0';
 
         function ensureBookingMap() {
@@ -1124,35 +1304,31 @@ function initSenderWorkspace() {
             maybeRevealForBothPoints();
         }
 
-        function drawRoutePreview() {
+        async function drawRoutePreview() {
             const map = workspaceState.bookingMap;
             if (!map || !pickupLat?.value || !deliveryLat?.value) return;
             const from = [parseFloat(pickupLat.value), parseFloat(pickupLng.value)];
             const to = [parseFloat(deliveryLat.value), parseFloat(deliveryLng.value)];
             if (bookingRoutingControl) {
-                map.removeControl(bookingRoutingControl);
+                bookingRoutingControl.remove();
                 bookingRoutingControl = null;
             }
-            bookingRoutingControl = L.Routing.control({
-                waypoints: [L.latLng(from), L.latLng(to)],
-                router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
-                addWaypoints: false,
-                draggableWaypoints: false,
-                routeWhileDragging: false,
-                fitSelectedRoutes: true,
-                show: false,
-                createMarker: () => null,
-                lineOptions: { styles: [{ color: '#38bdf8', opacity: 0.85, weight: 5 }] }
-            }).addTo(map);
-            bookingRoutingControl.on('routesfound', function (e) {
-                const summary = e.routes[0].summary;
-                const km = (summary.totalDistance / 1000).toFixed(1);
-                const mins = Math.round(summary.totalTime / 60);
-                if (routeSummary) routeSummary.textContent = `${km} km · ~${mins} min drive`;
-            });
-            bookingRoutingControl.on('routingerror', function () {
+            if (routeSummary) routeSummary.textContent = 'Calculating route...';
+
+            const route = await fetchMapboxRoute([from, to]);
+            if (!route) {
                 if (routeSummary) routeSummary.textContent = '';
-            });
+                return;
+            }
+
+            bookingRoutingControl = L.polyline(route.latlngs, {
+                color: '#38bdf8', opacity: 0.85, weight: 5
+            }).addTo(map);
+            map.fitBounds(bookingRoutingControl.getBounds(), { padding: [40, 40] });
+
+            const km = (route.distanceMeters / 1000).toFixed(1);
+            const mins = Math.round(route.durationSec / 60);
+            if (routeSummary) routeSummary.textContent = `${km} km · ~${mins} min drive`;
         }
 
         function renderSuggestions(container, items, onPick) {
@@ -1298,6 +1474,19 @@ function initSenderWorkspace() {
         if (deliveryLat?.value && deliveryLng?.value) updateFormMarker('delivery', parseFloat(deliveryLat.value), parseFloat(deliveryLng.value));
     }
 
+    const detailMapToggleBtn = root.querySelector('#detail-map-toggle-btn');
+    const detailMapToggleLabel = root.querySelector('#detail-map-toggle-label');
+    const detailMapWrap = root.querySelector('#detail_map_wrap');
+    detailMapToggleBtn?.addEventListener('click', function () {
+        const collapsed = detailMapWrap.classList.toggle('collapsed');
+        if (detailMapToggleLabel) detailMapToggleLabel.textContent = collapsed ? 'Show Map' : 'Hide Map';
+        this.querySelector('i')?.classList.toggle('fa-chevron-down', collapsed);
+        this.querySelector('i')?.classList.toggle('fa-chevron-up', !collapsed);
+        if (!collapsed && workspaceState.detailMap) {
+            setTimeout(() => workspaceState.detailMap.invalidateSize(), 200);
+        }
+    });
+
     const detailMapEl = root.querySelector('#detail_map');
     const pickupLatVal = parseFloat(root.dataset.pickupLat || '');
     const pickupLngVal = parseFloat(root.dataset.pickupLng || '');
@@ -1326,14 +1515,9 @@ function initSenderWorkspace() {
         setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
 
         function clearRouteInternal() {
-            if (workspaceState.routingControl && workspaceState.detailMap) {
-                try { workspaceState.detailMap.removeControl(workspaceState.routingControl); } catch (e) {}
+            if (workspaceState.routingControl) {
+                try { workspaceState.routingControl.remove(); } catch (e) {}
                 workspaceState.routingControl = null;
-            }
-            const rd = root.querySelector('#routing-directions');
-            if (rd) {
-                rd.style.display = 'none';
-                rd.innerHTML = '';
             }
             const btn = root.querySelector('#clear-route-btn');
             if (btn) btn.style.display = 'none';
@@ -1427,50 +1611,36 @@ function initSenderWorkspace() {
                     listContainer.innerHTML = html || '<div class="text-center text-soft py-3">No active riders found in range.</div>';
 
                     listContainer.querySelectorAll('.rider-route-btn').forEach(btn => {
-                        btn.addEventListener('click', function () {
+                        btn.addEventListener('click', async function () {
                             const rLat = parseFloat(this.dataset.riderLat);
                             const rLng = parseFloat(this.dataset.riderLng);
                             const rId = this.dataset.riderId;
 
                             clearRouteInternal();
-                            const directionsDiv = root.querySelector('#routing-directions');
-                            if (directionsDiv) {
-                                directionsDiv.style.display = 'block';
-                                directionsDiv.innerHTML = '<div class="text-center p-3 text-info"><i class="fa-solid fa-spinner fa-spin me-2"></i>Analyzing route...</div>';
-                            }
 
                             const clearBtn = root.querySelector('#clear-route-btn');
                             if (clearBtn) clearBtn.style.display = 'inline-block';
 
-                            workspaceState.routingControl = L.Routing.control({
-                                waypoints: [
-                                    L.latLng(rLat, rLng),
-                                    L.latLng(pickupCoords[0], pickupCoords[1]),
-                                    L.latLng(deliveryCoords[0], deliveryCoords[1])
-                                ],
-                                lineOptions: { styles: [{ color: '#38bdf8', opacity: 0.7, weight: 8 }] },
-                                createMarker: () => null,
-                                addWaypoints: false,
-                                itineraryClassName: 'routing-instructions-list',
-                                show: true
-                            }).addTo(workspaceState.detailMap);
+                            const badge = root.querySelector(`#eta-${rId}`);
+                            if (badge) {
+                                badge.style.display = 'inline-block';
+                                badge.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Calculating...';
+                            }
 
-                            workspaceState.routingControl.on('routesfound', function (e) {
-                                const summary = e.routes[0].summary;
-                                const mins = Math.round(summary.totalTime / 60);
+                            const route = await fetchMapboxRoute([[rLat, rLng], pickupCoords, deliveryCoords]);
 
-                                const badge = root.querySelector(`#eta-${rId}`);
+                            if (route) {
+                                workspaceState.routingControl = L.polyline(route.latlngs, {
+                                    color: '#38bdf8', opacity: 0.8, weight: 5
+                                }).addTo(workspaceState.detailMap);
+
                                 if (badge) {
-                                    badge.style.display = 'inline-block';
+                                    const mins = Math.round(route.durationSec / 60);
                                     badge.innerHTML = `<i class="fa-regular fa-clock me-1"></i> ${mins}m ETA`;
                                 }
-
-                                if (directionsDiv) {
-                                    const container = workspaceState.routingControl.getItinerary().getContainer();
-                                    directionsDiv.innerHTML = '<h6 class="text-info fw-bold mb-3"><i class="fa-solid fa-diamond-turn-right me-2"></i>Route Details</h6>';
-                                    directionsDiv.appendChild(container);
-                                }
-                            });
+                            } else if (badge) {
+                                badge.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-1"></i> ETA unavailable';
+                            }
 
                             workspaceState.detailMap.fitBounds([[rLat, rLng], pickupCoords, deliveryCoords], { padding: [50, 50] });
                         });
@@ -1539,7 +1709,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 `;
             }
 
-            ajaxLoadWorkspace(`<?= e(url_path('bookings/index.php')) ?>?booking_id=${selectedBookingId}`, false);
+            ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
 
         } catch (err) {
             console.error('send_request error:', err);
@@ -1613,11 +1783,11 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                         target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
                     }
 
-                    // Only rebuild the routing control when the target actually changes (pickup vs
-                    // delivery) - matching the pattern already used in bookings/track.php. Rebuilding
-                    // on every poll regardless of movement causes visible flicker and hits the public
-                    // OSRM demo server every 10s for no reason.
-                    const targetKey = JSON.stringify(target);
+                    // Only re-fetch the route when the target actually changes (pickup vs delivery)
+                    // or the rider has moved meaningfully - matching the pattern already used in
+                    // bookings/track.php. Re-fetching on every poll regardless of movement causes
+                    // unnecessary API calls every 10s.
+                    const targetKey = JSON.stringify([target, riderLatLng]);
                     if (workspaceState.routingControl && targetKey === currentTrackTarget) {
                         return;
                     }
@@ -1625,34 +1795,21 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
 
                     clearRouteInternal();
 
-                    workspaceState.routingControl = L.Routing.control({
-                        waypoints: [
-                            L.latLng(riderLatLng[0], riderLatLng[1]),
-                            L.latLng(target[0], target[1])
-                        ],
-                        routeWhileDragging: false,
-                        addWaypoints: false,
-                        draggableWaypoints: false,
-                        createMarker: () => null,
-                        lineOptions: { styles: [{ color: '#38bdf8', weight: 6 }] },
-                        show: true,
-                        itineraryClassName: 'routing-instructions-list'
-                    }).addTo(workspaceState.detailMap);
+                    const etaText = root.querySelector('#eta_text');
+                    if (etaText) etaText.innerText = 'Calculating...';
 
-                    workspaceState.routingControl.on('routesfound', function (e) {
-                        const route = e.routes[0];
-                        const distKm = (route.summary.totalDistance / 1000).toFixed(2);
-                        const etaMin = Math.round(route.summary.totalTime / 60);
-                        const etaText = root.querySelector('#eta_text');
+                    const route = await fetchMapboxRoute([riderLatLng, target]);
+                    if (route) {
+                        workspaceState.routingControl = L.polyline(route.latlngs, {
+                            color: '#38bdf8', weight: 6
+                        }).addTo(workspaceState.detailMap);
+
+                        const distKm = (route.distanceMeters / 1000).toFixed(2);
+                        const etaMin = Math.round(route.durationSec / 60);
                         if (etaText) etaText.innerText = `${etaMin} min · ${distKm} km`;
-
-                        const directionsDiv = root.querySelector('#routing-directions');
-                        if (directionsDiv) {
-                            directionsDiv.style.display = 'block';
-                            directionsDiv.innerHTML = '<h6 class="text-info fw-bold mb-3"><i class="fa-solid fa-diamond-turn-right me-2"></i>Live Route Details</h6>';
-                            directionsDiv.appendChild(workspaceState.routingControl.getItinerary().getContainer());
-                        }
-                    });
+                    } else if (etaText) {
+                        etaText.innerText = '--';
+                    }
 
                 } catch (e) {
                     console.log('Tracking error', e);
@@ -1837,7 +1994,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 throw new Error(result.message || 'Unable to book another rider.');
             }
 
-            ajaxLoadWorkspace('<?= e(url_path('bookings/index.php')) ?>?booking_id=' + encodeURIComponent(bookingId), true);
+            ajaxLoadWorkspace('<?= e(url_path('bookings/')) ?>?booking_id=' + encodeURIComponent(bookingId), true);
         } catch (err) {
             btn.disabled = false;
             btn.innerHTML = originalHtml;
@@ -1878,6 +2035,148 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         }
     });
 
+    const editDetailsForm = root.querySelector('#edit-details-form');
+    editDetailsForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const errorBox = root.querySelector('#edit-details-error');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+        errorBox?.classList.add('d-none');
+
+        try {
+            const formData = new FormData(this);
+            formData.append('csrf_token', CSRF_TOKEN);
+            const response = await fetch('<?= e(url_path('bookings/ajax_update_details.php')) ?>', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+                body: formData
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to update booking details.');
+            }
+            window.location.reload();
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHtml;
+            if (errorBox) {
+                errorBox.textContent = err.message || 'Unable to update booking details.';
+                errorBox.classList.remove('d-none');
+            }
+        }
+    });
+
+    const changeDeliveryForm = root.querySelector('#change-delivery-form');
+    if (changeDeliveryForm) {
+        const editDeliveryAddress = root.querySelector('#edit_delivery_address');
+        const editDeliveryLat = root.querySelector('#edit_delivery_latitude');
+        const editDeliveryLng = root.querySelector('#edit_delivery_longitude');
+        const editDeliverySuggestions = root.querySelector('#edit_delivery_suggestions');
+
+        function renderEditDeliverySuggestions(items, onPick) {
+            if (!items.length) {
+                editDeliverySuggestions.innerHTML = '<div class="address-suggestion-empty">No matching Nigerian address found.</div>';
+                editDeliverySuggestions.classList.add('show');
+                return;
+            }
+            editDeliverySuggestions.innerHTML = items.map((item, idx) => `
+                <div class="address-suggestion-item" data-index="${idx}">
+                    <i class="fa-solid fa-location-dot"></i>
+                    <div>
+                        <div class="main-text">${item.text}</div>
+                        <div class="sub-text">${item.place_name}</div>
+                    </div>
+                </div>
+            `).join('');
+            editDeliverySuggestions.classList.add('show');
+            editDeliverySuggestions.querySelectorAll('.address-suggestion-item').forEach((el, idx) => {
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    onPick(items[idx]);
+                    editDeliverySuggestions.classList.remove('show');
+                });
+            });
+        }
+
+        if (editDeliveryAddress && editDeliverySuggestions) {
+            const NIGERIA_BBOX_EDIT = '2.6,4.2,14.7,14.0';
+            let editDebounce = null;
+
+            editDeliveryAddress.addEventListener('input', function () {
+                if (editDeliveryLat) editDeliveryLat.value = '';
+                if (editDeliveryLng) editDeliveryLng.value = '';
+                const query = this.value.trim();
+                if (editDebounce) clearTimeout(editDebounce);
+                if (query.length < 3) {
+                    editDeliverySuggestions.classList.remove('show');
+                    return;
+                }
+                editDebounce = setTimeout(async () => {
+                    try {
+                        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=6&language=en&bbox=${NIGERIA_BBOX_EDIT}`;
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        const items = (data.features || []).map(f => ({ text: f.text, place_name: f.place_name, lat: f.center[1], lng: f.center[0] }));
+                        renderEditDeliverySuggestions(items, (item) => {
+                            editDeliveryAddress.value = item.place_name;
+                            editDeliveryAddress.classList.add('location-confirmed');
+                            if (editDeliveryLat) editDeliveryLat.value = item.lat;
+                            if (editDeliveryLng) editDeliveryLng.value = item.lng;
+                        });
+                    } catch (err) {
+                        editDeliverySuggestions.classList.remove('show');
+                    }
+                }, 300);
+            });
+
+            editDeliveryAddress.addEventListener('blur', function () {
+                setTimeout(() => editDeliverySuggestions.classList.remove('show'), 150);
+            });
+        }
+
+        changeDeliveryForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const errorBox = root.querySelector('#change-delivery-error');
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalHtml = submitBtn.innerHTML;
+
+            if (!editDeliveryLat?.value || !editDeliveryLng?.value) {
+                if (errorBox) {
+                    errorBox.textContent = 'Please pick an address from the suggestions list.';
+                    errorBox.classList.remove('d-none');
+                }
+                return;
+            }
+            errorBox?.classList.add('d-none');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Updating...';
+
+            try {
+                const formData = new FormData(this);
+                formData.append('csrf_token', CSRF_TOKEN);
+                const response = await fetch('<?= e(url_path('bookings/ajax_update_delivery.php')) ?>', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Unable to update delivery address.');
+                }
+                window.location.reload();
+            } catch (err) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalHtml;
+                if (errorBox) {
+                    errorBox.textContent = err.message || 'Unable to update delivery address.';
+                    errorBox.classList.remove('d-none');
+                }
+            }
+        });
+    }
+
     if (canChat) {
         const openChatBtn = root.querySelector('#open-chat-btn');
         const closeChatBtn = root.querySelector('#close-chat-btn');
@@ -1896,7 +2195,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         const endCallBtn = root.querySelector('#end-call-btn');
         const remoteAudio = root.querySelector('#remote-audio');
         const currentUserId = <?= (int)$user['id'] ?>;
-        const realtimeBaseUrl = '<?= e(url_path('bookings/index.php')) ?>';
+        const realtimeBaseUrl = '<?= e(url_path('bookings/')) ?>';
 
         function escapeHtml(str) {
             return String(str)
@@ -2001,9 +2300,11 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             workspaceState.peer = new Peer(peerIdFor(currentUserId));
             workspaceState.peer.on('call', function (incomingCall) {
                 pendingIncomingCall = incomingCall;
+                if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
                 if (callPanel) callPanel.style.display = 'block';
                 if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
                 if (acceptCallBtn) acceptCallBtn.style.display = 'block';
+                if (endCallBtn) endCallBtn.style.display = '';
             });
             workspaceState.peer.on('error', function (err) {
                 console.error('Peer error:', err);
@@ -2018,9 +2319,25 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             return workspaceState.localCallStream;
         }
 
+        let callPanelHideTimer = null;
+
+        function finishCallUI(statusMessage) {
+            if (remoteAudio) remoteAudio.srcObject = null;
+            if (callStatusText) callStatusText.textContent = statusMessage;
+            if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+            if (endCallBtn) endCallBtn.style.display = 'none';
+            if (callPanelHideTimer) clearTimeout(callPanelHideTimer);
+            callPanelHideTimer = setTimeout(() => {
+                if (callPanel) callPanel.style.display = 'none';
+                if (endCallBtn) endCallBtn.style.display = '';
+            }, 1500);
+        }
+
         function bindActiveCall(call) {
             if (!call) return;
             workspaceState.currentCall = call;
+            if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
+            if (endCallBtn) endCallBtn.style.display = '';
             call.on('stream', function (remoteStream) {
                 if (remoteAudio) remoteAudio.srcObject = remoteStream;
                 if (callPanel) callPanel.style.display = 'block';
@@ -2028,13 +2345,13 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 if (acceptCallBtn) acceptCallBtn.style.display = 'none';
             });
             call.on('close', function () {
-                if (remoteAudio) remoteAudio.srcObject = null;
-                if (callStatusText) callStatusText.textContent = 'Call ended.';
                 pendingIncomingCall = null;
                 workspaceState.currentCall = null;
+                finishCallUI('Call ended.');
             });
             call.on('error', function () {
                 if (callStatusText) callStatusText.textContent = 'Call failed.';
+                finishCallUI('Call failed.');
             });
         }
 
@@ -2083,6 +2400,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     workspaceState.localCallStream.getTracks().forEach(track => track.stop());
                     workspaceState.localCallStream = null;
                 }
+                workspaceState.currentCall = null;
                 await fetch(`${realtimeBaseUrl}?action=call_end`, {
                     method: 'POST',
                     body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
@@ -2090,9 +2408,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             } catch (err) {
                 console.error(err);
             } finally {
-                if (remoteAudio) remoteAudio.srcObject = null;
-                if (callStatusText) callStatusText.textContent = 'Call ended.';
-                if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+                finishCallUI('Call ended.');
             }
         }
 

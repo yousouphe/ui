@@ -204,6 +204,64 @@ function response_cache_headers(string $etag, int $maxAge = 3): void {
     }
 }
 
+function load_sender_bookings(PDO $pdo, int $userId): array {
+    $stmt = $pdo->prepare("
+        SELECT
+            b.*,
+            r.full_name AS rider_name,
+            r.phone AS rider_phone,
+            rp.last_latitude,
+            rp.last_longitude,
+            rp.availability_status
+        FROM bookings b
+        LEFT JOIN users r ON r.id = b.selected_rider_user_id
+        LEFT JOIN rider_profiles rp ON rp.user_id = b.selected_rider_user_id
+        WHERE b.sender_user_id = ?
+        ORDER BY b.id DESC
+    ");
+    $stmt->execute([$userId]);
+    $allBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $activeBookings = [];
+    $pendingBookings = [];
+    $unpaidBookings = [];
+    $cancelledBookings = [];
+    $historyBookings = [];
+
+    foreach ($allBookings as $b) {
+        $paymentStatus = $b['payment_status'] ?? 'unpaid';
+        $bookingStatus = $b['booking_status'] ?? '';
+
+        if ($bookingStatus === 'draft') {
+            continue;
+        }
+
+        if ($bookingStatus === 'cancelled') {
+            // Cancelled orders never owe payment - keep them out of "Unpaid" where money is
+            // genuinely due, so senders don't have to hunt for a closed order in that list.
+            $cancelledBookings[] = $b;
+        } elseif ($paymentStatus === 'paid') {
+            $historyBookings[] = $b;
+        } elseif ($bookingStatus === 'delivered') {
+            $unpaidBookings[] = $b;
+        } elseif ($bookingStatus === 'submitted') {
+            $pendingBookings[] = $b;
+            $activeBookings[] = $b;
+        } else {
+            $activeBookings[] = $b;
+        }
+    }
+
+    return [
+        'all' => $allBookings,
+        'active' => $activeBookings,
+        'pending' => $pendingBookings,
+        'unpaid' => $unpaidBookings,
+        'cancelled' => $cancelledBookings,
+        'history' => $historyBookings,
+    ];
+}
+
 function haversine_sql(string $latField, string $lngField, float $lat, float $lng): string {
     return "(6371 * ACOS(
         COS(RADIANS($lat)) * COS(RADIANS($latField)) *

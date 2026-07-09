@@ -10,7 +10,7 @@ $error = flash('error');
 
 $requestedBookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
 $selectedBookingId = $requestedBookingId;
-$showNewOrderForm = isset($_GET['new']) && $_GET['new'] === '1';
+$forceWizard = isset($_GET['new']) && $_GET['new'] === '1';
 
 
 
@@ -220,9 +220,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ], $_POST);
 
     $saveAsDraft = isset($_POST['save_draft']);
-    if (!$saveAsDraft && empty($_FILES['item_image']['name'])) {
-        $errors['item_image'] = 'Item image is required when submitting a booking.';
-    }
 
     $trackingToken = bin2hex(random_bytes(16));
 
@@ -278,60 +275,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('bookings/index.php?booking_id=' . $selectedBookingId);
         } catch (Throwable $e) {
             $errors['general'] = $e->getMessage();
-            $showNewOrderForm = true;
+            $forceWizard = true;
         }
     } else {
-        $showNewOrderForm = true;
+        $forceWizard = true;
     }
 }
 
 // ---------------- LOAD BOOKINGS ----------------
-$stmt = $pdo->prepare("
-    SELECT
-        b.*,
-        r.full_name AS rider_name,
-        r.phone AS rider_phone,
-        rp.last_latitude,
-        rp.last_longitude,
-        rp.availability_status
-    FROM bookings b
-    LEFT JOIN users r ON r.id = b.selected_rider_user_id
-    LEFT JOIN rider_profiles rp ON rp.user_id = b.selected_rider_user_id
-    WHERE b.sender_user_id = ?
-    ORDER BY b.id DESC
-");
-$stmt->execute([$user['id']]);
-$allBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-$activeBookings = [];
-$pendingBookings = [];
-$unpaidBookings = [];
-$cancelledBookings = [];
-$historyBookings = [];
-
-foreach ($allBookings as $b) {
-    $paymentStatus = $b['payment_status'] ?? 'unpaid';
-    $bookingStatus = $b['booking_status'] ?? '';
-
-    if ($bookingStatus === 'draft') {
-        continue;
-    }
-
-    if ($bookingStatus === 'cancelled') {
-        // Cancelled orders never owe payment - keep them out of "Unpaid" where money is
-        // genuinely due, so senders don't have to hunt for a closed order in that list.
-        $cancelledBookings[] = $b;
-    } elseif ($paymentStatus === 'paid') {
-        $historyBookings[] = $b;
-    } elseif ($bookingStatus === 'delivered') {
-        $unpaidBookings[] = $b;
-    } elseif ($bookingStatus === 'submitted') {
-        $pendingBookings[] = $b;
-        $activeBookings[] = $b;
-    } else {
-        $activeBookings[] = $b;
-    }
-}
+$senderBookings = load_sender_bookings($pdo, (int) $user['id']);
+$allBookings = $senderBookings['all'];
+$activeBookings = $senderBookings['active'];
+$pendingBookings = $senderBookings['pending'];
+$unpaidBookings = $senderBookings['unpaid'];
+$cancelledBookings = $senderBookings['cancelled'];
+$historyBookings = $senderBookings['history'];
 
 $selectedBooking = null;
 if ($selectedBookingId > 0) {
@@ -342,16 +300,17 @@ if ($selectedBookingId > 0) {
         }
     }
 }
-if (!$selectedBooking && !empty($activeBookings)) {
-    $selectedBooking = $activeBookings[0];
-    $selectedBookingId = (int) $selectedBooking['id'];
-} elseif (!$selectedBooking && !empty($unpaidBookings)) {
-    $selectedBooking = $unpaidBookings[0];
-    $selectedBookingId = (int) $selectedBooking['id'];
-} elseif (!$selectedBooking && !empty($historyBookings)) {
-    $selectedBooking = $historyBookings[0];
-    $selectedBookingId = (int) $selectedBooking['id'];
+if (!$forceWizard) {
+    if (!$selectedBooking && !empty($activeBookings)) {
+        $selectedBooking = $activeBookings[0];
+        $selectedBookingId = (int) $selectedBooking['id'];
+    } elseif (!$selectedBooking && !empty($unpaidBookings)) {
+        $selectedBooking = $unpaidBookings[0];
+        $selectedBookingId = (int) $selectedBooking['id'];
+    }
 }
+
+$showWizard = $forceWizard || !$selectedBooking;
 
 function haversine_distance($lat1, $lon1, $lat2, $lon2)
 {
@@ -417,39 +376,6 @@ $selectedBookingIsUnpaid = $selectedBooking ? booking_exists_in_list($unpaidBook
 $selectedBookingIsHistory = $selectedBooking
     ? (booking_exists_in_list($historyBookings, (int) $selectedBooking['id']) || booking_exists_in_list($cancelledBookings, (int) $selectedBooking['id']))
     : false;
-
-$selectedBookingTab = 'active-orders';
-if ($selectedBookingIsUnpaid) {
-    $selectedBookingTab = 'unpaid-orders';
-} elseif ($selectedBookingIsHistory) {
-    $selectedBookingTab = 'history-orders';
-}
-
-// "History" combines completed (paid) and cancelled orders - each still tagged with its
-// own outcome so the tab can offer an All/Completed/Cancelled filter without needing a
-// 4th/5th top-level tab (fewer tabs = less to scan at a glance).
-$displayHistoryEntries = array_merge(
-    array_map(fn($b) => $b + ['history_kind' => 'completed'], $historyBookings),
-    array_map(fn($b) => $b + ['history_kind' => 'cancelled'], $cancelledBookings)
-);
-usort($displayHistoryEntries, fn($a, $b) => (int)$b['id'] <=> (int)$a['id']);
-
-$displayActiveBookings = $activeBookings;
-$displayUnpaidBookings = $unpaidBookings;
-$displayHistoryBookings = $displayHistoryEntries;
-
-$pendingOrdersCount = count($pendingBookings);
-$activeOrdersCount = count($activeBookings);
-$unpaidOrdersCount = count($unpaidBookings);
-$completedOrdersCount = count($historyBookings);
-$cancelledOrdersCount = count($cancelledBookings);
-
-$shouldAutoOpenSelectedTab = false;
-if ($requestedBookingId > 0 && $selectedBooking) {
-    $shouldAutoOpenSelectedTab = true;
-} elseif (empty($activeBookings) && $selectedBooking && ($selectedBookingIsUnpaid || $selectedBookingIsHistory)) {
-    $shouldAutoOpenSelectedTab = true;
-}
 
 $selectedPickupLat = $selectedBooking['pickup_latitude'] ?? '';
 $selectedPickupLng = $selectedBooking['pickup_longitude'] ?? '';
@@ -524,21 +450,27 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .address-suggestion-item i{color:#38bdf8;margin-top:3px}
         .address-suggestion-empty{padding:.75rem .9rem;color:#9fb0d6;font-size:.85rem}
         .location-confirmed{border-color:#22c55e!important}
-        .stat-chip{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#eef4ff;cursor:pointer;transition:.15s ease}
-        .stat-chip:hover{border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.08)}
-        .stat-chip.active-filter{border-color:#38bdf8;background:rgba(56,189,248,.14)}
-        .stat-chip-count{font-weight:800;font-size:1.05rem;color:#38bdf8}
-        .stat-chip-label{font-size:.82rem;color:#9fb0d6}
-        .order-search-wrap{position:relative;max-width:360px}
-        .order-search-wrap input{padding-left:2.25rem}
-        .order-search-wrap i{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:#9fb0d6}
-        .history-filter-row{display:flex;gap:8px;margin-bottom:1rem}
-        .history-filter-chip{padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#9fb0d6;font-size:.82rem;cursor:pointer}
-        .history-filter-chip.active{background:rgba(56,189,248,.16);border-color:#38bdf8;color:#eef4ff}
-        .order-card[data-hidden-by-filter="1"]{display:none!important}
+        .wizard-steps{display:flex;align-items:center;gap:8px;margin-bottom:1.75rem}
+        .wizard-step-dot{display:flex;align-items:center;gap:8px;color:#9fb0d6;font-size:.85rem}
+        .wizard-step-dot .num{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-weight:700;color:#9fb0d6}
+        .wizard-step-dot.current .num{background:#38bdf8;border-color:#38bdf8;color:#09101d}
+        .wizard-step-dot.current{color:#eef4ff}
+        .wizard-step-dot.done .num{background:rgba(34,197,94,.2);border-color:#22c55e;color:#22c55e}
+        .wizard-step-sep{flex:1;height:1px;background:rgba(255,255,255,.1);min-width:16px;max-width:60px}
+        .wizard-pane{display:none}
+        .wizard-pane.active{display:block}
+        .rider-float-bar{position:fixed;left:0;right:0;bottom:0;z-index:1040;background:rgba(9,16,33,.97);backdrop-filter:blur(10px);border-top:1px solid rgba(56,189,248,.25);box-shadow:0 -12px 30px rgba(0,0,0,.35)}
+        .rider-float-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(255,255,255,.08)}
+        .rider-float-list{max-height:180px;overflow-y:auto;padding:.4rem .75rem}
+        .rider-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:.55rem .5rem;border-bottom:1px solid rgba(255,255,255,.06)}
+        .rider-row:last-child{border-bottom:none}
+        .rider-row-name{font-weight:600;font-size:.9rem}
+        .rider-row-actions{display:flex;align-items:center;gap:6px}
+        .rider-row-actions input[type="number"]{width:78px}
+        body.has-rider-float-bar{padding-bottom:220px}
         @media (max-width:576px){
-            .sticky-chat-btn{right:14px;bottom:14px}
-            .chat-panel{right:12px;left:12px;width:auto;bottom:84px}.call-panel{right:12px;left:12px;width:auto;bottom:620px}
+            .sticky-chat-btn{right:14px;bottom:230px}
+            .chat-panel{right:12px;left:12px;width:auto;bottom:300px}.call-panel{right:12px;left:12px;width:auto;bottom:620px}
         }
     </style>
 </head>
@@ -546,7 +478,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <nav class="navbar navbar-expand-lg navbar-dark navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
-        <div class="navbar-nav ms-auto">
+        <div class="navbar-nav ms-auto flex-row gap-3">
+            <a class="nav-link" href="<?= e(url_path('dashboard.php')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
+            <a class="nav-link" href="<?= e(url_path('bookings/index.php?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
             <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
         </div>
     </div>
@@ -558,8 +492,6 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         data-selected-booking-id="<?= (int) $selectedBookingId ?>"
         data-selected-booking-status="<?= e((string) ($selectedBooking['booking_status'] ?? '')) ?>"
         data-selected-has-rider="<?= !empty($selectedBooking['selected_rider_user_id']) ? '1' : '0' ?>"
-        data-selected-booking-tab="<?= e($selectedBookingTab) ?>"
-        data-should-auto-open-selected-tab="<?= $shouldAutoOpenSelectedTab ? '1' : '0' ?>"
         data-needs-rider="<?= $needsRider ? '1' : '0' ?>"
         data-can-track="<?= $canTrack ? '1' : '0' ?>"
         data-can-pay="<?= $canPay ? '1' : '0' ?>"
@@ -575,106 +507,71 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php if (!empty($errors['general'])): ?><div class="alert alert-danger"><?= e($errors['general']) ?></div><?php endif; ?>
         <div id="alert-container"></div>
 
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
-            <div>
-                <h1 class="h3 fw-bold mb-1">Sender Workspace</h1>
-                <p class="text-soft mb-0">Manage active deliveries, view history, and place a new order only when needed.</p>
-            </div>
-            <button class="btn btn-primary" id="toggle-new-order">
-                <i class="fa-solid fa-plus me-2"></i>New Order
-            </button>
-        </div>
-
-        <div class="d-flex flex-wrap gap-2 mb-4" id="status-glance">
-            <button type="button" class="stat-chip" data-goto-tab="active-orders">
-                <span class="stat-chip-count"><?= $activeOrdersCount ?></span>
-                <span class="stat-chip-label">Active</span>
-            </button>
-            <button type="button" class="stat-chip" data-goto-tab="active-orders">
-                <span class="stat-chip-count"><?= $pendingOrdersCount ?></span>
-                <span class="stat-chip-label">Pending Match</span>
-            </button>
-            <button type="button" class="stat-chip" data-goto-tab="unpaid-orders">
-                <span class="stat-chip-count"><?= $unpaidOrdersCount ?></span>
-                <span class="stat-chip-label">Unpaid</span>
-            </button>
-            <button type="button" class="stat-chip" data-goto-tab="history-orders" data-history-filter="completed">
-                <span class="stat-chip-count"><?= $completedOrdersCount ?></span>
-                <span class="stat-chip-label">Completed</span>
-            </button>
-            <button type="button" class="stat-chip" data-goto-tab="history-orders" data-history-filter="cancelled">
-                <span class="stat-chip-count"><?= $cancelledOrdersCount ?></span>
-                <span class="stat-chip-label">Cancelled</span>
-            </button>
-        </div>
-
-        <div class="cardx p-4 p-lg-5 mb-5" id="new-order-panel" style="<?= $showNewOrderForm ? '' : 'display:none;' ?>">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
-                <div>
-                    <h2 class="h4 fw-bold mb-1">Create Booking</h2>
-                    <p class="text-soft mb-0">Fill in parcel details, set pickup and delivery, then submit to start rider matching.</p>
-                </div>
-                <button class="btn btn-outline-light" type="button" id="close-new-order">
-                    <i class="fa-solid fa-xmark me-1"></i>Close
-                </button>
+        <?php if ($showWizard): ?>
+        <div class="cardx p-4 p-lg-5 mb-5" id="new-order-panel">
+            <div class="wizard-steps">
+                <div class="wizard-step-dot current" data-step-dot="1"><span class="num">1</span> Addresses</div>
+                <div class="wizard-step-sep"></div>
+                <div class="wizard-step-dot" data-step-dot="2"><span class="num">2</span> Item details</div>
+                <div class="wizard-step-sep"></div>
+                <div class="wizard-step-dot" data-step-dot="3"><span class="num">3</span> Photo &amp; send</div>
             </div>
 
             <form method="post" enctype="multipart/form-data" id="booking-form">
                 <?= csrf_field() ?>
-                <div class="row g-4">
-                    <div class="col-md-6">
-                        <label class="form-label">Recipient name</label>
-                        <input class="form-control" name="recipient_name" value="<?= e(old('recipient_name')) ?>">
-                        <?php if (!empty($errors['recipient_name'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_name']) ?></div><?php endif; ?>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Recipient phone</label>
-                        <input class="form-control" name="recipient_phone" value="<?= e(old('recipient_phone')) ?>">
-                        <?php if (!empty($errors['recipient_phone'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_phone']) ?></div><?php endif; ?>
+
+                <div class="wizard-pane active" data-step="1">
+                    <h2 class="h4 fw-bold mb-1">Send a package?</h2>
+                    <p class="text-soft mb-4">Enter where we're picking up and where it's going.</p>
+
+                    <div class="cardx p-3 mb-4">
+                        <h3 class="h5">Pickup location</h3>
+                        <label class="form-label">Pickup address</label>
+                        <div class="address-search">
+                            <div class="input-group">
+                                <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
+                                <button class="btn btn-outline-light" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                            </div>
+                            <div class="address-suggestions" id="pickup_suggestions"></div>
+                        </div>
+                        <div class="small mt-2">
+                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+                        </div>
+                        <input type="hidden" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>">
+                        <input type="hidden" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>">
                     </div>
 
-                    <div class="col-12">
-                        <div class="cardx p-3">
-                            <h3 class="h5">Pickup location</h3>
-                            <label class="form-label">Pickup address</label>
-                            <div class="address-search">
-                                <div class="input-group">
-                                    <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                    <button class="btn btn-outline-light" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
-                                </div>
-                                <div class="address-suggestions" id="pickup_suggestions"></div>
+                    <div class="cardx p-3 mb-4">
+                        <h3 class="h5">Destination</h3>
+                        <label class="form-label">Delivery address</label>
+                        <div class="address-search">
+                            <div class="input-group">
+                                <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
+                                <button class="btn btn-outline-light" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
-                            <div class="small mt-2">
-                                <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
-                            </div>
-                            <input type="hidden" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>">
-                            <input type="hidden" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>">
+                            <div class="address-suggestions" id="delivery_suggestions"></div>
                         </div>
+                        <div class="small mt-2">
+                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+                        </div>
+                        <input type="hidden" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>">
+                        <input type="hidden" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>">
                     </div>
 
-                    <div class="col-12">
-                        <div class="cardx p-3">
-                            <h3 class="h5">Delivery location</h3>
-                            <label class="form-label">Delivery address</label>
-                            <div class="address-search">
-                                <div class="input-group">
-                                    <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                    <button class="btn btn-outline-light" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
-                                </div>
-                                <div class="address-suggestions" id="delivery_suggestions"></div>
-                            </div>
-                            <div class="small mt-2">
-                                <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
-                            </div>
-                            <input type="hidden" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>">
-                            <input type="hidden" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>">
-                        </div>
+                    <div class="small text-danger mb-3 d-none" id="step1-error">Please set both a pickup and a delivery address.</div>
+                    <div class="d-flex justify-content-end">
+                        <button class="btn btn-primary" type="button" data-wizard-next="2">Next<i class="fa-solid fa-arrow-right ms-2"></i></button>
                     </div>
+                </div>
+
+                <div class="wizard-pane" data-step="2">
+                    <h2 class="h4 fw-bold mb-1">What are you sending?</h2>
+                    <p class="text-soft mb-4">Recipient and item details, plus a quick look at the route.</p>
 
                     <div class="col-12" id="route_map_card" style="display:none;">
-                        <div class="cardx p-3">
+                        <div class="cardx p-3 mb-4">
                             <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-                                <h3 class="h5 mb-0">Confirm route</h3>
+                                <h3 class="h5 mb-0">Route preview</h3>
                                 <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
                                 <span class="small text-soft" id="route_summary"></span>
                             </div>
@@ -682,420 +579,173 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                         </div>
                     </div>
 
-                    <div class="col-md-6">
-                        <label class="form-label">Item name</label>
-                        <input class="form-control" name="item_name" value="<?= e(old('item_name')) ?>">
+                    <div class="row g-4">
+                        <div class="col-md-6">
+                            <label class="form-label">Recipient name</label>
+                            <input class="form-control" name="recipient_name" value="<?= e(old('recipient_name')) ?>">
+                            <?php if (!empty($errors['recipient_name'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_name']) ?></div><?php endif; ?>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Recipient phone</label>
+                            <input class="form-control" name="recipient_phone" value="<?= e(old('recipient_phone')) ?>">
+                            <?php if (!empty($errors['recipient_phone'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_phone']) ?></div><?php endif; ?>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Item name</label>
+                            <input class="form-control" name="item_name" value="<?= e(old('item_name')) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Item category</label>
+                            <?php $selectedCategory = old('item_category'); ?>
+                            <select class="form-select" name="item_category">
+                                <option value="">Select category</option>
+                                <option value="document" <?= $selectedCategory === 'document' ? 'selected' : '' ?>>Document</option>
+                                <option value="food" <?= $selectedCategory === 'food' ? 'selected' : '' ?>>Food</option>
+                                <option value="parcel" <?= $selectedCategory === 'parcel' ? 'selected' : '' ?>>Parcel</option>
+                                <option value="fragile" <?= $selectedCategory === 'fragile' ? 'selected' : '' ?>>Fragile</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Item description</label>
+                            <textarea class="form-control" name="item_description" rows="3"><?= e(old('item_description')) ?></textarea>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Estimated value</label>
+                            <input class="form-control" name="estimated_value" value="<?= e(old('estimated_value')) ?>">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Special instructions</label>
+                            <textarea class="form-control" name="special_instructions" rows="2"><?= e(old('special_instructions')) ?></textarea>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Item category</label>
-                        <?php $selectedCategory = old('item_category'); ?>
-                        <select class="form-select" name="item_category">
-                            <option value="">Select category</option>
-                            <option value="document" <?= $selectedCategory === 'document' ? 'selected' : '' ?>>Document</option>
-                            <option value="food" <?= $selectedCategory === 'food' ? 'selected' : '' ?>>Food</option>
-                            <option value="parcel" <?= $selectedCategory === 'parcel' ? 'selected' : '' ?>>Parcel</option>
-                            <option value="fragile" <?= $selectedCategory === 'fragile' ? 'selected' : '' ?>>Fragile</option>
-                        </select>
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label">Item description</label>
-                        <textarea class="form-control" name="item_description" rows="4"><?= e(old('item_description')) ?></textarea>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Estimated value</label>
-                        <input class="form-control" name="estimated_value" value="<?= e(old('estimated_value')) ?>">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Item image</label>
-                        <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-                        <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label">Special instructions</label>
-                        <textarea class="form-control" name="special_instructions" rows="3"><?= e(old('special_instructions')) ?></textarea>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button class="btn btn-outline-light" type="button" data-wizard-back="1"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
+                        <button class="btn btn-primary" type="button" data-wizard-next="3">Next<i class="fa-solid fa-arrow-right ms-2"></i></button>
                     </div>
                 </div>
 
-                <div class="d-flex gap-2 flex-wrap mt-4">
-                    <button class="btn btn-primary" type="submit" name="submit_booking">Submit Booking & Find Riders</button>
-                    <button class="btn btn-outline-light" type="submit" name="save_draft">Save as Draft</button>
+                <div class="wizard-pane" data-step="3">
+                    <h2 class="h4 fw-bold mb-1">Add a photo</h2>
+                    <p class="text-soft mb-4">Optional - add one if you'd like the rider to see the item before pickup.</p>
+
+                    <label class="form-label">Item image (optional)</label>
+                    <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                    <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button class="btn btn-outline-light" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-outline-light" type="submit" name="save_draft">Save as Draft</button>
+                            <button class="btn btn-primary" type="submit" name="submit_booking">Send Package</button>
+                        </div>
+                    </div>
                 </div>
             </form>
         </div>
+        <?php endif; ?>
 
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-            <ul class="nav nav-tabs" id="hubTabs" role="tablist">
-                <li class="nav-item">
-                    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#active-orders" type="button">Active Orders <span class="badge badge-soft ms-1"><?= $activeOrdersCount ?></span></button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#unpaid-orders" type="button">Unpaid <span class="badge badge-soft ms-1"><?= $unpaidOrdersCount ?></span></button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-orders" type="button">History <span class="badge badge-soft ms-1"><?= $completedOrdersCount + $cancelledOrdersCount ?></span></button>
-                </li>
-            </ul>
-            <div class="order-search-wrap">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="search" class="form-control form-control-sm" id="order-search" placeholder="Search by code, item, or recipient...">
+        <?php if (!$showWizard && $selectedBooking): ?>
+            <div class="cardx p-4 mb-4">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                    <div>
+                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
+                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> &middot; <?= e($selectedBooking['item_category']) ?></p>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
+                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> &#8358;<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
+                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
+                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
+                    </div>
+                </div>
             </div>
-        </div>
 
-        <div class="tab-content">
-            <div class="tab-pane fade show active" id="active-orders">
-                <div class="row g-4">
-                    <div class="col-lg-4">
-                        <div class="cardx p-4">
-                            <h2 class="h5 mb-3">Active Orders</h2>
-                            <?php if (empty($displayActiveBookings)): ?>
-                                <div class="text-soft">No active orders yet.</div>
-                            <?php else: ?>
-                                <div class="d-grid gap-3">
-                                    <?php foreach ($displayActiveBookings as $b): ?>
-                                        <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
-                                            <div class="order-card cardx p-3 <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
-                                                <div class="d-flex justify-content-between align-items-start">
-                                                    <div>
-                                                        <div class="fw-bold"><?= e($b['booking_code']) ?></div>
-                                                        <div class="small text-soft"><?= e($b['item_name']) ?></div>
-                                                    </div>
-                                                    <span class="badge badge-soft"><?= e($b['booking_status']) ?></span>
-                                                </div>
-                                                <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
-                                                <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
-                                                <div class="small mt-2 text-info">
-                                                    <?= !empty($b['rider_name']) ? 'Rider: ' . e($b['rider_name']) : 'Awaiting rider selection' ?>
-                                                </div>
-                                            </div>
-                                        </a>
-                                    <?php endforeach; ?>
+            <div class="row g-4 mb-4">
+                <div class="col-lg-8">
+                    <div class="cardx p-4">
+                        <div id="detail_map"></div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="cardx p-4 h-100">
+                        <h3 class="h5 mb-3">Booking Info</h3>
+                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
+                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
+                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+
+                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
+                            <div class="mt-3">
+                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
+                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="mt-4 action-stack">
+                            <?php if ($canPay): ?>
+                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
+                                    Pay &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($canIssueItem): ?>
+                                <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
+                                    <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
+                                </button>
+                            <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
+                                <div class="alert alert-info mb-0">
+                                    <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
                                 </div>
+                            <?php endif; ?>
+
+                            <?php if ($canCancel): ?>
+                                <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
+                                    <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($canRebook): ?>
+                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
+                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
+                                </button>
                             <?php endif; ?>
                         </div>
-                    </div>
 
-                    <div class="col-lg-8">
-                        <?php if ($selectedBooking && $selectedBookingIsActive): ?>
-                            <div class="cardx p-4 mb-4">
-                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-                                    <div>
-                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
-                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
-                                    </div>
-                                    <div class="d-flex flex-wrap gap-2">
-                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
-                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
-                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
-                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
-                                    </div>
-                                </div>
+                        <?php if ($cancellationReason !== ''): ?>
+                            <div class="cancel-reason-box">
+                                <div class="fw-bold mb-1">Cancellation Reason</div>
+                                <div class="small"><?= e($cancellationReason) ?></div>
                             </div>
-
-                            <div class="row g-4 mb-4">
-                                <div class="col-lg-8">
-                                    <div class="cardx p-4">
-                                        <div id="detail_map"></div>
-                                    </div>
-                                </div>
-                                <div class="col-lg-4">
-                                    <div class="cardx p-4 h-100">
-                                        <h3 class="h5 mb-3">Booking Info</h3>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
-
-                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
-                                            <div class="mt-3">
-                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
-                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
-                                            </div>
-                                        <?php endif; ?>
-
-                                        <div class="mt-4 action-stack">
-                                            <?php if ($canPay): ?>
-                                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
-                                                    Pay ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
-                                                </button>
-                                            <?php endif; ?>
-
-                                            <?php if ($canIssueItem): ?>
-                                                <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
-                                                    <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
-                                                </button>
-                                            <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
-                                                <div class="alert alert-info mb-0">
-                                                    <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
-                                                </div>
-                                            <?php endif; ?>
-
-                                            <?php if ($canCancel): ?>
-                                                <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
-                                                    <i class="fa-solid fa-ban me-2"></i>Cancel Order
-                                                </button>
-                                            <?php endif; ?>
-
-                                            <?php if ($canRebook): ?>
-                                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
-                                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
-                                                </button>
-                                            <?php endif; ?>
-                                        </div>
-
-                                        <?php if ($cancellationReason !== ''): ?>
-                                            <div class="cancel-reason-box">
-                                                <div class="fw-bold mb-1">Cancellation Reason</div>
-                                                <div class="small"><?= e($cancellationReason) ?></div>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="routing-directions" class="p-3 mb-4"></div>
-
-                            <?php if ($needsRider): ?>
-                                <div class="cardx p-4 mb-4">
-                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                        <div>
-                                            <h3 class="h5 mb-1">Nearby Riders</h3>
-                                            <p class="text-soft mb-0">Select a rider and send a request for this booking.</p>
-                                        </div>
-                                        <button id="clear-route-btn" class="btn btn-sm btn-outline-warning" style="display:none;" onclick="clearActiveRoute()">
-                                            <i class="fa-solid fa-xmark me-1"></i> Clear Route
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="row g-4" id="rider-list-container">
-                                    <div class="col-12 text-center py-5">
-                                        <div class="spinner-border text-info" role="status"></div>
-                                        <p class="mt-2 text-soft">Scanning for nearby riders...</p>
-                                    </div>
-                                </div>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <div class="cardx p-5 text-center text-soft">Select an active order to view details.</div>
                         <?php endif; ?>
                     </div>
                 </div>
             </div>
 
-            <div class="tab-pane fade" id="unpaid-orders">
-                <div class="row g-4">
-                    <div class="col-lg-4">
-                        <div class="cardx p-4">
-                            <h2 class="h5 mb-3">Unpaid Orders</h2>
-                            <?php if (empty($displayUnpaidBookings)): ?>
-                                <div class="text-soft">No unpaid orders.</div>
-                            <?php else: ?>
-                                <div class="row g-3">
-                                    <?php foreach ($displayUnpaidBookings as $b): ?>
-                                        <div class="col-12">
-                                            <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
-                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
-                                                            <div class="small text-soft"><?= e($b['item_name']) ?></div>
-                                                        </div>
-                                                        <span class="badge bg-warning text-dark"><?= e($b['payment_status'] ?? 'unpaid') ?></span>
-                                                    </div>
-                                                    <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
-                                                    <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
-                                                    <div class="small mt-2 text-info">Status: <?= e($b['booking_status']) ?></div>
-                                                    <?php if (($b['booking_status'] ?? '') === 'cancelled' && !empty($b['cancellation_reason'])): ?>
-                                                        <div class="small mt-2 text-danger">Reason: <?= e($b['cancellation_reason']) ?></div>
-                                                    <?php endif; ?>
-                                                    <div class="small mt-1 text-warning">Amount: ₦<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></div>
-                                                </div>
-                                            </a>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php endif; ?>
+            <div id="routing-directions" class="p-3 mb-4"></div>
+
+            <?php if ($needsRider): ?>
+                <div class="rider-float-bar" id="rider-float-bar">
+                    <div class="rider-float-header">
+                        <div>
+                            <strong>Nearby Riders</strong>
+                            <span class="text-soft small ms-2">Tap a rider to request them</span>
+                        </div>
+                        <button id="clear-route-btn" class="btn btn-sm btn-outline-warning" style="display:none;" onclick="clearActiveRoute()">
+                            <i class="fa-solid fa-xmark me-1"></i> Clear Route
+                        </button>
+                    </div>
+                    <div class="rider-float-list" id="rider-list-container">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                            <span class="ms-2 text-soft small">Scanning for nearby riders...</span>
                         </div>
                     </div>
-
-                    <div class="col-lg-8">
-                        <?php if ($selectedBooking && $selectedBookingIsUnpaid): ?>
-                            <div class="cardx p-4 mb-4">
-                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-                                    <div>
-                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
-                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
-                                    </div>
-                                    <div class="d-flex flex-wrap gap-2">
-                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
-                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
-                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
-                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row g-4 mb-4">
-                                <div class="col-12">
-                                    <div class="cardx p-4">
-                                        <h3 class="h5 mb-3">Booking Info</h3>
-                                        <div class="row g-3">
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
-                                            <div class="col-md-6 small text-soft"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
-                                        </div>
-
-                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
-                                            <div class="mt-3">
-                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
-                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
-                                            </div>
-                                        <?php endif; ?>
-
-                                        <div class="mt-4 action-stack">
-                                            <?php if ($canPay): ?>
-                                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
-                                                    Pay ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
-                                                </button>
-                                            <?php endif; ?>
-
-                                            <?php if ($canRebook): ?>
-                                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
-                                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
-                                                </button>
-                                            <?php endif; ?>
-                                        </div>
-
-                                        <?php if ($cancellationReason !== ''): ?>
-                                            <div class="cancel-reason-box">
-                                                <div class="fw-bold mb-1">Cancellation Reason</div>
-                                                <div class="small"><?= e($cancellationReason) ?></div>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row g-4 mb-4">
-                                <div class="col-12">
-                                    <div class="cardx p-4 detail-map-small">
-                                        <div id="detail_map"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="routing-directions" class="p-3 mb-4"></div>
-                        <?php else: ?>
-                            <div class="cardx p-5 text-center text-soft">Select an unpaid order to view details.</div>
-                        <?php endif; ?>
-                    </div>
                 </div>
-            </div>
-
-            <div class="tab-pane fade" id="history-orders">
-                <div class="row g-4">
-                    <div class="col-lg-4">
-                        <div class="cardx p-4">
-                            <h2 class="h5 mb-3">Completed / Historical Orders</h2>
-                            <?php if (!empty($displayHistoryBookings)): ?>
-                                <div class="history-filter-row" id="history-filter-row">
-                                    <button type="button" class="history-filter-chip active" data-history-kind="all">All</button>
-                                    <button type="button" class="history-filter-chip" data-history-kind="completed">Completed</button>
-                                    <button type="button" class="history-filter-chip" data-history-kind="cancelled">Cancelled</button>
-                                </div>
-                            <?php endif; ?>
-                            <?php if (empty($displayHistoryBookings)): ?>
-                                <div class="text-soft">No completed bookings yet.</div>
-                            <?php else: ?>
-                                <div class="row g-3">
-                                    <?php foreach ($displayHistoryBookings as $b): ?>
-                                        <div class="col-12">
-                                            <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
-                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>" data-history-kind="<?= e($b['history_kind']) ?>">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <div class="fw-bold"><?= e($b['booking_code']) ?></div>
-                                                            <div class="small text-soft"><?= e($b['item_name']) ?></div>
-                                                        </div>
-                                                        <span class="badge badge-soft"><?= e($b['booking_status']) ?></span>
-                                                    </div>
-                                                    <div class="small text-soft mt-2"><?= e($b['pickup_address']) ?></div>
-                                                    <div class="small text-soft">to <?= e($b['delivery_address']) ?></div>
-                                                    <div class="small mt-2 text-info">Payment: <?= e($b['payment_status'] ?? 'unpaid') ?></div>
-                                                    <?php if (($b['booking_status'] ?? '') === 'cancelled' && !empty($b['cancellation_reason'])): ?>
-                                                        <div class="small mt-2 text-danger">Reason: <?= e($b['cancellation_reason']) ?></div>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </a>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-
-                    <div class="col-lg-8">
-                        <?php if ($selectedBooking && $selectedBookingIsHistory): ?>
-                            <div class="cardx p-4 mb-4">
-                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-                                    <div>
-                                        <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
-                                        <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> · <?= e($selectedBooking['item_category']) ?></p>
-                                    </div>
-                                    <div class="d-flex flex-wrap gap-2">
-                                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
-                                        <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> ₦<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
-                                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
-                                        <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row g-4 mb-4">
-                                <div class="col-lg-8">
-                                    <div class="cardx p-4">
-                                        <div id="detail_map"></div>
-                                    </div>
-                                </div>
-                                <div class="col-lg-4">
-                                    <div class="cardx p-4 h-100">
-                                        <h3 class="h5 mb-3">Booking Info</h3>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> · <?= e($selectedBooking['recipient_phone']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
-                                        <div class="small text-soft mb-2"><strong class="text-white">Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
-
-                                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
-                                            <div class="mt-3">
-                                                <div class="small text-white fw-bold mb-2">Proof of Delivery</div>
-                                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
-                                            </div>
-                                        <?php endif; ?>
-
-                                        <?php if ($cancellationReason !== ''): ?>
-                                            <div class="cancel-reason-box">
-                                                <div class="fw-bold mb-1">Cancellation Reason</div>
-                                                <div class="small"><?= e($cancellationReason) ?></div>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div id="routing-directions" class="p-3 mb-4"></div>
-                        <?php else: ?>
-                            <div class="cardx p-5 text-center text-soft">Select a completed order to view details.</div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <?php endif; ?>
+        <?php endif; ?>
 
         <?php if ($selectedBooking): ?>
         <div class="modal fade" id="cancelBookingModal" tabindex="-1" aria-hidden="true">
@@ -1308,93 +958,53 @@ function initSenderWorkspace() {
     const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
     const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
     const selectedHasRider = root.dataset.selectedHasRider === '1';
-    const selectedBookingTabId = root.dataset.selectedBookingTab || 'active-orders';
-    const shouldAutoOpenSelectedTab = root.dataset.shouldAutoOpenSelectedTab === '1';
     const shouldSearchRiders = root.dataset.needsRider === '1';
     const canTrack = root.dataset.canTrack === '1';
     const canPay = root.dataset.canPay === '1';
     const canChat = root.dataset.canChat === '1';
     const chatReceiverIdFromRoot = parseInt(root.dataset.chatReceiverId || '0', 10);
 
-    const newOrderPanel = root.querySelector('#new-order-panel');
-    const toggleNewOrderBtn = root.querySelector('#toggle-new-order');
-    const closeNewOrderBtn = root.querySelector('#close-new-order');
+    document.body.classList.toggle('has-rider-float-bar', shouldSearchRiders);
 
-    toggleNewOrderBtn?.addEventListener('click', function () {
-        newOrderPanel.style.display = '';
-        newOrderPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    // ---------------- WIZARD STEP NAVIGATION ----------------
+    const wizardForm = root.querySelector('#booking-form');
+    if (wizardForm) {
+        const panes = Array.from(wizardForm.querySelectorAll('.wizard-pane'));
+        const dots = Array.from(root.querySelectorAll('.wizard-step-dot'));
 
-    closeNewOrderBtn?.addEventListener('click', function () {
-        newOrderPanel.style.display = 'none';
-    });
-
-    if (shouldAutoOpenSelectedTab && selectedBookingTabId && window.bootstrap?.Tab) {
-        const tabTrigger = root.querySelector(`#hubTabs button[data-bs-target="#${selectedBookingTabId}"]`);
-        if (tabTrigger) {
-            bootstrap.Tab.getOrCreateInstance(tabTrigger).show();
+        function goToStep(step) {
+            panes.forEach(pane => pane.classList.toggle('active', pane.dataset.step === String(step)));
+            dots.forEach(dot => {
+                const dotStep = parseInt(dot.dataset.stepDot, 10);
+                dot.classList.toggle('current', dotStep === step);
+                dot.classList.toggle('done', dotStep < step);
+            });
+            wizardForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-    }
 
-    root.querySelectorAll('#hubTabs button[data-bs-toggle="tab"]').forEach(btn => {
-        btn.addEventListener('shown.bs.tab', function () {
-            const url = new URL(window.location.href);
-            url.searchParams.delete('booking_id');
-            window.history.replaceState({ url: url.toString() }, '', url.toString());
-
-            setTimeout(() => {
-                if (workspaceState.detailMap) {
-                    workspaceState.detailMap.invalidateSize();
+        wizardForm.querySelectorAll('[data-wizard-next]').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const currentPane = this.closest('.wizard-pane');
+                if (currentPane && currentPane.dataset.step === '1') {
+                    const pickupSet = wizardForm.querySelector('#pickup_latitude')?.value;
+                    const deliverySet = wizardForm.querySelector('#delivery_latitude')?.value;
+                    const step1Error = root.querySelector('#step1-error');
+                    if (!pickupSet || !deliverySet) {
+                        step1Error?.classList.remove('d-none');
+                        return;
+                    }
+                    step1Error?.classList.add('d-none');
                 }
-            }, 200);
-        });
-    });
-
-    root.querySelectorAll('.order-select-link').forEach(link => {
-        link.addEventListener('click', function (e) {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-            e.preventDefault();
-            ajaxLoadWorkspace(this.href, true);
-        });
-    });
-
-    // ---------------- AT-A-GLANCE STAT CHIPS ----------------
-    root.querySelectorAll('#status-glance .stat-chip').forEach(chip => {
-        chip.addEventListener('click', function () {
-            const tabButton = root.querySelector(`#hubTabs button[data-bs-target="#${this.dataset.gotoTab}"]`);
-            if (tabButton && window.bootstrap) {
-                window.bootstrap.Tab.getOrCreateInstance(tabButton).show();
-            }
-            const historyFilter = this.dataset.historyFilter;
-            if (historyFilter) {
-                const filterChip = root.querySelector(`.history-filter-chip[data-history-kind="${historyFilter}"]`);
-                if (filterChip) filterChip.click();
-            }
-        });
-    });
-
-    // ---------------- HISTORY: COMPLETED / CANCELLED FILTER ----------------
-    root.querySelectorAll('.history-filter-chip').forEach(chip => {
-        chip.addEventListener('click', function () {
-            root.querySelectorAll('.history-filter-chip').forEach(c => c.classList.remove('active'));
-            this.classList.add('active');
-            const kind = this.dataset.historyKind;
-            root.querySelectorAll('#history-orders .order-card[data-history-kind]').forEach(card => {
-                const matches = kind === 'all' || card.dataset.historyKind === kind;
-                card.closest('.col-12').style.display = matches ? '' : 'none';
+                goToStep(parseInt(this.dataset.wizardNext, 10));
             });
         });
-    });
 
-    // ---------------- ORDER SEARCH ----------------
-    const orderSearchInput = root.querySelector('#order-search');
-    orderSearchInput?.addEventListener('input', function () {
-        const query = this.value.trim().toLowerCase();
-        root.querySelectorAll('.order-select-link').forEach(link => {
-            const matches = query === '' || link.textContent.toLowerCase().includes(query);
-            link.style.display = matches ? '' : 'none';
+        wizardForm.querySelectorAll('[data-wizard-back]').forEach(btn => {
+            btn.addEventListener('click', function () {
+                goToStep(parseInt(this.dataset.wizardBack, 10));
+            });
         });
-    });
+    }
 
     const pickupAddress = root.querySelector('#pickup_address');
     const pickupLat = root.querySelector('#pickup_latitude');
@@ -1781,39 +1391,25 @@ function initSenderWorkspace() {
                         }
 
                         html += `
-                            <div class="col-lg-6" id="rider-card-${rider.id}">
-                                <div class="cardx p-4 h-100">
-                                    <div class="d-flex justify-content-between">
-                                        <div>
-                                            <h2 class="h5 mb-1">${rider.full_name}</h2>
-                                            <div class="text-soft small">
-                                                <span>${rider.vehicle_type === 'car' ? '🚗' : '🏍️'} ${rider.vehicle_type.toUpperCase()}</span> | ⭐ ${parseFloat(rider.rating).toFixed(1)}
-                                            </div>
-                                            <div class="d-flex gap-2 mt-2 flex-wrap">
-                                                <span class="badge bg-info">${parseFloat(rider.distance_km).toFixed(2)} km away</span>
-                                                <span class="badge bg-dark border border-info text-info eta-badge" id="eta-${rider.id}" style="display:none;"></span>
-                                            </div>
-                                        </div>
-                                        <button class="btn btn-sm btn-outline-info rider-route-btn" data-rider-lat="${rider.last_latitude}" data-rider-lng="${rider.last_longitude}" data-rider-id="${rider.id}">
-                                            <i class="fa-solid fa-route me-1"></i> Route
-                                        </button>
+                            <div class="rider-row" id="rider-card-${rider.id}">
+                                <div class="rider-row-info">
+                                    <div class="rider-row-name">${rider.full_name}
+                                        <span class="badge bg-info ms-1">${parseFloat(rider.distance_km).toFixed(2)}km</span>
+                                        <span class="badge bg-dark border border-info text-info eta-badge ms-1" id="eta-${rider.id}" style="display:none;"></span>
                                     </div>
-                                    <div class="rider-card p-3 mt-3">
-                                        <form class="rider-request-form">
-                                            <input type="hidden" name="booking_id" value="${selectedBookingId}">
-                                            <input type="hidden" name="rider_user_id" value="${rider.id}">
-                                            <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                                            <div class="row g-2 align-items-end">
-                                                <div class="col">
-                                                    <label class="form-label small text-soft">Proposed Fee (₦)</label>
-                                                    <input class="form-control fw-bold text-info" type="number" name="proposed_cost" value="${rider.suggested_fee}">
-                                                </div>
-                                                <div class="col-auto">
-                                                    <button class="btn btn-primary" type="submit">Request</button>
-                                                </div>
-                                            </div>
-                                        </form>
-                                    </div>
+                                    <div class="text-soft small">${rider.vehicle_type === 'car' ? '🚗' : '🏍️'} ${rider.vehicle_type.toUpperCase()} &middot; ⭐ ${parseFloat(rider.rating).toFixed(1)}</div>
+                                </div>
+                                <div class="rider-row-actions">
+                                    <button class="btn btn-sm btn-outline-info rider-route-btn" data-rider-lat="${rider.last_latitude}" data-rider-lng="${rider.last_longitude}" data-rider-id="${rider.id}" title="Preview route">
+                                        <i class="fa-solid fa-route"></i>
+                                    </button>
+                                    <form class="rider-request-form d-flex gap-1 align-items-center">
+                                        <input type="hidden" name="booking_id" value="${selectedBookingId}">
+                                        <input type="hidden" name="rider_user_id" value="${rider.id}">
+                                        <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+                                        <input class="form-control form-control-sm fw-bold text-info" type="number" name="proposed_cost" value="${rider.suggested_fee}" title="Proposed fee (₦)">
+                                        <button class="btn btn-sm btn-primary" type="submit">Request</button>
+                                    </form>
                                 </div>
                             </div>`;
                     });
@@ -1823,7 +1419,7 @@ function initSenderWorkspace() {
                     }
 
                     workspaceState.knownRiderIds = activeIds;
-                    listContainer.innerHTML = html || '<div class="col-12 text-center text-soft py-5">No active riders found in range.</div>';
+                    listContainer.innerHTML = html || '<div class="text-center text-soft py-3">No active riders found in range.</div>';
 
                     listContainer.querySelectorAll('.rider-route-btn').forEach(btn => {
                         btn.addEventListener('click', function () {

@@ -7,14 +7,6 @@ $user = current_user();
 $success = flash('success');
 $error = flash('error');
 
-function respond_json(array $payload, int $statusCode = 200): void
-{
-    http_response_code($statusCode);
-    header('Content-Type: application/json');
-    echo json_encode($payload);
-    exit;
-}
-
 function sum_amount(array $rows): float
 {
     $total = 0.0;
@@ -683,7 +675,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .chat-status { display:block; font-size:.70rem; color:#7dd3fc; margin-top:4px; text-align:right; }
         .chat-footer { padding:12px; border-top:1px solid rgba(255,255,255,.08); }
         .chat-footer textarea { resize:none; min-height:54px; max-height:100px; }
-        .chat-action-row{display:flex;gap:8px;margin-bottom:10px}
+        .chat-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+        .chat-action-row>*{min-width:105px}
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
@@ -1195,6 +1188,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
             <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
             <div class="chat-action-row">
+                <?php if (!empty($activeBooking['sender_phone'])): ?>
+                <a class="btn btn-outline-info flex-fill" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="Call the sender's phone number directly">
+                    <i class="fa-solid fa-phone me-2"></i>Call Sender
+                </a>
+                <?php endif; ?>
                 <button type="button" class="btn btn-outline-success flex-fill" id="chat-call-btn"><i class="fa-solid fa-phone-volume me-2"></i>Internet Call</button>
                 <button type="button" class="btn btn-outline-warning flex-fill" id="chat-voice-btn"><i class="fa-solid fa-microphone me-2"></i><span class="voice-btn-label">Record Voice</span></button>
             </div>

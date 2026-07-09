@@ -25,6 +25,7 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
 <html lang="en">
 <head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <?= csrf_meta_tag() ?>
     <title>Rider Navigation</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -57,6 +58,7 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
             </div>
 
             <form id="arrival_form" method="post" action="rider/mark_arrived.php">
+                <?= csrf_field() ?>
                 <input type="hidden" name="booking_id" value="<?= $activeBooking['id'] ?>">
                 <button type="submit" id="btn_arrived" class="btn btn-secondary w-100 py-3 fw-bold btn-arrival" disabled>
                     Not Yet at Destination
@@ -105,6 +107,7 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
         lat: <?= $destLat ?? 'null' ?>,
         lng: <?= $destLng ?? 'null' ?>
     };
+    const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
     let map, riderMarker, destMarker;
 
@@ -174,7 +177,8 @@ $destLng = $activeBooking ? (float)$activeBooking['delivery_longitude'] : null;
                     body: JSON.stringify({
                         latitude: riderLat,
                         longitude: riderLng,
-                        status: document.getElementById('availability_status').value
+                        status: document.getElementById('availability_status').value,
+                        csrf_token: CSRF_TOKEN
                     })
                 });
                 const res = await response.json();

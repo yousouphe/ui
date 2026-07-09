@@ -7,6 +7,7 @@ header('Content-Type: application/json');
 
 $user = current_user();
 $data = json_decode(file_get_contents('php://input'), true);
+require_csrf(is_array($data) ? $data : null);
 
 if (!$data) {
     echo json_encode(['success' => false, 'message' => 'Invalid payload.']);

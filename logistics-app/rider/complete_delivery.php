@@ -9,6 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     redirect_to('rider/dashboard.php');
 }
 
+require_csrf();
+
 $bookingId = (int)($_POST['booking_id'] ?? 0);
 if ($bookingId <= 0) {
     flash('error', 'Invalid booking.');

@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config/db.php';
 header('Content-Type: application/json');
 
 $input = json_decode(file_get_contents('php://input'), true);
+require_csrf(is_array($input) ? $input : null);
 $bookingId = (int)($input['booking_id'] ?? 0);
 $action = (string)($input['action'] ?? '');
 

@@ -61,6 +61,8 @@ if (strpos($contentType, 'application/json') !== false && $rawInput !== '') {
 
 $data = array_merge($jsonInput, $_POST);
 
+require_csrf($data);
+
 $bookingId = isset($data['booking_id']) ? (int)$data['booking_id'] : 0;
 $riderUserId = isset($data['rider_user_id']) ? (int)$data['rider_user_id'] : 0;
 $proposedCostRaw = trim((string)($data['proposed_cost'] ?? ''));

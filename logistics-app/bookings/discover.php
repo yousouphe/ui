@@ -37,6 +37,7 @@ $success = flash('success');
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <?= csrf_meta_tag() ?>
     <title>Discover Riders | SwiftDrop</title>
     <base href="<?= e(base_url() . '/') ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -113,6 +114,7 @@ let knownRiderIds = new Set();
 const pickupCoords = [<?= $pickupLat ?>, <?= $pickupLng ?>];
 const deliveryCoords = [<?= $deliveryLat ?>, <?= $deliveryLng ?>];
 const bookingId = <?= $bookingId ?>;
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
 document.addEventListener('DOMContentLoaded', function() {
     map = L.map('radar_map').setView(pickupCoords, 14);
@@ -170,7 +172,7 @@ async function updateRiders() {
                             <div>
                                 <h2 class="h5 mb-1">${rider.full_name}</h2>
                                 <div class="text-soft small">
-                                    <span>${rider.vehicle_type === 'car' ? '•07' : '”9Ä3„1‚5'} ${rider.vehicle_type.toUpperCase()}</span> | 8¬2 ${parseFloat(rider.rating).toFixed(1)}
+                                    <span>${rider.vehicle_type === 'car' ? 'ï¿½0ï¿½7' : 'ï¿½9ï¿½3ï¿½1ï¿½5'} ${rider.vehicle_type.toUpperCase()}</span> | ï¿½8ï¿½2 ${parseFloat(rider.rating).toFixed(1)}
                                 </div>
                                 <div class="d-flex gap-2 mt-2">
                                     <span class="badge bg-info">${parseFloat(rider.distance_km).toFixed(2)} km</span>
@@ -185,9 +187,10 @@ async function updateRiders() {
                             <form onsubmit="sendRiderRequest(event, this)">
                                 <input type="hidden" name="booking_id" value="${bookingId}">
                                 <input type="hidden" name="rider_user_id" value="${rider.id}">
+                                <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
                                 <div class="row g-2 align-items-end">
                                     <div class="col">
-                                        <label class="form-label small text-soft">Proposed Fee (6²6)</label>
+                                        <label class="form-label small text-soft">Proposed Fee (ï¿½6ï¿½6)</label>
                                         <input class="form-control fw-bold text-info" type="number" name="proposed_cost" value="${rider.suggested_fee}">
                                     </div>
                                     <div class="col-auto">

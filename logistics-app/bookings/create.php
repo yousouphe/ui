@@ -7,6 +7,7 @@ $errors = [];
 $user = current_user();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf();
     $errors = validate_required([
         'recipient_name' => 'Recipient name',
         'recipient_phone' => 'Recipient phone',
@@ -117,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php if (!empty($errors['general'])): ?><div class="alert alert-danger"><?= e($errors['general']) ?></div><?php endif; ?>
 
     <form method="post" enctype="multipart/form-data">
+      <?= csrf_field() ?>
       <div class="row g-4">
         <div class="col-md-6">
           <label class="form-label">Recipient name</label>

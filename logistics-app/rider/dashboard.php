@@ -77,6 +77,7 @@ body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:1
             <td>
               <?php if ($request['request_status'] === 'pending'): ?>
                 <form class="d-flex gap-2 flex-wrap" method="post" action="<?= e(url_path('rider/respond_request.php')) ?>">
+                  <?= csrf_field() ?>
                   <input type="hidden" name="request_id" value="<?= (int)$request['id'] ?>">
                   <button class="btn btn-sm btn-success" type="submit" name="action" value="accepted">Accept</button>
                   <button class="btn btn-sm btn-danger" type="submit" name="action" value="rejected">Reject</button>

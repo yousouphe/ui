@@ -217,6 +217,7 @@ function badge_class(string $status): string
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <?= csrf_meta_tag() ?>
     <title>Rider Dashboard | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -730,6 +731,7 @@ function badge_class(string $status): string
                                     <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
                                     <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
                                     <form class="d-flex gap-2" method="post" action="<?= e($respondRequestUrl) ?>">
+                                        <?= csrf_field() ?>
                                         <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
                                         <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
                                         <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
@@ -906,6 +908,7 @@ function badge_class(string $status): string
     const ajaxUpdateLocationUrl = <?= json_encode($ajaxUpdateLocationUrl) ?>;
     const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
     const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
+    const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
     let watchId = null;
     let lastKnownPosition = null;
@@ -1187,7 +1190,8 @@ function badge_class(string $status): string
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     booking_id: bookingId,
-                    action: action
+                    action: action,
+                    csrf_token: CSRF_TOKEN
                 })
             });
 
@@ -1271,7 +1275,7 @@ function badge_class(string $status): string
                     await fetch(ajaxUpdateLocationUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ latitude, longitude, status: 'available' })
+                        body: JSON.stringify({ latitude, longitude, status: 'available', csrf_token: CSRF_TOKEN })
                     });
                 } catch (e) {
                     if (geoMessage) geoMessage.textContent = 'Live location updated on screen, but server sync failed.';
@@ -1302,7 +1306,7 @@ function badge_class(string $status): string
             await fetch(ajaxUpdateStatusUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status })
+                body: JSON.stringify({ status, csrf_token: CSRF_TOKEN })
             });
         } catch (e) {
             // ignore

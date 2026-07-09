@@ -5,6 +5,7 @@ require_once __DIR__ . '/config/db.php';
 
 $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf();
     $errors = validate_required([
         'full_name' => 'Full name',
         'email' => 'Email',
@@ -70,6 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <p class="text-soft">Register to start booking and tracking deliveries.</p>
             <?php if ($errors): ?><div class="alert alert-danger">Please fix the highlighted fields.</div><?php endif; ?>
             <form method="post" novalidate>
+              <?= csrf_field() ?>
               <div class="mb-3">
                 <label class="form-label">Full name</label>
                 <input class="form-control" name="full_name" value="<?= e(old('full_name')) ?>">

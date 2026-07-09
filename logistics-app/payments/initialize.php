@@ -25,6 +25,8 @@ try {
         $input = $_POST;
     }
 
+    require_csrf($input);
+
     $bookingId = (int)($input['booking_id'] ?? 0);
 
     if ($bookingId <= 0) {

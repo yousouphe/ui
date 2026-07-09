@@ -38,6 +38,49 @@ function e(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
+function csrf_token(): string {
+    if (empty($_SESSION['_csrf_token'])) {
+        $_SESSION['_csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['_csrf_token'];
+}
+
+function csrf_field(): string {
+    return '<input type="hidden" name="csrf_token" value="' . e(csrf_token()) . '">';
+}
+
+function csrf_meta_tag(): string {
+    return '<meta name="csrf-token" content="' . e(csrf_token()) . '">';
+}
+
+function require_csrf(?array $source = null): void {
+    $token = null;
+    if (is_array($source) && isset($source['csrf_token'])) {
+        $token = (string)$source['csrf_token'];
+    } elseif (isset($_POST['csrf_token'])) {
+        $token = (string)$_POST['csrf_token'];
+    } elseif (isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+        $token = (string)$_SERVER['HTTP_X_CSRF_TOKEN'];
+    }
+
+    if ($token !== null && $token !== '' && hash_equals(csrf_token(), $token)) {
+        return;
+    }
+
+    $wantsJson = str_contains(strtolower($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+        || strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest'
+        || str_contains(strtolower($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json');
+
+    http_response_code(419);
+    if ($wantsJson) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'status' => false, 'message' => 'Invalid or expired security token. Please refresh and try again.']);
+    } else {
+        echo 'Invalid or expired security token. Please refresh the page and try again.';
+    }
+    exit;
+}
+
 function redirect_to(string $path): void {
     header('Location: ' . url_path($path));
     exit;

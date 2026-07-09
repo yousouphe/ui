@@ -6,6 +6,7 @@ $data = json_decode(file_get_contents('php://input'), true);
 $user = current_user();
 
 if ($user && isset($data['status'])) {
+    require_csrf(is_array($data) ? $data : null);
     $stmt = $pdo->prepare('UPDATE rider_profiles SET availability_status = ? WHERE user_id = ?');
     $stmt->execute([$data['status'], $user['id']]);
     echo json_encode(['success' => true]);

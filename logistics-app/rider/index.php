@@ -140,6 +140,10 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
         $currentUserId = (int)($user['id'] ?? 0);
         $counterpartId = (int)($ctx['counterpart_user_id'] ?? 0);
 
+        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload'], true)) {
+            require_csrf();
+        }
+
         if ($realtimeAction === 'call_create') {
             $payload = [
                 'booking_id' => $bookingIdForRealtime,
@@ -236,6 +240,10 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         respond_json(['success' => false, 'message' => 'Invalid request method.'], 405);
+    }
+
+    if (($_POST['csrf_token'] ?? '') === '' || !hash_equals(csrf_token(), (string)$_POST['csrf_token'])) {
+        respond_json(['success' => false, 'message' => 'Invalid or expired security token. Please refresh and try again.'], 419);
     }
 
     $requestId = (int)($_POST['request_id'] ?? 0);
@@ -624,6 +632,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <?= csrf_meta_tag() ?>
     <title>Rider Dashboard | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -1223,6 +1232,7 @@ const routeDetailsBody = document.getElementById('route_details_body');
 const ajaxUpdateLocationUrl = <?= json_encode($ajaxUpdateLocationUrl) ?>;
 const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
 const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
 let watchId = null;
 let lastKnownPosition = null;
@@ -1655,7 +1665,8 @@ async function runWorkflowAction() {
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
                 booking_id: bookingId,
-                action: action
+                action: action,
+                csrf_token: CSRF_TOKEN
             })
         });
 
@@ -1746,7 +1757,7 @@ function startTracking() {
                 await fetch(safeAbsoluteUrl(ajaxUpdateLocationUrl), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ latitude, longitude, status: 'available' })
+                    body: JSON.stringify({ latitude, longitude, status: 'available', csrf_token: CSRF_TOKEN })
                 });
             } catch (e) {
                 if (geoMessage) geoMessage.textContent = 'Live location updated on screen, but server sync failed.';
@@ -1777,7 +1788,7 @@ async function updateServerStatus(status) {
         await fetch(safeAbsoluteUrl(ajaxUpdateStatusUrl), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status })
+            body: JSON.stringify({ status, csrf_token: CSRF_TOKEN })
         });
     } catch (e) {}
 }
@@ -1794,6 +1805,7 @@ async function handleOfferAction(requestId, action, button) {
         const formData = new FormData();
         formData.append('request_id', String(requestId));
         formData.append('action', action);
+        formData.append('csrf_token', CSRF_TOKEN);
 
         const response = await fetch(safeAbsoluteUrl(respondUrl), {
             method: 'POST',
@@ -2157,7 +2169,7 @@ function initChat() {
             await ensurePeerReady();
             await fetch(`${realtimeBaseUrl}?action=call_create`, {
                 method: 'POST',
-                body: new URLSearchParams({ booking_id: chatBookingId })
+                body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
             const localStream = await ensureLocalAudioStream();
             if (callPanel) callPanel.style.display = 'block';
@@ -2178,7 +2190,7 @@ function initChat() {
             bindActiveCall(pendingIncomingCall);
             await fetch(`${realtimeBaseUrl}?action=call_accept`, {
                 method: 'POST',
-                body: new URLSearchParams({ booking_id: chatBookingId })
+                body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
             pendingIncomingCall = null;
         } catch (err) {
@@ -2198,7 +2210,7 @@ function initChat() {
             }
             await fetch(`${realtimeBaseUrl}?action=call_end`, {
                 method: 'POST',
-                body: new URLSearchParams({ booking_id: chatBookingId })
+                body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
         } catch (err) {
             console.error(err);
@@ -2238,6 +2250,7 @@ function initChat() {
         formData.append('booking_id', chatBookingId);
         formData.append('receiver_user_id', chatReceiverId);
         formData.append('voice_note', blob, `voice-${Date.now()}.webm`);
+        formData.append('csrf_token', CSRF_TOKEN);
         const response = await fetch(`${realtimeBaseUrl}?action=voice_upload`, {
             method: 'POST',
             body: formData
@@ -2333,7 +2346,8 @@ function initChat() {
                 body: JSON.stringify({
                     booking_id: chatBookingId,
                     receiver_user_id: chatReceiverId,
-                    message: message
+                    message: message,
+                    csrf_token: CSRF_TOKEN
                 })
             });
 

@@ -34,6 +34,7 @@ $canPay = $booking['booking_status'] === 'delivered' && $booking['payment_status
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <?= csrf_meta_tag() ?>
   <title>Track Delivery</title>
   <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -101,6 +102,7 @@ let map, riderMarker, routingControl;
 let currentRouteTarget = null;
 
 const bookingId = <?= (int)$booking['id'] ?>;
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
 // INIT MAP
 map = L.map('tracking_map').setView(
@@ -214,7 +216,7 @@ document.getElementById('pay-now-btn').addEventListener('click', async function 
         const res = await fetch('<?= e(url_path('payments/initialize.php')) ?>', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ booking_id: <?= (int)$booking['id'] ?> })
+            body: JSON.stringify({ booking_id: <?= (int)$booking['id'] ?>, csrf_token: CSRF_TOKEN })
         });
 
         const data = await res.json();

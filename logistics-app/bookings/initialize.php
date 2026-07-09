@@ -20,6 +20,8 @@ if (is_array($input)) {
     $bookingId = (int)$_POST['booking_id'];
 }
 
+require_csrf(is_array($input) ? $input : null);
+
 $user = current_user();
 
 if ($bookingId <= 0) {

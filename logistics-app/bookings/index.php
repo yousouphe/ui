@@ -111,6 +111,10 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
         $currentUserId = (int)($user['id'] ?? 0);
         $counterpartId = (int)($ctx['counterpart_user_id'] ?? 0);
 
+        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload'], true)) {
+            require_csrf();
+        }
+
         if ($realtimeAction === 'call_create') {
             $payload = [
                 'booking_id' => $bookingIdForRealtime,
@@ -205,6 +209,7 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
 
 // ---------------- CREATE BOOKING ----------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf();
     $errors = validate_required([
         'recipient_name'   => 'Recipient name',
         'recipient_phone'  => 'Recipient phone',
@@ -430,6 +435,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <?= csrf_meta_tag() ?>
     <title>Sender Hub | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -542,6 +548,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             </div>
 
             <form method="post" enctype="multipart/form-data" id="booking-form">
+                <?= csrf_field() ?>
                 <div class="row g-4">
                     <div class="col-md-6">
                         <label class="form-label">Recipient name</label>
@@ -1110,6 +1117,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <script>
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 const workspaceState = {
     bookingMap: null,
     detailMap: null,
@@ -1517,6 +1525,7 @@ function initSenderWorkspace() {
                                         <form class="rider-request-form">
                                             <input type="hidden" name="booking_id" value="${selectedBookingId}">
                                             <input type="hidden" name="rider_user_id" value="${rider.id}">
+                                            <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
                                             <div class="row g-2 align-items-end">
                                                 <div class="col">
                                                     <label class="form-label small text-soft">Proposed Fee (₦)</label>
@@ -1785,7 +1794,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                         'Accept': 'application/json'
                     },
                     cache: 'no-store',
-                    body: JSON.stringify({ booking_id: bookingId })
+                    body: JSON.stringify({ booking_id: bookingId, csrf_token: CSRF_TOKEN })
                 });
 
                 const rawText = await response.text();
@@ -1894,7 +1903,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ booking_id: bookingId, reason })
+                body: JSON.stringify({ booking_id: bookingId, reason, csrf_token: CSRF_TOKEN })
             });
 
             const result = await response.json();
@@ -1927,7 +1936,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ booking_id: bookingId })
+                body: JSON.stringify({ booking_id: bookingId, csrf_token: CSRF_TOKEN })
             });
 
             const result = await response.json();
@@ -1960,7 +1969,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ booking_id: bookingId })
+                body: JSON.stringify({ booking_id: bookingId, csrf_token: CSRF_TOKEN })
             });
 
             const result = await response.json();
@@ -2143,7 +2152,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 await ensurePeerReady();
                 await fetch(`${realtimeBaseUrl}?action=call_create`, {
                     method: 'POST',
-                    body: new URLSearchParams({ booking_id: chatBookingId })
+                    body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
                 const localStream = await ensureLocalAudioStream();
                 if (callPanel) callPanel.style.display = 'block';
@@ -2164,7 +2173,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 bindActiveCall(pendingIncomingCall);
                 await fetch(`${realtimeBaseUrl}?action=call_accept`, {
                     method: 'POST',
-                    body: new URLSearchParams({ booking_id: chatBookingId })
+                    body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
                 pendingIncomingCall = null;
             } catch (err) {
@@ -2184,7 +2193,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 }
                 await fetch(`${realtimeBaseUrl}?action=call_end`, {
                     method: 'POST',
-                    body: new URLSearchParams({ booking_id: chatBookingId })
+                    body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
             } catch (err) {
                 console.error(err);
@@ -2224,6 +2233,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             formData.append('booking_id', chatBookingId);
             formData.append('receiver_user_id', chatReceiverId);
             formData.append('voice_note', blob, `voice-${Date.now()}.webm`);
+            formData.append('csrf_token', CSRF_TOKEN);
             const response = await fetch(`${realtimeBaseUrl}?action=voice_upload`, {
                 method: 'POST',
                 body: formData
@@ -2310,7 +2320,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 const response = await fetch('<?= e(url_path('chat/ajax_send_message.php')) ?>', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({ booking_id: chatBookingId, receiver_user_id: chatReceiverId, message: message })
+                    body: JSON.stringify({ booking_id: chatBookingId, receiver_user_id: chatReceiverId, message: message, csrf_token: CSRF_TOKEN })
                 });
                 const result = await response.json();
                 if (!response.ok || !result.success) {

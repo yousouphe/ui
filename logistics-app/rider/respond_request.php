@@ -4,6 +4,7 @@ require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') redirect_to('rider/dashboard.php');
+require_csrf();
 
 $user = current_user();
 $requestId = (int)($_POST['request_id'] ?? 0);

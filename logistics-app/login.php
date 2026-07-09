@@ -5,6 +5,7 @@ require_once __DIR__ . '/config/db.php';
 
 $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_csrf();
     $email = strtolower(trim($_POST['email'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
 
@@ -53,6 +54,7 @@ body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:1
         <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
         <?php if ($msg = flash('success')): ?><div class="alert alert-success"><?= e($msg) ?></div><?php endif; ?>
         <form method="post">
+          <?= csrf_field() ?>
           <div class="mb-3"><label class="form-label">Email</label><input class="form-control" type="email" name="email"></div>
           <div class="mb-4"><label class="form-label">Password</label><input class="form-control" type="password" name="password"></div>
           <button class="btn btn-primary" type="submit">Login</button>

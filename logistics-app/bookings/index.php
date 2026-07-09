@@ -545,9 +545,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="<?= e(url_path('dashboard.php')) ?>">Dashboard</a>
             <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
         </div>
     </div>

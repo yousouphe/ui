@@ -121,8 +121,8 @@ function require_role(array $roles): void {
 function require_guest(): void {
     if (is_logged_in()) {
         $user = current_user();
-        if (($user['role'] ?? '') === 'rider') redirect_to('rider/dashboard.php');
-        redirect_to('dashboard.php');
+        if (($user['role'] ?? '') === 'rider') redirect_to('rider/index.php');
+        redirect_to('bookings/index.php');
     }
 }
 

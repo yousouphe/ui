@@ -663,6 +663,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .system-msg { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:12px 14px; font-size:.9rem; color:#cfe0ff; margin-bottom:1rem; }
         .mini-row { border-bottom:1px solid rgba(255,255,255,.06); padding:10px 0; }
         .mini-row:last-child { border-bottom:none; }
+        .glance-row { cursor:pointer; transition:.15s ease; border-radius:.5rem; padding-left:8px; padding-right:8px; margin:0 -8px; }
+        .glance-row:hover { background:rgba(56,189,248,.08); }
+        .order-search-wrap { position:relative; max-width:320px; }
+        .order-search-wrap input { padding-left:2.25rem; }
+        .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#9fb0d6; }
         .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
         .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
         .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(8,17,33,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.10); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
@@ -884,7 +889,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3">Quick Summary</h2>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="offers" role="button">
                     <div>
                         <div class="small text-soft">Pending Offers</div>
                         <div class="fw-bold" id="pending-offers-count"><?= count($pendingOffers) ?></div>
@@ -892,7 +897,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-warning text-dark">Awaiting response</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Ongoing Orders</div>
                         <div class="fw-bold" id="quick-ongoing-count"><?= count($ongoingBookings) ?></div>
@@ -900,7 +905,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-info text-dark">In progress</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Completed Orders</div>
                         <div class="fw-bold" id="quick-delivered-count"><?= count($deliveredBookings) ?></div>
@@ -908,7 +913,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-success">Delivered</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                     <div>
                         <div class="small text-soft">Cancelled Orders</div>
                         <div class="fw-bold" id="quick-cancelled-count"><?= count($cancelledBookings) ?></div>
@@ -916,7 +921,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <span class="badge bg-danger">Cancelled</span>
                 </div>
 
-                <div class="mini-row d-flex justify-content-between align-items-center">
+                <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="payments" role="button">
                     <div>
                         <div class="small text-soft">Paid Earnings</div>
                         <div class="fw-bold" id="quick-paid-overall">₦<?= number_format($totalPaidOverall, 2) ?></div>
@@ -1009,10 +1014,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
                 <div class="col-lg-8">
                     <div class="cardx p-4">
-                        <h2 class="h5 fw-bold mb-3">All Assigned Orders</h2>
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h2 class="h5 fw-bold mb-0">All Assigned Orders</h2>
+                            <?php if (!empty($allAssignedBookings)): ?>
+                            <div class="order-search-wrap">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" class="form-control form-control-sm bg-dark text-white border-secondary" id="assigned-orders-search" placeholder="Search by code, item, sender...">
+                            </div>
+                            <?php endif; ?>
+                        </div>
                         <?php if (empty($allAssignedBookings)): ?>
                             <div class="text-soft">No assigned orders yet.</div>
                         <?php else: ?>
+                            <div id="assigned-orders-list">
                             <?php foreach ($allAssignedBookings as $b): ?>
                                 <div class="req-card p-3">
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
@@ -1031,6 +1045,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <div class="price-tag">₦<?= number_format((float)($b['agreed_cost'] ?? 0), 2) ?></div>
                                 </div>
                             <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -2412,6 +2427,25 @@ window.addEventListener('resize', function () {
     if (state.map) {
         state.map.invalidateSize();
     }
+});
+
+// ---------------- QUICK SUMMARY: JUMP TO TAB ----------------
+document.querySelectorAll('.glance-row').forEach(row => {
+    row.addEventListener('click', function () {
+        const tabButton = document.querySelector(`#riderDashboardTabs button[data-bs-target="#${this.dataset.gotoTab}"]`);
+        if (tabButton && window.bootstrap) {
+            window.bootstrap.Tab.getOrCreateInstance(tabButton).show();
+        }
+    });
+});
+
+// ---------------- ASSIGNED ORDERS SEARCH ----------------
+document.getElementById('assigned-orders-search')?.addEventListener('input', function () {
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll('#assigned-orders-list > .req-card').forEach(card => {
+        const matches = query === '' || card.textContent.toLowerCase().includes(query);
+        card.style.display = matches ? '' : 'none';
+    });
 });
 </script>
 </body>

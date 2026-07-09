@@ -1,0 +1,129 @@
+<?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+function config_app(): array {
+    static $config = null;
+    if ($config === null) {
+        $config = require __DIR__ . '/env.php';
+    }
+    return $config;
+}
+
+function base_url(): string {
+    $configured = trim((string)(config_app()['base_url'] ?? ''));
+    if ($configured !== '') {
+        return rtrim($configured, '/');
+    }
+
+    $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+    $dir = rtrim(dirname($scriptName), '/');
+    foreach (['/bookings', '/rider'] as $suffix) {
+        if (str_ends_with($dir, $suffix)) {
+            $dir = substr($dir, 0, -strlen($suffix));
+            break;
+        }
+    }
+    return ($dir === '/' || $dir === '.' || $dir === '') ? '' : $dir;
+}
+
+function url_path(string $path = ''): string {
+    $base = base_url();
+    $path = ltrim($path, '/');
+    return $base . ($path !== '' ? '/' . $path : '');
+}
+
+function e(string $value): string {
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function redirect_to(string $path): void {
+    header('Location: ' . url_path($path));
+    exit;
+}
+
+function is_logged_in(): bool {
+    return !empty($_SESSION['user']);
+}
+
+function current_user(): ?array {
+    return $_SESSION['user'] ?? null;
+}
+
+function require_auth(): void {
+    if (!is_logged_in()) redirect_to('login.php');
+}
+
+function require_role(array $roles): void {
+    require_auth();
+    $user = current_user();
+    if (!$user || !in_array($user['role'], $roles, true)) {
+        http_response_code(403);
+        exit('Access denied.');
+    }
+}
+
+function require_guest(): void {
+    if (is_logged_in()) {
+        $user = current_user();
+        if (($user['role'] ?? '') === 'rider') redirect_to('rider/dashboard.php');
+        redirect_to('dashboard.php');
+    }
+}
+
+function flash(string $key, ?string $message = null): ?string {
+    if ($message !== null) {
+        $_SESSION['_flash'][$key] = $message;
+        return null;
+    }
+    if (isset($_SESSION['_flash'][$key])) {
+        $msg = $_SESSION['_flash'][$key];
+        unset($_SESSION['_flash'][$key]);
+        return $msg;
+    }
+    return null;
+}
+
+function old(string $key, string $default = ''): string {
+    return $_POST[$key] ?? $default;
+}
+
+function validate_required(array $fields, array $source): array {
+    $errors = [];
+    foreach ($fields as $field => $label) {
+        if (!isset($source[$field]) || trim((string)$source[$field]) === '') {
+            $errors[$field] = $label . ' is required.';
+        }
+    }
+    return $errors;
+}
+
+function save_item_image(array $file): ?string {
+    if (empty($file['name']) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        return null;
+    }
+    if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Item image upload failed.');
+    }
+    $allowed = ['image/jpeg'=>'jpg', 'image/png'=>'png', 'image/webp'=>'webp'];
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = $finfo->file($file['tmp_name']) ?: '';
+    if (!isset($allowed[$mime])) throw new RuntimeException('Only JPG, PNG and WEBP are allowed.');
+    if (($file['size'] ?? 0) > 5 * 1024 * 1024) throw new RuntimeException('Image must not exceed 5MB.');
+
+    $name = 'item_' . date('Ymd_His') . '_' . bin2hex(random_bytes(5)) . '.' . $allowed[$mime];
+    $dir = dirname(__DIR__) . '/uploads/items';
+    if (!is_dir($dir)) mkdir($dir, 0775, true);
+    $dest = $dir . '/' . $name;
+    if (!move_uploaded_file($file['tmp_name'], $dest)) throw new RuntimeException('Failed to move uploaded image.');
+    return 'uploads/items/' . $name;
+}
+
+function haversine_sql(string $latField, string $lngField, float $lat, float $lng): string {
+    return "(6371 * ACOS(
+        COS(RADIANS($lat)) * COS(RADIANS($latField)) *
+        COS(RADIANS($lngField) - RADIANS($lng)) +
+        SIN(RADIANS($lat)) * SIN(RADIANS($latField))
+    ))";
+}

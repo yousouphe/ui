@@ -633,59 +633,72 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css">
     <style>
-        body { background:#09101d; min-height:100vh; color:#eef4ff; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-        .navx { background:rgba(8,17,33,.88); border-bottom:1px solid rgba(255,255,255,.08); }
-        .cardx { background:rgba(17,27,51,.95); border-radius:1.5rem; border:1px solid rgba(255,255,255,.08); box-shadow:0 10px 40px rgba(0,0,0,0.4); }
-        #nav_map { height:400px; width:100%; border-radius:1.25rem; border:1px solid rgba(255,255,255,0.1); margin-bottom:1rem; overflow:hidden; }
-        #route_details { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:14px; color:#cfe0ff; font-size:.92rem; margin-bottom:1.5rem; max-height:220px; overflow-y:auto; }
+        body { background:#eaf5ff; min-height:100vh; color:#0f2c44; font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        .navx { background:rgba(255,255,255,.85); border-bottom:1px solid rgba(15,42,68,.10); }
+        .cardx { background:rgba(255,255,255,.95); border-radius:1.5rem; border:1px solid rgba(15,42,68,.10); box-shadow:0 10px 40px rgba(0,0,0,0.4); }
+        #nav_map { height:260px; width:100%; border-radius:1.25rem; border:1px solid rgba(15,42,68,.12); margin-bottom:1rem; overflow:hidden; }
+        #nav_map_wrap.collapsed #nav_map { display:none; }
+        #map-toggle-btn i { transition:.2s transform; }
+        #nav_map_wrap.collapsed #map-toggle-btn i { transform:rotate(-90deg); }
+        #route_details { background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); border-radius:1rem; padding:14px; color:#0f2c44; font-size:.92rem; margin-bottom:1.5rem; max-height:220px; overflow-y:auto; }
         #route_details .route-title { font-weight:700; margin-bottom:8px; color:#fff; }
-        #route_details .route-step { padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+        #route_details .route-step { padding:6px 0; border-bottom:1px solid rgba(15,42,68,.08); }
         #route_details .route-step:last-child { border-bottom:none; }
         .stats-bar { background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.2); border-radius:1rem; padding:12px; margin-bottom:1.5rem; }
-        .summary-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:16px; height:100%; }
-        .stat-label { font-size:.65rem; color:#9fb0d6; text-transform:uppercase; letter-spacing:1px; }
-        .stat-value { font-size:1rem; font-weight:800; color:#fff; }
-        .money-big { font-size:1.4rem; font-weight:800; color:#38bdf8; }
-        .swipe-container { width:100%; height:54px; background:#16203a; border-radius:27px; position:relative; cursor:pointer; border:2px solid rgba(255,255,255,0.1); transition:0.4s; user-select:none; }
-        .swipe-handle { width:46px; height:46px; background:#9fb0d6; border-radius:50%; position:absolute; top:2px; left:3px; transition:0.4s; display:flex; align-items:center; justify-content:center; color:#09101d; z-index:2; }
-        .swipe-text { position:absolute; width:100%; text-align:center; line-height:50px; font-size:.85rem; font-weight:800; letter-spacing:1px; z-index:1; pointer-events:none; }
-        .swipe-container.active { background:#10b981; border-color:#10b981; }
-        .swipe-container.active .swipe-handle { left:calc(100% - 49px); background:#fff; color:#10b981; }
-        .req-card { background:rgba(255,255,255,0.03); border-radius:1rem; border:1px solid rgba(255,255,255,0.08); margin-bottom:1rem; }
-        .price-tag { color:#38bdf8; font-weight:800; font-size:1.1rem; }
+        .summary-card { background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); border-radius:1rem; padding:16px; height:100%; }
+        .stat-label { font-size:.65rem; color:#5c7a91; text-transform:uppercase; letter-spacing:1px; }
+        .stat-value { font-size:1rem; font-weight:800; color:#0f2c44; }
+        .money-big { font-size:1.4rem; font-weight:800; color:#0284c7; }
+        .online-toggle-row { display:flex; align-items:center; gap:14px; }
+        .online-toggle { position:relative; display:inline-block; width:52px; height:30px; flex-shrink:0; }
+        .online-toggle input { opacity:0; width:0; height:0; }
+        .online-toggle-slider { position:absolute; inset:0; background:#16203a; border:2px solid rgba(15,42,68,.18); border-radius:999px; cursor:pointer; transition:.3s; }
+        .online-toggle-slider::before { content:""; position:absolute; width:20px; height:20px; left:3px; top:2px; background:#5c7a91; border-radius:50%; transition:.3s; }
+        .online-toggle input:checked + .online-toggle-slider { background:#10b981; border-color:#10b981; }
+        .online-toggle input:checked + .online-toggle-slider::before { transform:translateX(22px); background:#fff; }
+        #map-toggle-btn { white-space:nowrap; }
+        .req-card { background:rgba(15,42,68,.05); border-radius:1rem; border:1px solid rgba(15,42,68,.10); margin-bottom:1rem; }
+        .price-tag { color:#0284c7; font-weight:800; font-size:1.1rem; }
         .pulse-btn { animation:pulse-green 2s infinite; border-radius:12px; }
         @keyframes pulse-green { 0% { box-shadow:0 0 0 0 rgba(16,185,129,0.7);} 70% { box-shadow:0 0 0 15px rgba(16,185,129,0);} 100% { box-shadow:0 0 0 0 rgba(16,185,129,0);} }
         .nav-tabs { border:none; gap:8px; }
-        .nav-link { color:#9fb0d6; border:none !important; border-radius:10px !important; font-weight:600; padding:10px 20px; }
+        .nav-link { color:#5c7a91; border:none !important; border-radius:10px !important; font-weight:600; padding:10px 20px; }
         .nav-link.active { background:#38bdf8 !important; color:#09101d !important; }
-        .text-soft { color:#9fb0d6; }
-        .map-legend { position:absolute; left:12px; bottom:12px; background:rgba(8,17,33,.82); border:1px solid rgba(255,255,255,.08); border-radius:.75rem; padding:.6rem .8rem; color:#cfe0ff; font-size:.82rem; z-index:3; }
-        .system-msg { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,.08); border-radius:1rem; padding:12px 14px; font-size:.9rem; color:#cfe0ff; margin-bottom:1rem; }
-        .mini-row { border-bottom:1px solid rgba(255,255,255,.06); padding:10px 0; }
+        .text-soft { color:#5c7a91; }
+        .map-legend { position:absolute; left:12px; bottom:12px; background:rgba(255,255,255,.82); border:1px solid rgba(15,42,68,.10); border-radius:.75rem; padding:.6rem .8rem; color:#0f2c44; font-size:.82rem; z-index:3; }
+        .system-msg { background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); border-radius:1rem; padding:12px 14px; font-size:.9rem; color:#0f2c44; margin-bottom:1rem; }
+        .mini-row { border-bottom:1px solid rgba(15,42,68,.08); padding:10px 0; }
         .mini-row:last-child { border-bottom:none; }
         .glance-row { cursor:pointer; transition:.15s ease; border-radius:.5rem; padding-left:8px; padding-right:8px; margin:0 -8px; }
         .glance-row:hover { background:rgba(56,189,248,.08); }
         .order-search-wrap { position:relative; max-width:320px; }
         .order-search-wrap input { padding-left:2.25rem; }
-        .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#9fb0d6; }
-        .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
+        .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#5c7a91; }
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); font-size:.85rem; }
         .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
-        .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(8,17,33,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.10); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
-        .chat-header { padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.08); display:flex; justify-content:space-between; align-items:center; }
-        .chat-messages { height:360px; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
-        .chat-bubble { max-width:80%; padding:10px 12px; border-radius:14px; font-size:.92rem; line-height:1.35; word-wrap:break-word; }
-        .chat-bubble.me { align-self:flex-end; background:rgba(56,189,248,.18); border:1px solid rgba(56,189,248,.30); color:#eef4ff; }
-        .chat-bubble.them { align-self:flex-start; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.10); color:#eef4ff; }
-        .chat-time { display:block; font-size:.72rem; color:#9fb0d6; margin-top:6px; }
-        .chat-status { display:block; font-size:.70rem; color:#7dd3fc; margin-top:4px; text-align:right; }
-        .chat-footer { padding:12px; border-top:1px solid rgba(255,255,255,.08); }
-        .chat-footer textarea { resize:none; min-height:54px; max-height:100px; }
-        .chat-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
-        .chat-action-row>*{min-width:105px}
+        .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(255,255,255,.75); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(15,42,68,.12); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
+        .chat-header { padding:14px 16px; border-bottom:1px solid rgba(15,42,68,.10); display:flex; justify-content:space-between; align-items:center; }
+        .chat-header-info{display:flex;align-items:center;gap:10px}
+        .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
+        .chat-header-actions{display:flex;align-items:center;gap:4px}
+        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s ease;text-decoration:none}
+        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44}
+        .chat-icon-btn.recording-live{background:#ef4444;border-color:#ef4444;color:#fff}
+        .chat-messages { height:360px; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:2px; background:rgba(0,0,0,.12); }
+        .chat-bubble { max-width:78%; padding:8px 12px; border-radius:16px; font-size:.9rem; line-height:1.35; word-wrap:break-word; margin:3px 0; box-shadow:0 1px 2px rgba(0,0,0,.15); }
+        .chat-bubble.me { align-self:flex-end; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#062334; border-bottom-right-radius:4px; }
+        .chat-bubble.them { align-self:flex-start; background:rgba(15,42,68,.10); color:#0f2c44; border-bottom-left-radius:4px; }
+        .chat-time { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:4px; }
+        .chat-status { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:2px; text-align:right; }
+        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10)}
+        .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
+        .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
+        .chat-send-btn{width:38px;height:38px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
-        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(8,17,33,.88);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
+        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.85);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
         .call-panel .call-actions{display:flex;gap:8px;margin-top:12px}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
         .request-indicator { min-width:22px; height:22px; border-radius:999px; background:#ef4444; color:#fff; font-size:.72rem; font-weight:700; display:none; align-items:center; justify-content:center; padding:0 6px; }
@@ -695,7 +708,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark navx">
+<nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
@@ -730,6 +743,44 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         </div>
     </div>
 
+    <?php if (!$activeBooking): ?>
+    <div class="cardx p-4 mb-4" id="offers">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h2 class="h5 fw-bold mb-0">New Offers</h2>
+            <span class="request-indicator" id="new-request-indicator" style="<?= empty($pendingOffers) ? '' : 'display:inline-flex;' ?>"><?= count($pendingOffers) ?></span>
+        </div>
+        <div id="offers-list-wrap">
+            <?php if (empty($pendingOffers)): ?>
+                <div class="text-center py-5 text-soft">
+                    <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
+                    <p class="mb-0">Scanning for nearby orders...</p>
+                </div>
+            <?php else: ?>
+                <div class="row g-3">
+                    <?php foreach ($pendingOffers as $req): ?>
+                        <div class="col-lg-6">
+                            <div class="req-card p-3 border-warning h-100">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                                    <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
+                                </div>
+                                <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
+                                <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
+                                <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
+                                <form class="offer-action-form d-flex gap-2" method="post" action="#">
+                                    <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
+                                    <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                                    <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
+                                </form>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="row g-4 mb-4">
         <div class="col-12">
             <div class="cardx p-3 p-md-4">
@@ -759,30 +810,37 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     </div>
                 <?php endif; ?>
 
-                <div id="nav_map">
-                    <div class="map-legend">
-                        <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#38bdf8;margin-right:6px"></span>Rider</div>
-                        <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:6px"></span><span id="target_label"><?= e($targetLabel) ?></span></div>
-                    </div>
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="map-toggle-btn">
+                        <i class="fa-solid fa-chevron-down me-1"></i><span id="map-toggle-label">Show Map</span>
+                    </button>
                 </div>
 
-                <div id="route_details">
-                    <div class="route-title">Route Details</div>
-                    <div id="route_details_body">Waiting for route...</div>
+                <div id="nav_map_wrap" class="collapsed">
+                    <div id="nav_map">
+                        <div class="map-legend">
+                            <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#38bdf8;margin-right:6px"></span>Rider</div>
+                            <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:6px"></span><span id="target_label"><?= e($targetLabel) ?></span></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="system-msg" id="geo_message">
                     <?php if ($activeBooking): ?>
                         Current target: <strong><?= e($targetLabel) ?></strong> — <?= e($targetAddress) ?>
                     <?php else: ?>
-                        Tap the slider to go online. If GPS is unavailable, the map still shows your last known saved position.
+                        Toggle online to go online. If GPS is unavailable, the map still shows your last known saved position.
                     <?php endif; ?>
                 </div>
 
-                <div class="mb-4">
-                    <div id="swipe-btn" class="swipe-container <?= $isOnline ? 'active' : '' ?>" onclick="toggleStatus()">
-                        <div class="swipe-handle"><i class="fa-solid fa-motorcycle"></i></div>
-                        <span class="swipe-text"><?= $isOnline ? 'TRACKING ONLINE' : 'SWIPE TO START WORKING' ?></span>
+                <div class="online-toggle-row mb-4">
+                    <label class="online-toggle">
+                        <input type="checkbox" id="online-toggle-input" <?= $isOnline ? 'checked' : '' ?> onchange="toggleStatus()">
+                        <span class="online-toggle-slider"></span>
+                    </label>
+                    <div>
+                        <div class="fw-bold" id="online-toggle-label"><?= $isOnline ? 'You are Online' : 'You are Offline' ?></div>
+                        <div class="small text-soft">Go online to start receiving delivery offers</div>
                     </div>
                 </div>
 
@@ -852,57 +910,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
     </div>
 
-    <?php if (!$activeBooking): ?>
-    <div class="cardx p-4 mb-4" id="offers">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <h2 class="h5 fw-bold mb-0">New Offers</h2>
-            <span class="request-indicator" id="new-request-indicator" style="<?= empty($pendingOffers) ? '' : 'display:inline-flex;' ?>"><?= count($pendingOffers) ?></span>
-        </div>
-        <div id="offers-list-wrap">
-            <?php if (empty($pendingOffers)): ?>
-                <div class="text-center py-5 text-soft">
-                    <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
-                    <p class="mb-0">Scanning for nearby orders...</p>
-                </div>
-            <?php else: ?>
-                <div class="row g-3">
-                    <?php foreach ($pendingOffers as $req): ?>
-                        <div class="col-lg-6">
-                            <div class="req-card p-3 border-warning h-100">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
-                                    <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
-                                </div>
-                                <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
-                                <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
-                                <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
-                                <form class="offer-action-form d-flex gap-2" method="post" action="#">
-                                    <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
-                                    <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
-                                    <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
-                                </form>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </div>
-    </div>
-    <?php endif; ?>
-
 </div>
 
 <div class="modal fade" id="newRequestModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content bg-dark text-white border-secondary">
-            <div class="modal-header border-secondary">
+        <div class="modal-content bg-white text-dark border-0 shadow-lg">
+            <div class="modal-header border-bottom">
                 <h5 class="modal-title">New Delivery Request</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="new-request-modal-body">
                 Waiting for request details...
             </div>
-            <div class="modal-footer border-secondary">
+            <div class="modal-footer border-top">
                 <form id="new-request-reject-form" class="me-2">
                     <input type="hidden" name="request_id" id="modal-request-id-reject">
                     <button class="btn btn-outline-danger" type="submit">Reject</button>
@@ -923,36 +943,42 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
 <div class="chat-panel" id="chat-panel">
     <div class="chat-header">
-        <div>
-            <div class="fw-bold">Chat with Sender</div>
-            <div class="small text-soft"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
+        <div class="chat-header-info">
+            <div class="chat-avatar"><i class="fa-solid fa-user"></i></div>
+            <div>
+                <div class="fw-bold"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
+                <div class="small text-soft">Your sender</div>
+            </div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-light" id="close-chat-btn">
-            <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div class="chat-header-actions">
+            <?php if (!empty($activeBooking['sender_phone'])): ?>
+            <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="Call sender's phone">
+                <i class="fa-solid fa-phone"></i>
+            </a>
+            <?php endif; ?>
+            <button type="button" class="chat-icon-btn" id="chat-call-btn" title="Internet call">
+                <i class="fa-solid fa-phone-volume"></i>
+            </button>
+            <button type="button" class="chat-icon-btn" id="close-chat-btn" title="Close chat">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
     </div>
 
     <div class="chat-messages" id="chat-messages"></div>
 
-    <div class="chat-footer">
-        <form id="chat-form">
-            <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
-            <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
-            <div class="chat-action-row">
-                <?php if (!empty($activeBooking['sender_phone'])): ?>
-                <a class="btn btn-outline-info flex-fill" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="Call the sender's phone number directly">
-                    <i class="fa-solid fa-phone me-2"></i>Call Sender
-                </a>
-                <?php endif; ?>
-                <button type="button" class="btn btn-outline-success flex-fill" id="chat-call-btn"><i class="fa-solid fa-phone-volume me-2"></i>Internet Call</button>
-                <button type="button" class="btn btn-outline-warning flex-fill" id="chat-voice-btn"><i class="fa-solid fa-microphone me-2"></i><span class="voice-btn-label">Record Voice</span></button>
-            </div>
-            <textarea id="chat-message-input" class="form-control mb-2" placeholder="Type your message..."></textarea>
-            <button type="submit" class="btn btn-info w-100 fw-bold">
-                <i class="fa-solid fa-paper-plane me-2"></i>Send
-            </button>
-        </form>
-    </div>
+    <form id="chat-form" class="chat-input-row">
+        <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
+        <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
+        <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="Record voice note">
+            <i class="fa-solid fa-microphone"></i>
+            <span class="voice-btn-label visually-hidden">Record Voice</span>
+        </button>
+        <textarea id="chat-message-input" class="chat-text-input" placeholder="Type a message..." rows="1"></textarea>
+        <button type="submit" class="chat-send-btn" title="Send">
+            <i class="fa-solid fa-paper-plane"></i>
+        </button>
+    </form>
 </div>
 <div class="call-panel" id="call-panel">
     <div class="fw-bold mb-1">Internet Call</div>
@@ -971,7 +997,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const dashboardRoot = document.getElementById('rider-dashboard-root');
-const swipeBtn = document.getElementById('swipe-btn');
+const onlineToggleInput = document.getElementById('online-toggle-input');
+const onlineToggleLabel = document.getElementById('online-toggle-label');
 const btnWorkflow = document.getElementById('btn_workflow');
 const distDisplay = document.getElementById('distance_display');
 const etaDisplay = document.getElementById('eta_display');
@@ -1148,7 +1175,7 @@ function showToast(message, type = 'success') {
     toastEl.innerHTML = `
         <div class="d-flex">
             <div class="toast-body" id="${toastBodyId}"></div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            <button type="button" class="btn-close btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
         </div>
     `;
 
@@ -1449,9 +1476,9 @@ async function runWorkflowAction() {
 }
 
 async function toggleStatus() {
-    if (!swipeBtn) return;
+    if (!onlineToggleInput) return;
 
-    const isActivating = !swipeBtn.classList.contains('active');
+    const isActivating = onlineToggleInput.checked;
 
     if (isActivating) {
         if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -1460,26 +1487,24 @@ async function toggleStatus() {
 
         if (!navigator.geolocation) {
             if (geoMessage) geoMessage.textContent = 'Geolocation is not supported on this browser.';
+            onlineToggleInput.checked = false;
             return;
         }
 
         navigator.geolocation.getCurrentPosition(
             () => {
-                swipeBtn.classList.add('active');
-                const swipeText = swipeBtn.querySelector('.swipe-text');
-                if (swipeText) swipeText.innerText = 'TRACKING ONLINE';
+                if (onlineToggleLabel) onlineToggleLabel.innerText = 'You are Online';
                 startTracking();
                 updateServerStatus('available');
             },
             (err) => {
+                onlineToggleInput.checked = false;
                 if (geoMessage) geoMessage.textContent = explainGeoError(err);
             },
             { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
         );
     } else {
-        swipeBtn.classList.remove('active');
-        const swipeText = swipeBtn.querySelector('.swipe-text');
-        if (swipeText) swipeText.innerText = 'SWIPE TO START WORKING';
+        if (onlineToggleLabel) onlineToggleLabel.innerText = 'You are Offline';
         stopTracking();
         updateServerStatus('offline');
         if (geoMessage) geoMessage.textContent = 'Tracking stopped.';
@@ -1876,9 +1901,11 @@ function initChat() {
         state.peer = new Peer(peerIdFor(currentUserId));
         state.peer.on('call', function (incomingCall) {
             pendingIncomingCall = incomingCall;
+            if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
             if (callPanel) callPanel.style.display = 'block';
             if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
             if (acceptCallBtn) acceptCallBtn.style.display = 'block';
+            if (endCallBtn) endCallBtn.style.display = '';
         });
         state.peer.on('error', function (err) {
             console.error('Peer error:', err);
@@ -1893,9 +1920,25 @@ function initChat() {
         return state.localCallStream;
     }
 
+    let callPanelHideTimer = null;
+
+    function finishCallUI(statusMessage) {
+        if (remoteAudio) remoteAudio.srcObject = null;
+        if (callStatusText) callStatusText.textContent = statusMessage;
+        if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+        if (endCallBtn) endCallBtn.style.display = 'none';
+        if (callPanelHideTimer) clearTimeout(callPanelHideTimer);
+        callPanelHideTimer = setTimeout(() => {
+            if (callPanel) callPanel.style.display = 'none';
+            if (endCallBtn) endCallBtn.style.display = '';
+        }, 1500);
+    }
+
     function bindActiveCall(call) {
         if (!call) return;
         state.currentCall = call;
+        if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
+        if (endCallBtn) endCallBtn.style.display = '';
         call.on('stream', function (remoteStream) {
             if (remoteAudio) remoteAudio.srcObject = remoteStream;
             if (callPanel) callPanel.style.display = 'block';
@@ -1903,13 +1946,12 @@ function initChat() {
             if (acceptCallBtn) acceptCallBtn.style.display = 'none';
         });
         call.on('close', function () {
-            if (remoteAudio) remoteAudio.srcObject = null;
-            if (callStatusText) callStatusText.textContent = 'Call ended.';
             pendingIncomingCall = null;
             state.currentCall = null;
+            finishCallUI('Call ended.');
         });
         call.on('error', function () {
-            if (callStatusText) callStatusText.textContent = 'Call failed.';
+            finishCallUI('Call failed.');
         });
     }
 
@@ -1958,6 +2000,7 @@ function initChat() {
                 state.localCallStream.getTracks().forEach(track => track.stop());
                 state.localCallStream = null;
             }
+            state.currentCall = null;
             await fetch(`${realtimeBaseUrl}?action=call_end`, {
                 method: 'POST',
                 body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
@@ -1965,9 +2008,7 @@ function initChat() {
         } catch (err) {
             console.error(err);
         } finally {
-            if (remoteAudio) remoteAudio.srcObject = null;
-            if (callStatusText) callStatusText.textContent = 'Call ended.';
-            if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+            finishCallUI('Call ended.');
         }
     }
 
@@ -2143,9 +2184,22 @@ function initPage() {
         await handleOfferAction(requestId, 'rejected', btn);
     });
 
-    if (swipeBtn && swipeBtn.classList.contains('active')) {
+    if (onlineToggleInput && onlineToggleInput.checked) {
         startTracking();
     }
+
+    const mapToggleBtn = document.getElementById('map-toggle-btn');
+    const mapToggleLabel = document.getElementById('map-toggle-label');
+    const navMapWrap = document.getElementById('nav_map_wrap');
+    mapToggleBtn?.addEventListener('click', function () {
+        const collapsed = navMapWrap.classList.toggle('collapsed');
+        if (mapToggleLabel) mapToggleLabel.textContent = collapsed ? 'Show Map' : 'Hide Map';
+        this.querySelector('i')?.classList.toggle('fa-chevron-down', collapsed);
+        this.querySelector('i')?.classList.toggle('fa-chevron-up', !collapsed);
+        if (!collapsed && state.map) {
+            setTimeout(() => state.map.invalidateSize(), 200);
+        }
+    });
 
     const indicator = document.getElementById('new-request-indicator');
     if (indicator) {

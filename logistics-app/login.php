@@ -38,11 +38,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
-body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:100vh;color:#eef4ff}
-.cardx{background:rgba(17,27,51,.92);border:1px solid rgba(255,255,255,.08);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
-.form-control{background:#0b1430;color:#eef4ff;border-color:rgba(255,255,255,.1)}
-.form-control:focus{background:#0b1430;color:#eef4ff;border-color:#6ea8fe;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
-.text-soft{color:#9fb0d6}
+body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:100vh;color:#0f2c44}
+.cardx{background:rgba(255,255,255,.92);border:1px solid rgba(15,42,68,.10);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+.form-control{background:#ffffff;color:#0f2c44;border-color:rgba(15,42,68,.12)}
+.form-control:focus{background:#ffffff;color:#0f2c44;border-color:#38bdf8;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
+.text-soft{color:#5c7a91}
 </style>
 </head><body>
 <div class="container py-5">
@@ -58,7 +58,7 @@ body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:1
           <div class="mb-3"><label class="form-label">Email</label><input class="form-control" type="email" name="email"></div>
           <div class="mb-4"><label class="form-label">Password</label><input class="form-control" type="password" name="password"></div>
           <button class="btn btn-primary" type="submit">Login</button>
-          <a class="btn btn-outline-light ms-2" href="<?= e(url_path('index.php')) ?>">Back</a>
+          <a class="btn btn-outline-secondary ms-2" href="<?= e(url_path('index.php')) ?>">Back</a>
         </form>
       </div>
     </div>

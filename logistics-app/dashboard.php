@@ -47,29 +47,29 @@ function order_card(array $b, string $badgeClass, string $badgeText, ?string $ex
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:100vh;color:#eef4ff}
-        .navx{background:rgba(8,17,33,.88);border-bottom:1px solid rgba(255,255,255,.08)}
-        .cardx{background:rgba(17,27,51,.92);border:1px solid rgba(255,255,255,.08);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
-        .text-soft{color:#9fb0d6}
-        .form-control{background:#0b1430;color:#eef4ff;border-color:rgba(255,255,255,.1)}
-        .form-control:focus{background:#0b1430;color:#eef4ff;border-color:#6ea8fe;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
+        body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:100vh;color:#0f2c44}
+        .navx{background:rgba(255,255,255,.85);border-bottom:1px solid rgba(15,42,68,.10)}
+        .cardx{background:rgba(255,255,255,.92);border:1px solid rgba(15,42,68,.10);border-radius:1.25rem;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+        .text-soft{color:#5c7a91}
+        .form-control{background:#ffffff;color:#0f2c44;border-color:rgba(15,42,68,.12)}
+        .form-control:focus{background:#ffffff;color:#0f2c44;border-color:#38bdf8;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
         .order-card{cursor:pointer;transition:.2s ease}
         .order-card:hover{transform:translateY(-2px);border-color:rgba(110,168,254,.4)}
-        .badge-soft{background:rgba(56,189,248,.12);color:#9ddcff;border:1px solid rgba(56,189,248,.3)}
-        .stat-chip{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#eef4ff;cursor:pointer;transition:.15s ease}
+        .badge-soft{background:rgba(56,189,248,.12);color:#0369a1;border:1px solid rgba(56,189,248,.3)}
+        .stat-chip{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;background:rgba(15,42,68,.06);border:1px solid rgba(15,42,68,.10);color:#0f2c44;cursor:pointer;transition:.15s ease}
         .stat-chip:hover{border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.08)}
-        .stat-chip-count{font-weight:800;font-size:1.05rem;color:#38bdf8}
-        .stat-chip-label{font-size:.82rem;color:#9fb0d6}
+        .stat-chip-count{font-weight:800;font-size:1.05rem;color:#0284c7}
+        .stat-chip-label{font-size:.82rem;color:#5c7a91}
         .order-search-wrap{position:relative;max-width:360px}
         .order-search-wrap input{padding-left:2.25rem}
-        .order-search-wrap i{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:#9fb0d6}
+        .order-search-wrap i{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:#5c7a91}
         .history-filter-row{display:flex;gap:8px;margin-bottom:1rem}
-        .history-filter-chip{padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#9fb0d6;font-size:.82rem;cursor:pointer}
-        .history-filter-chip.active{background:rgba(56,189,248,.16);border-color:#38bdf8;color:#eef4ff}
+        .history-filter-chip{padding:6px 14px;border-radius:999px;background:rgba(15,42,68,.06);border:1px solid rgba(15,42,68,.10);color:#5c7a91;font-size:.82rem;cursor:pointer}
+        .history-filter-chip.active{background:rgba(56,189,248,.16);border-color:#38bdf8;color:#0f2c44}
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark navx">
+<nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">

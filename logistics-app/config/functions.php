@@ -11,6 +11,10 @@ function config_app(): array {
     return $config;
 }
 
+function mapbox_token(): string {
+    return trim((string)(config_app()['mapbox_token'] ?? ''));
+}
+
 function base_url(): string {
     $configured = trim((string)(config_app()['base_url'] ?? ''));
     if ($configured !== '') {

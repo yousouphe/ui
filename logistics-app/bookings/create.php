@@ -76,6 +76,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <style>
     body{background:linear-gradient(180deg,#09101d,#0d1530 42%,#0b1020);min-height:100vh;color:#eef4ff}
     .navx{background:rgba(8,17,33,.88);border-bottom:1px solid rgba(255,255,255,.08)}
@@ -84,13 +86,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     .form-control:focus,.form-select:focus{background:#0b1430;color:#eef4ff;border-color:#6ea8fe;box-shadow:0 0 0 .2rem rgba(110,168,254,.18)}
     .text-soft{color:#9fb0d6}
     .map-wrap{height:380px;border-radius:1rem;overflow:hidden;border:1px solid rgba(255,255,255,.08)}
-    
+
     #booking_map {
     height: 380px !important;
     width: 100% !important;
     }
-    
+
     .leaflet-container{height:100%;width:100%}
+    .address-search{position:relative}
+    .address-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:1500;background:#0b1430;border:1px solid rgba(255,255,255,.14);border-radius:.75rem;box-shadow:0 12px 30px rgba(0,0,0,.35);max-height:260px;overflow-y:auto;display:none}
+    .address-suggestions.show{display:block}
+    .address-suggestion-item{padding:.6rem .9rem;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:.6rem;align-items:flex-start}
+    .address-suggestion-item:last-child{border-bottom:none}
+    .address-suggestion-item:hover,.address-suggestion-item.active{background:rgba(56,189,248,.14)}
+    .address-suggestion-item .main-text{font-weight:600;color:#eef4ff;font-size:.9rem}
+    .address-suggestion-item .sub-text{color:#9fb0d6;font-size:.78rem}
+    .address-suggestion-item i{color:#38bdf8;margin-top:3px}
+    .address-suggestion-empty{padding:.75rem .9rem;color:#9fb0d6;font-size:.85rem}
+    .location-confirmed{border-color:#22c55e!important}
   </style>
 </head>
 <body>
@@ -134,61 +147,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="col-12">
           <div class="cardx p-3">
             <h2 class="h5">Pickup location</h2>
-            <div class="row g-3">
-              <div class="col-lg-6">
-                <label class="form-label">Pickup address</label>
-                <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" placeholder="Auto-filled from GPS or map, editable">
-                <?php if (!empty($errors['pickup_address'])): ?><div class="small text-danger mt-1"><?= e($errors['pickup_address']) ?></div><?php endif; ?>
+            <label class="form-label">Pickup address</label>
+            <div class="address-search">
+              <div class="input-group">
+                <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
+                <button class="btn btn-outline-light" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
               </div>
-              <div class="col-lg-6 d-flex align-items-end gap-2 flex-wrap">
-                <button class="btn btn-outline-light" type="button" id="use_current_pickup">Use Current Location</button>
-                <button class="btn btn-outline-info" type="button" id="select_pickup_mode">Pick From Map</button>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Pickup latitude</label>
-                <input class="form-control" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>" readonly>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Pickup longitude</label>
-                <input class="form-control" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>" readonly>
-              </div>
+              <div class="address-suggestions" id="pickup_suggestions"></div>
             </div>
+            <?php if (!empty($errors['pickup_address'])): ?><div class="small text-danger mt-1"><?= e($errors['pickup_address']) ?></div><?php endif; ?>
+            <div class="small mt-2">
+              <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+            </div>
+            <input type="hidden" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>">
+            <input type="hidden" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>">
           </div>
         </div>
 
         <div class="col-12">
           <div class="cardx p-3">
             <h2 class="h5">Delivery location</h2>
-            <div class="row g-3">
-              <div class="col-lg-6">
-                <label class="form-label">Delivery address</label>
-                <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" placeholder="Auto-filled from GPS or map, editable">
-                <?php if (!empty($errors['delivery_address'])): ?><div class="small text-danger mt-1"><?= e($errors['delivery_address']) ?></div><?php endif; ?>
+            <label class="form-label">Delivery address</label>
+            <div class="address-search">
+              <div class="input-group">
+                <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
+                <button class="btn btn-outline-light" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
               </div>
-              <div class="col-lg-6 d-flex align-items-end gap-2 flex-wrap">
-                <button class="btn btn-outline-light" type="button" id="use_current_delivery">Use Current Location</button>
-                <button class="btn btn-outline-info" type="button" id="select_delivery_mode">Pick From Map</button>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Delivery latitude</label>
-                <input class="form-control" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>" readonly>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Delivery longitude</label>
-                <input class="form-control" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>" readonly>
-              </div>
+              <div class="address-suggestions" id="delivery_suggestions"></div>
             </div>
+            <?php if (!empty($errors['delivery_address'])): ?><div class="small text-danger mt-1"><?= e($errors['delivery_address']) ?></div><?php endif; ?>
+            <div class="small mt-2">
+              <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+            </div>
+            <input type="hidden" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>">
+            <input type="hidden" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>">
           </div>
         </div>
 
-        <div class="col-12">
+        <div class="col-12" id="route_map_card" style="display:none;">
           <div class="cardx p-3">
             <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-              <h2 class="h5 mb-0">Map selection</h2>
-              <span class="badge text-bg-primary" id="map_mode_label">Mode: none</span>
+              <h2 class="h5 mb-0">Confirm route</h2>
+              <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
+              <span class="small text-soft" id="route_summary"></span>
             </div>
             <div id="booking_map" class="map-wrap"></div>
-            <div class="small text-soft mt-2">If the map cannot load, confirm internet access to Leaflet CDN and OpenStreetMap tiles.</div>
           </div>
         </div>
 
@@ -238,22 +241,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 <script>
-
 document.addEventListener('DOMContentLoaded', function () {
+    const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
+    const NIGERIA_BBOX = '2.6,4.2,14.7,14.0';
+
     const pickupAddress = document.getElementById('pickup_address');
     const pickupLat = document.getElementById('pickup_latitude');
     const pickupLng = document.getElementById('pickup_longitude');
+    const pickupSuggestions = document.getElementById('pickup_suggestions');
     const deliveryAddress = document.getElementById('delivery_address');
     const deliveryLat = document.getElementById('delivery_latitude');
     const deliveryLng = document.getElementById('delivery_longitude');
+    const deliverySuggestions = document.getElementById('delivery_suggestions');
     const modeLabel = document.getElementById('map_mode_label');
+    const bookingMapEl = document.getElementById('booking_map');
+    const routeMapCard = document.getElementById('route_map_card');
+    const routeSummary = document.getElementById('route_summary');
 
     let mapMode = null;
     let pickupMarker = null;
     let deliveryMarker = null;
+    let map = null;
+    let routingControl = null;
 
-    // Force Marker Icons to load from CDN
     delete L.Icon.Default.prototype._getIconUrl;
     L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -261,132 +273,253 @@ document.addEventListener('DOMContentLoaded', function () {
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
     });
 
-    const defaultLat = parseFloat(pickupLat.value) || 6.5244;
-    const defaultLng = parseFloat(pickupLng.value) || 3.3792;
-
-    const map = L.map('booking_map', { tap: false }).setView([defaultLat, defaultLng], 13);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap'
-    }).addTo(map);
-
-    // Critical fix for visible rendering
-    setTimeout(() => { 
-        map.invalidateSize(); 
-    }, 600);
-
-     function setMode(mode, btn) {
-    mapMode = mode;
-    modeLabel.textContent = 'Mode: Selecting ' + mode.toUpperCase();
-    modeLabel.className = mode === 'pickup' ? 'badge text-bg-warning' : 'badge text-bg-info';
-    
-    // Smooth scroll to map so user knows to click
-    document.getElementById('booking_map').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
-  function updateMarker(type, lat, lng) {
-    if (type === 'pickup') {
-      if (pickupMarker) map.removeLayer(pickupMarker);
-      pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup('Pickup').openPopup();
-      pickupLat.value = lat.toFixed(7);
-      pickupLng.value = lng.toFixed(7);
-      pickupMarker.on('dragend', (e) => handleManualMove('pickup', e.target.getLatLng()));
-    } else {
-      if (deliveryMarker) map.removeLayer(deliveryMarker);
-      deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup('Delivery').openPopup();
-      deliveryLat.value = lat.toFixed(7);
-      deliveryLng.value = lng.toFixed(7);
-      deliveryMarker.on('dragend', (e) => handleManualMove('delivery', e.target.getLatLng()));
-    }
-  }
-
-  async function handleManualMove(type, latlng) {
-      updateMarker(type, latlng.lat, latlng.lng);
-      await reverseGeocode(latlng.lat, latlng.lng, type === 'pickup' ? pickupAddress : deliveryAddress);
-  }
-
-  async function reverseGeocode(lat, lng, targetInput) {
-    targetInput.value = "Locating address...";
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
-          headers: { 'Accept-Language': 'en' }
-      });
-      const data = await res.json();
-      targetInput.value = data.display_name || "Unknown Location";
-    } catch (e) {
-      targetInput.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      console.error("Geocoding failed", e);
-    }
-  }
-
-  // Click on Map Logic
-  map.on('click', async function(e) {
-    if (!mapMode) {
-        alert("Please click 'Pick From Map' for Pickup or Delivery first.");
-        return;
-    }
-    const { lat, lng } = e.latlng;
-    updateMarker(mapMode, lat, lng);
-    await reverseGeocode(lat, lng, mapMode === 'pickup' ? pickupAddress : deliveryAddress);
-  });
-
-  // GPS Geolocation Logic
-  async function useCurrentLocation(target, btn) {
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Locating...';
-    btn.disabled = true;
-
-    if (!navigator.geolocation) {
-      alert('Geolocation not supported');
-      btn.innerHTML = originalText;
-      btn.disabled = false;
-      return;
+    function ensureMap() {
+        if (map) return map;
+        map = L.map(bookingMapEl, { tap: false }).setView([
+            parseFloat(pickupLat.value) || 9.0820,
+            parseFloat(pickupLng.value) || 8.6753
+        ], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+        map.on('click', async function (e) {
+            if (!mapMode) return;
+            const { lat, lng } = e.latlng;
+            updateMarker(mapMode, lat, lng);
+            await reverseGeocode(lat, lng, mapMode === 'pickup' ? pickupAddress : deliveryAddress);
+        });
+        return map;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        map.setView([latitude, longitude], 16);
-        updateMarker(target, latitude, longitude);
-        await reverseGeocode(latitude, longitude, target === 'pickup' ? pickupAddress : deliveryAddress);
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-      },
-      (err) => {
-        alert(`Error (${err.code}): ${err.message}. Ensure HTTPS is enabled.`);
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-      },
-      { enableHighAccuracy: false, timeout: 15000,  maximumAge: 0    }
-    );
-  }
-  
-    
-    // Ensure initial markers show up if values exist
-    if (pickupLat.value && pickupLng.value) {
-        updateMarker('pickup', parseFloat(pickupLat.value), parseFloat(pickupLng.value));
-    }
-    if (deliveryLat.value && deliveryLng.value) {
-        updateMarker('delivery', parseFloat(deliveryLat.value), parseFloat(deliveryLng.value));
+    function revealMap() {
+        routeMapCard.style.display = '';
+        const m = ensureMap();
+        setTimeout(() => m.invalidateSize(), 150);
+        return m;
     }
 
+    function setMode(mode) {
+        mapMode = mode;
+        revealMap();
+        modeLabel.style.display = '';
+        modeLabel.textContent = 'Tap the map to set ' + mode.toUpperCase();
+        modeLabel.className = 'badge ' + (mode === 'pickup' ? 'text-bg-warning' : 'text-bg-info');
+        bookingMapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 
+    function maybeRevealForBothPoints() {
+        if (pickupLat.value && pickupLng.value && deliveryLat.value && deliveryLng.value) {
+            revealMap();
+            drawRoutePreview();
+        }
+    }
 
+    function updateMarker(type, lat, lng) {
+        const m = ensureMap();
+        if (type === 'pickup') {
+            if (pickupMarker) m.removeLayer(pickupMarker);
+            pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(m).bindPopup('Pickup').openPopup();
+            pickupLat.value = lat.toFixed(7);
+            pickupLng.value = lng.toFixed(7);
+            pickupMarker.on('dragend', (e) => handleManualMove('pickup', e.target.getLatLng()));
+        } else {
+            if (deliveryMarker) m.removeLayer(deliveryMarker);
+            deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(m).bindPopup('Delivery').openPopup();
+            deliveryLat.value = lat.toFixed(7);
+            deliveryLng.value = lng.toFixed(7);
+            deliveryMarker.on('dragend', (e) => handleManualMove('delivery', e.target.getLatLng()));
+        }
+        maybeRevealForBothPoints();
+    }
 
-  
+    async function handleManualMove(type, latlng) {
+        updateMarker(type, latlng.lat, latlng.lng);
+        await reverseGeocode(latlng.lat, latlng.lng, type === 'pickup' ? pickupAddress : deliveryAddress);
+    }
 
-  // Event Listeners
-  document.getElementById('select_pickup_mode').addEventListener('click', function() { setMode('pickup', this); });
-  document.getElementById('select_delivery_mode').addEventListener('click', function() { setMode('delivery', this); });
-  
-  document.getElementById('use_current_pickup').addEventListener('click', function() { useCurrentLocation('pickup', this); });
-  document.getElementById('use_current_delivery').addEventListener('click', function() { useCurrentLocation('delivery', this); });
+    async function reverseGeocode(lat, lng, targetInput) {
+        targetInput.value = 'Locating address...';
+        try {
+            const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
+            const data = await res.json();
+            const place = data.features && data.features[0];
+            targetInput.value = place ? place.place_name : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        } catch (e) {
+            targetInput.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        }
+        targetInput.classList.add('location-confirmed');
+    }
 
-  // Initial markers if editing/redirecting back
-  if (pickupLat.value && pickupLng.value) updateMarker('pickup', parseFloat(pickupLat.value), parseFloat(pickupLng.value));
-  if (deliveryLat.value && deliveryLng.value) updateMarker('delivery', parseFloat(deliveryLat.value), parseFloat(deliveryLng.value));
-})();
+    function drawRoutePreview() {
+        if (!map || !pickupLat.value || !deliveryLat.value) return;
+        const from = [parseFloat(pickupLat.value), parseFloat(pickupLng.value)];
+        const to = [parseFloat(deliveryLat.value), parseFloat(deliveryLng.value)];
+        if (routingControl) {
+            map.removeControl(routingControl);
+            routingControl = null;
+        }
+        routingControl = L.Routing.control({
+            waypoints: [L.latLng(from), L.latLng(to)],
+            router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+            addWaypoints: false,
+            draggableWaypoints: false,
+            routeWhileDragging: false,
+            fitSelectedRoutes: true,
+            show: false,
+            createMarker: () => null,
+            lineOptions: { styles: [{ color: '#38bdf8', opacity: 0.85, weight: 5 }] }
+        }).addTo(map);
+        routingControl.on('routesfound', function (e) {
+            const summary = e.routes[0].summary;
+            const km = (summary.totalDistance / 1000).toFixed(1);
+            const mins = Math.round(summary.totalTime / 60);
+            routeSummary.textContent = `${km} km · ~${mins} min drive`;
+        });
+        routingControl.on('routingerror', function () {
+            routeSummary.textContent = '';
+        });
+    }
+
+    function renderSuggestions(container, items, onPick) {
+        if (!items.length) {
+            container.innerHTML = '<div class="address-suggestion-empty">No matching Nigerian address found.</div>';
+            container.classList.add('show');
+            return;
+        }
+        container.innerHTML = items.map((item, idx) => `
+            <div class="address-suggestion-item" data-index="${idx}">
+                <i class="fa-solid fa-location-dot"></i>
+                <div>
+                    <div class="main-text">${item.text}</div>
+                    <div class="sub-text">${item.place_name}</div>
+                </div>
+            </div>
+        `).join('');
+        container.classList.add('show');
+        container.querySelectorAll('.address-suggestion-item').forEach((el, idx) => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                onPick(items[idx]);
+                container.classList.remove('show');
+            });
+        });
+    }
+
+    function attachAutocomplete(inputEl, suggestionsEl, targetType) {
+        let debounceTimer = null;
+        let abortController = null;
+
+        inputEl.addEventListener('input', function () {
+            inputEl.classList.remove('location-confirmed');
+            if (targetType === 'pickup') { pickupLat.value = ''; pickupLng.value = ''; }
+            else { deliveryLat.value = ''; deliveryLng.value = ''; }
+
+            const query = inputEl.value.trim();
+            if (debounceTimer) clearTimeout(debounceTimer);
+            if (query.length < 3) {
+                suggestionsEl.classList.remove('show');
+                return;
+            }
+            debounceTimer = setTimeout(async () => {
+                if (abortController) abortController.abort();
+                abortController = new AbortController();
+                try {
+                    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=6&language=en&bbox=${NIGERIA_BBOX}`;
+                    const res = await fetch(url, { signal: abortController.signal });
+                    const data = await res.json();
+                    const items = (data.features || []).map(f => ({
+                        text: f.text,
+                        place_name: f.place_name,
+                        lat: f.center[1],
+                        lng: f.center[0]
+                    }));
+                    renderSuggestions(suggestionsEl, items, (item) => {
+                        inputEl.value = item.place_name;
+                        inputEl.classList.add('location-confirmed');
+                        updateMarker(targetType, item.lat, item.lng);
+                    });
+                } catch (e) {
+                    if (e.name !== 'AbortError') suggestionsEl.classList.remove('show');
+                }
+            }, 300);
+        });
+
+        inputEl.addEventListener('blur', function () {
+            setTimeout(() => suggestionsEl.classList.remove('show'), 150);
+        });
+
+        inputEl.addEventListener('keydown', function (e) {
+            const items = Array.from(suggestionsEl.querySelectorAll('.address-suggestion-item'));
+            if (!items.length || !suggestionsEl.classList.contains('show')) return;
+            let activeIdx = items.findIndex(i => i.classList.contains('active'));
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIdx = (activeIdx + 1) % items.length;
+                items.forEach(i => i.classList.remove('active'));
+                items[activeIdx].classList.add('active');
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
+                items.forEach(i => i.classList.remove('active'));
+                items[activeIdx].classList.add('active');
+            } else if (e.key === 'Enter') {
+                if (activeIdx >= 0) {
+                    e.preventDefault();
+                    items[activeIdx].dispatchEvent(new Event('mousedown'));
+                }
+            } else if (e.key === 'Escape') {
+                suggestionsEl.classList.remove('show');
+            }
+        });
+    }
+
+    attachAutocomplete(pickupAddress, pickupSuggestions, 'pickup');
+    attachAutocomplete(deliveryAddress, deliverySuggestions, 'delivery');
+
+    document.querySelectorAll('.map-pick-link').forEach(link => {
+        link.addEventListener('click', function (e) {
+            e.preventDefault();
+            setMode(this.dataset.target);
+        });
+    });
+
+    async function useCurrentLocation(target, btn) {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        btn.disabled = true;
+
+        if (!navigator.geolocation) {
+            alert('Geolocation not supported');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+                const { latitude, longitude } = pos.coords;
+                revealMap().setView([latitude, longitude], 16);
+                updateMarker(target, latitude, longitude);
+                await reverseGeocode(latitude, longitude, target === 'pickup' ? pickupAddress : deliveryAddress);
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            },
+            (err) => {
+                alert(`Error (${err.code}): ${err.message}. Ensure HTTPS is enabled.`);
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            },
+            { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 }
+        );
+    }
+
+    document.getElementById('use_current_pickup').addEventListener('click', function () { useCurrentLocation('pickup', this); });
+    document.getElementById('use_current_delivery').addEventListener('click', function () { useCurrentLocation('delivery', this); });
+
+    if (pickupLat.value && pickupLng.value) updateMarker('pickup', parseFloat(pickupLat.value), parseFloat(pickupLng.value));
+    if (deliveryLat.value && deliveryLng.value) updateMarker('delivery', parseFloat(deliveryLat.value), parseFloat(deliveryLng.value));
+});
 </script>
 </body>
 </html>

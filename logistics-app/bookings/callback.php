@@ -41,14 +41,14 @@ if (!$tranx['status'] || $tranx['data']['status'] !== 'success') {
 }
 
 // 4. FIND THE PAYMENT RECORD
-// Use a broader join to ensure we find the record regardless of status
+// Scope to the logged-in user's own booking so one user can't confirm another user's payment.
 $stmt = $pdo->prepare("
-    SELECT bp.id as payment_id, bp.booking_id, b.total_cost, b.payment_status 
+    SELECT bp.id as payment_id, bp.booking_id, b.total_cost, b.payment_status
     FROM booking_payments bp
     JOIN bookings b ON b.id = bp.booking_id
-    WHERE bp.reference = ?
+    WHERE bp.reference = ? AND b.sender_user_id = ?
 ");
-$stmt->execute([$reference]);
+$stmt->execute([$reference, $user['id']]);
 $payment = $stmt->fetch();
 
 if (!$payment) {

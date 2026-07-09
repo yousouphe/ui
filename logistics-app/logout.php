@@ -4,4 +4,4 @@ session_unset();
 session_destroy();
 session_start();
 flash('success', 'Logged out successfully.');
-redirect_to('login.php');
+redirect_to('login');

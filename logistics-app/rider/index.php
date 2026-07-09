@@ -533,7 +533,7 @@ $initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitud
 $ajaxUpdateLocationUrl = url_path('rider/ajax_update_location.php');
 $ajaxUpdateStatusUrl = url_path('rider/ajax_update_status.php');
 $ajaxWorkflowUrl = url_path('rider/ajax_workflow_action.php');
-$logoutUrl = url_path('logout.php');
+$logoutUrl = url_path('logout');
 
 $canChat = $activeBooking && (int)($activeBooking['sender_user_id'] ?? 0) > 0;
 $chatReceiverId = $canChat ? (int)$activeBooking['sender_user_id'] : 0;
@@ -710,9 +710,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('rider/dashboard.php')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Deliveries</a>
+            <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Deliveries</a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</a>
         </div>
     </div>

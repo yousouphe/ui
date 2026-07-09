@@ -19,7 +19,7 @@ $historyEntries = array_merge(
 usort($historyEntries, fn($a, $b) => (int) $b['id'] <=> (int) $a['id']);
 
 function order_card(array $b, string $badgeClass, string $badgeText, ?string $extraLine = null): string {
-    $html = '<a href="' . e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) . '" class="text-decoration-none order-select-link">';
+    $html = '<a href="' . e(url_path('bookings/?booking_id=' . (int) $b['id'])) . '" class="text-decoration-none order-select-link">';
     $html .= '<div class="cardx p-3 order-card">';
     $html .= '<div class="d-flex justify-content-between align-items-start">';
     $html .= '<div><div class="fw-bold">' . e($b['booking_code']) . '</div><div class="small text-soft">' . e($b['item_name']) . '</div></div>';
@@ -71,11 +71,11 @@ function order_card(array $b, string $badgeClass, string $badgeText, ?string $ex
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('bookings/index.php')) ?>"><i class="fa-solid fa-house me-1"></i>Sender Hub</a>
-            <a class="nav-link" href="<?= e(url_path('bookings/index.php?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
-            <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
+            <a class="nav-link" href="<?= e(url_path('bookings/')) ?>"><i class="fa-solid fa-house me-1"></i>Sender Hub</a>
+            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
         </div>
     </div>
 </nav>

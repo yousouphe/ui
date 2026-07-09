@@ -118,10 +118,10 @@ $historyRows = array_filter($allRequests, fn($req) =>
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('rider/index.php')) ?>"><i class="fa-solid fa-house me-1"></i>Dashboard</a>
-            <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
+            <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i>Dashboard</a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
         </div>
     </div>
 </nav>

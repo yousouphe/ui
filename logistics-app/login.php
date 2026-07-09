@@ -58,8 +58,9 @@ body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:1
           <div class="mb-3"><label class="form-label">Email</label><input class="form-control" type="email" name="email"></div>
           <div class="mb-4"><label class="form-label">Password</label><input class="form-control" type="password" name="password"></div>
           <button class="btn btn-primary" type="submit">Login</button>
-          <a class="btn btn-outline-secondary ms-2" href="<?= e(url_path('index.php')) ?>">Back</a>
+          <a class="btn btn-outline-secondary ms-2" href="<?= e(url_path('')) ?>">Back</a>
         </form>
+        <p class="text-soft mt-4 mb-0">Don't have an account? <a href="<?= e(url_path('register')) ?>">Register</a></p>
       </div>
     </div>
   </div>

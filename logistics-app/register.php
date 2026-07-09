@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               </div>
               <div class="d-flex gap-2 flex-wrap">
                 <button class="btn btn-primary" type="submit">Create Account</button>
-                <a class="btn btn-outline-secondary" href="<?= e(url_path('login.php')) ?>">Already have an account?</a>
+                <a class="btn btn-outline-secondary" href="<?= e(url_path('login')) ?>">Already have an account?</a>
               </div>
             </form>
           </div>
@@ -116,7 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           </div>
         </div>
       </div>
-      <div class="text-center mt-3"><a class="link-light text-decoration-none" href="<?= e(url_path('index.php')) ?>">Back home</a></div>
+      <div class="text-center mt-3"><a class="link-light text-decoration-none" href="<?= e(url_path('')) ?>">Back home</a></div>
     </div>
   </div>
 </div>

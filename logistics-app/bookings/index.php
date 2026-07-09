@@ -493,11 +493,11 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/index.php')) ?>">SwiftDrop</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>">SwiftDrop</a>
         <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('dashboard.php')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
-            <a class="nav-link" href="<?= e(url_path('bookings/index.php?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
-            <a class="nav-link" href="<?= e(url_path('logout.php')) ?>">Logout</a>
+            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
+            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
         </div>
     </div>
 </nav>
@@ -1709,7 +1709,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 `;
             }
 
-            ajaxLoadWorkspace(`<?= e(url_path('bookings/index.php')) ?>?booking_id=${selectedBookingId}`, false);
+            ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
 
         } catch (err) {
             console.error('send_request error:', err);
@@ -1994,7 +1994,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 throw new Error(result.message || 'Unable to book another rider.');
             }
 
-            ajaxLoadWorkspace('<?= e(url_path('bookings/index.php')) ?>?booking_id=' + encodeURIComponent(bookingId), true);
+            ajaxLoadWorkspace('<?= e(url_path('bookings/')) ?>?booking_id=' + encodeURIComponent(bookingId), true);
         } catch (err) {
             btn.disabled = false;
             btn.innerHTML = originalHtml;
@@ -2195,7 +2195,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         const endCallBtn = root.querySelector('#end-call-btn');
         const remoteAudio = root.querySelector('#remote-audio');
         const currentUserId = <?= (int)$user['id'] ?>;
-        const realtimeBaseUrl = '<?= e(url_path('bookings/index.php')) ?>';
+        const realtimeBaseUrl = '<?= e(url_path('bookings/')) ?>';
 
         function escapeHtml(str) {
             return String(str)

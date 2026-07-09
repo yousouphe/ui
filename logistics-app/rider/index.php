@@ -688,7 +688,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(8,17,33,.88);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
         .call-panel .call-actions{display:flex;gap:8px;margin-top:12px}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
-        .request-indicator { position:absolute; top:-4px; right:-4px; min-width:22px; height:22px; border-radius:999px; background:#ef4444; color:#fff; font-size:.72rem; font-weight:700; display:none; align-items:center; justify-content:center; padding:0 6px; }
+        .request-indicator { min-width:22px; height:22px; border-radius:999px; background:#ef4444; color:#fff; font-size:.72rem; font-weight:700; display:none; align-items:center; justify-content:center; padding:0 6px; }
         .toast-container-custom { position:fixed; top:16px; right:16px; z-index:110000; width:min(360px, calc(100vw - 24px)); }
         @media (max-width:576px){ .sticky-chat-btn{right:14px;bottom:14px} .chat-panel{right:12px;left:12px;width:auto;bottom:84px} .call-panel{right:12px;left:12px;width:auto;bottom:620px} }
     </style>
@@ -856,7 +856,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <div class="cardx p-4 mb-4" id="offers">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <h2 class="h5 fw-bold mb-0">New Offers</h2>
-            <span class="request-indicator d-inline-flex" id="new-request-indicator"><?= count($pendingOffers) ?></span>
+            <span class="request-indicator" id="new-request-indicator" style="<?= empty($pendingOffers) ? '' : 'display:inline-flex;' ?>"><?= count($pendingOffers) ?></span>
         </div>
         <div id="offers-list-wrap">
             <?php if (empty($pendingOffers)): ?>

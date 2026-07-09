@@ -43,7 +43,7 @@ if (!$tranx['status'] || $tranx['data']['status'] !== 'success') {
 // 4. FIND THE PAYMENT RECORD
 // Scope to the logged-in user's own booking so one user can't confirm another user's payment.
 $stmt = $pdo->prepare("
-    SELECT bp.id as payment_id, bp.booking_id, b.total_cost, b.payment_status
+    SELECT bp.id as payment_id, bp.booking_id, b.agreed_cost, b.payment_status
     FROM booking_payments bp
     JOIN bookings b ON b.id = bp.booking_id
     WHERE bp.reference = ? AND b.sender_user_id = ?
@@ -57,7 +57,7 @@ if (!$payment) {
 }
 
 // 5. COMPARE AMOUNTS (The most common point of failure)
-$expectedKobo = (int)round($payment['total_cost'] * 100);
+$expectedKobo = (int)round($payment['agreed_cost'] * 100);
 $paidKobo = (int)$tranx['data']['amount'];
 
 // If there's a huge mismatch, stop. (Using a 5 kobo margin for safety)

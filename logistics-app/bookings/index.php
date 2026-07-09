@@ -304,7 +304,9 @@ $stmt->execute([$user['id']]);
 $allBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $activeBookings = [];
+$pendingBookings = [];
 $unpaidBookings = [];
+$cancelledBookings = [];
 $historyBookings = [];
 
 foreach ($allBookings as $b) {
@@ -315,10 +317,17 @@ foreach ($allBookings as $b) {
         continue;
     }
 
-    if ($paymentStatus === 'paid') {
+    if ($bookingStatus === 'cancelled') {
+        // Cancelled orders never owe payment - keep them out of "Unpaid" where money is
+        // genuinely due, so senders don't have to hunt for a closed order in that list.
+        $cancelledBookings[] = $b;
+    } elseif ($paymentStatus === 'paid') {
         $historyBookings[] = $b;
-    } elseif (in_array($bookingStatus, ['delivered', 'cancelled'], true)) {
+    } elseif ($bookingStatus === 'delivered') {
         $unpaidBookings[] = $b;
+    } elseif ($bookingStatus === 'submitted') {
+        $pendingBookings[] = $b;
+        $activeBookings[] = $b;
     } else {
         $activeBookings[] = $b;
     }
@@ -405,7 +414,9 @@ $cancellationReason = trim((string)($selectedBooking['cancellation_reason'] ?? '
 
 $selectedBookingIsActive = $selectedBooking ? booking_exists_in_list($activeBookings, (int) $selectedBooking['id']) : false;
 $selectedBookingIsUnpaid = $selectedBooking ? booking_exists_in_list($unpaidBookings, (int) $selectedBooking['id']) : false;
-$selectedBookingIsHistory = $selectedBooking ? booking_exists_in_list($historyBookings, (int) $selectedBooking['id']) : false;
+$selectedBookingIsHistory = $selectedBooking
+    ? (booking_exists_in_list($historyBookings, (int) $selectedBooking['id']) || booking_exists_in_list($cancelledBookings, (int) $selectedBooking['id']))
+    : false;
 
 $selectedBookingTab = 'active-orders';
 if ($selectedBookingIsUnpaid) {
@@ -414,9 +425,24 @@ if ($selectedBookingIsUnpaid) {
     $selectedBookingTab = 'history-orders';
 }
 
+// "History" combines completed (paid) and cancelled orders - each still tagged with its
+// own outcome so the tab can offer an All/Completed/Cancelled filter without needing a
+// 4th/5th top-level tab (fewer tabs = less to scan at a glance).
+$displayHistoryEntries = array_merge(
+    array_map(fn($b) => $b + ['history_kind' => 'completed'], $historyBookings),
+    array_map(fn($b) => $b + ['history_kind' => 'cancelled'], $cancelledBookings)
+);
+usort($displayHistoryEntries, fn($a, $b) => (int)$b['id'] <=> (int)$a['id']);
+
 $displayActiveBookings = $activeBookings;
 $displayUnpaidBookings = $unpaidBookings;
-$displayHistoryBookings = $historyBookings;
+$displayHistoryBookings = $displayHistoryEntries;
+
+$pendingOrdersCount = count($pendingBookings);
+$activeOrdersCount = count($activeBookings);
+$unpaidOrdersCount = count($unpaidBookings);
+$completedOrdersCount = count($historyBookings);
+$cancelledOrdersCount = count($cancelledBookings);
 
 $shouldAutoOpenSelectedTab = false;
 if ($requestedBookingId > 0 && $selectedBooking) {
@@ -497,6 +523,18 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .address-suggestion-item i{color:#38bdf8;margin-top:3px}
         .address-suggestion-empty{padding:.75rem .9rem;color:#9fb0d6;font-size:.85rem}
         .location-confirmed{border-color:#22c55e!important}
+        .stat-chip{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#eef4ff;cursor:pointer;transition:.15s ease}
+        .stat-chip:hover{border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.08)}
+        .stat-chip.active-filter{border-color:#38bdf8;background:rgba(56,189,248,.14)}
+        .stat-chip-count{font-weight:800;font-size:1.05rem;color:#38bdf8}
+        .stat-chip-label{font-size:.82rem;color:#9fb0d6}
+        .order-search-wrap{position:relative;max-width:360px}
+        .order-search-wrap input{padding-left:2.25rem}
+        .order-search-wrap i{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:#9fb0d6}
+        .history-filter-row{display:flex;gap:8px;margin-bottom:1rem}
+        .history-filter-chip{padding:6px 14px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#9fb0d6;font-size:.82rem;cursor:pointer}
+        .history-filter-chip.active{background:rgba(56,189,248,.16);border-color:#38bdf8;color:#eef4ff}
+        .order-card[data-hidden-by-filter="1"]{display:none!important}
         @media (max-width:576px){
             .sticky-chat-btn{right:14px;bottom:14px}
             .chat-panel{right:12px;left:12px;width:auto;bottom:84px}.call-panel{right:12px;left:12px;width:auto;bottom:620px}
@@ -544,6 +582,29 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             </div>
             <button class="btn btn-primary" id="toggle-new-order">
                 <i class="fa-solid fa-plus me-2"></i>New Order
+            </button>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mb-4" id="status-glance">
+            <button type="button" class="stat-chip" data-goto-tab="active-orders">
+                <span class="stat-chip-count"><?= $activeOrdersCount ?></span>
+                <span class="stat-chip-label">Active</span>
+            </button>
+            <button type="button" class="stat-chip" data-goto-tab="active-orders">
+                <span class="stat-chip-count"><?= $pendingOrdersCount ?></span>
+                <span class="stat-chip-label">Pending Match</span>
+            </button>
+            <button type="button" class="stat-chip" data-goto-tab="unpaid-orders">
+                <span class="stat-chip-count"><?= $unpaidOrdersCount ?></span>
+                <span class="stat-chip-label">Unpaid</span>
+            </button>
+            <button type="button" class="stat-chip" data-goto-tab="history-orders" data-history-filter="completed">
+                <span class="stat-chip-count"><?= $completedOrdersCount ?></span>
+                <span class="stat-chip-label">Completed</span>
+            </button>
+            <button type="button" class="stat-chip" data-goto-tab="history-orders" data-history-filter="cancelled">
+                <span class="stat-chip-count"><?= $cancelledOrdersCount ?></span>
+                <span class="stat-chip-label">Cancelled</span>
             </button>
         </div>
 
@@ -662,17 +723,23 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             </form>
         </div>
 
-        <ul class="nav nav-tabs mb-4" id="hubTabs" role="tablist">
-            <li class="nav-item">
-                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#active-orders" type="button">Active Orders</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#unpaid-orders" type="button">Unpaid</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-orders" type="button">History</button>
-            </li>
-        </ul>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+            <ul class="nav nav-tabs" id="hubTabs" role="tablist">
+                <li class="nav-item">
+                    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#active-orders" type="button">Active Orders <span class="badge badge-soft ms-1"><?= $activeOrdersCount ?></span></button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#unpaid-orders" type="button">Unpaid <span class="badge badge-soft ms-1"><?= $unpaidOrdersCount ?></span></button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-orders" type="button">History <span class="badge badge-soft ms-1"><?= $completedOrdersCount + $cancelledOrdersCount ?></span></button>
+                </li>
+            </ul>
+            <div class="order-search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="search" class="form-control form-control-sm" id="order-search" placeholder="Search by code, item, or recipient...">
+            </div>
+        </div>
 
         <div class="tab-content">
             <div class="tab-pane fade show active" id="active-orders">
@@ -934,6 +1001,13 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     <div class="col-lg-4">
                         <div class="cardx p-4">
                             <h2 class="h5 mb-3">Completed / Historical Orders</h2>
+                            <?php if (!empty($displayHistoryBookings)): ?>
+                                <div class="history-filter-row" id="history-filter-row">
+                                    <button type="button" class="history-filter-chip active" data-history-kind="all">All</button>
+                                    <button type="button" class="history-filter-chip" data-history-kind="completed">Completed</button>
+                                    <button type="button" class="history-filter-chip" data-history-kind="cancelled">Cancelled</button>
+                                </div>
+                            <?php endif; ?>
                             <?php if (empty($displayHistoryBookings)): ?>
                                 <div class="text-soft">No completed bookings yet.</div>
                             <?php else: ?>
@@ -941,7 +1015,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                     <?php foreach ($displayHistoryBookings as $b): ?>
                                         <div class="col-12">
                                             <a href="<?= e(url_path('bookings/index.php?booking_id=' . (int) $b['id'])) ?>" class="text-decoration-none order-select-link" data-booking-id="<?= (int) $b['id'] ?>">
-                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>">
+                                                <div class="cardx p-3 order-card <?= ((int) $b['id'] === (int) $selectedBookingId) ? 'active' : '' ?>" data-history-kind="<?= e($b['history_kind']) ?>">
                                                     <div class="d-flex justify-content-between align-items-start">
                                                         <div>
                                                             <div class="fw-bold"><?= e($b['booking_code']) ?></div>
@@ -1276,6 +1350,44 @@ function initSenderWorkspace() {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
             e.preventDefault();
             ajaxLoadWorkspace(this.href, true);
+        });
+    });
+
+    // ---------------- AT-A-GLANCE STAT CHIPS ----------------
+    root.querySelectorAll('#status-glance .stat-chip').forEach(chip => {
+        chip.addEventListener('click', function () {
+            const tabButton = root.querySelector(`#hubTabs button[data-bs-target="#${this.dataset.gotoTab}"]`);
+            if (tabButton && window.bootstrap) {
+                window.bootstrap.Tab.getOrCreateInstance(tabButton).show();
+            }
+            const historyFilter = this.dataset.historyFilter;
+            if (historyFilter) {
+                const filterChip = root.querySelector(`.history-filter-chip[data-history-kind="${historyFilter}"]`);
+                if (filterChip) filterChip.click();
+            }
+        });
+    });
+
+    // ---------------- HISTORY: COMPLETED / CANCELLED FILTER ----------------
+    root.querySelectorAll('.history-filter-chip').forEach(chip => {
+        chip.addEventListener('click', function () {
+            root.querySelectorAll('.history-filter-chip').forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+            const kind = this.dataset.historyKind;
+            root.querySelectorAll('#history-orders .order-card[data-history-kind]').forEach(card => {
+                const matches = kind === 'all' || card.dataset.historyKind === kind;
+                card.closest('.col-12').style.display = matches ? '' : 'none';
+            });
+        });
+    });
+
+    // ---------------- ORDER SEARCH ----------------
+    const orderSearchInput = root.querySelector('#order-search');
+    orderSearchInput?.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+        root.querySelectorAll('.order-select-link').forEach(link => {
+            const matches = query === '' || link.textContent.toLowerCase().includes(query);
+            link.style.display = matches ? '' : 'none';
         });
     });
 

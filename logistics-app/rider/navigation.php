@@ -442,6 +442,36 @@ function badge_class(string $status): string
             border-bottom: none;
         }
 
+        .glance-row {
+            cursor: pointer;
+            transition: .15s ease;
+            border-radius: .5rem;
+            padding-left: 8px;
+            padding-right: 8px;
+            margin: 0 -8px;
+        }
+
+        .glance-row:hover {
+            background: rgba(56,189,248,.08);
+        }
+
+        .order-search-wrap {
+            position: relative;
+            max-width: 320px;
+        }
+
+        .order-search-wrap input {
+            padding-left: 2.25rem;
+        }
+
+        .order-search-wrap i {
+            position: absolute;
+            left: .8rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9fb0d6;
+        }
+
         .pill {
             display: inline-flex;
             align-items: center;
@@ -656,7 +686,7 @@ function badge_class(string $status): string
                     <div class="cardx p-4 h-100">
                         <h2 class="h5 fw-bold mb-3">Quick Summary</h2>
 
-                        <div class="mini-row d-flex justify-content-between align-items-center">
+                        <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="offers" role="button">
                             <div>
                                 <div class="small text-soft">Pending Offers</div>
                                 <div class="fw-bold"><?= count($pendingOffers) ?></div>
@@ -664,7 +694,7 @@ function badge_class(string $status): string
                             <span class="badge bg-warning text-dark">Awaiting response</span>
                         </div>
 
-                        <div class="mini-row d-flex justify-content-between align-items-center">
+                        <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                             <div>
                                 <div class="small text-soft">Ongoing Orders</div>
                                 <div class="fw-bold"><?= count($ongoingBookings) ?></div>
@@ -672,7 +702,7 @@ function badge_class(string $status): string
                             <span class="badge bg-info text-dark">In progress</span>
                         </div>
 
-                        <div class="mini-row d-flex justify-content-between align-items-center">
+                        <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                             <div>
                                 <div class="small text-soft">Completed Orders</div>
                                 <div class="fw-bold"><?= count($deliveredBookings) ?></div>
@@ -680,7 +710,7 @@ function badge_class(string $status): string
                             <span class="badge bg-success">Delivered</span>
                         </div>
 
-                        <div class="mini-row d-flex justify-content-between align-items-center">
+                        <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="orders" role="button">
                             <div>
                                 <div class="small text-soft">Cancelled Orders</div>
                                 <div class="fw-bold"><?= count($cancelledBookings) ?></div>
@@ -688,7 +718,7 @@ function badge_class(string $status): string
                             <span class="badge bg-danger">Cancelled</span>
                         </div>
 
-                        <div class="mini-row d-flex justify-content-between align-items-center">
+                        <div class="mini-row d-flex justify-content-between align-items-center glance-row" data-goto-tab="payments" role="button">
                             <div>
                                 <div class="small text-soft">Paid Earnings</div>
                                 <div class="fw-bold">₦<?= number_format($totalPaidOverall, 2) ?></div>
@@ -762,10 +792,19 @@ function badge_class(string $status): string
 
                 <div class="col-lg-8">
                     <div class="cardx p-4">
-                        <h2 class="h5 fw-bold mb-3">All Assigned Orders</h2>
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h2 class="h5 fw-bold mb-0">All Assigned Orders</h2>
+                            <?php if (!empty($allAssignedBookings)): ?>
+                            <div class="order-search-wrap">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="search" class="form-control form-control-sm bg-dark text-white border-secondary" id="assigned-orders-search" placeholder="Search by code, item, sender...">
+                            </div>
+                            <?php endif; ?>
+                        </div>
                         <?php if (empty($allAssignedBookings)): ?>
                             <div class="text-soft">No assigned orders yet.</div>
                         <?php else: ?>
+                            <div id="assigned-orders-list">
                             <?php foreach ($allAssignedBookings as $b): ?>
                                 <div class="req-card p-3">
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
@@ -784,6 +823,7 @@ function badge_class(string $status): string
                                     <div class="price-tag">₦<?= number_format((float)($b['agreed_cost'] ?? 0), 2) ?></div>
                                 </div>
                             <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1333,6 +1373,25 @@ function badge_class(string $status): string
         if (map) {
             map.invalidateSize();
         }
+    });
+
+    // ---------------- QUICK SUMMARY: JUMP TO TAB ----------------
+    document.querySelectorAll('.glance-row').forEach(row => {
+        row.addEventListener('click', function () {
+            const tabButton = document.querySelector(`#riderDashboardTabs button[data-bs-target="#${this.dataset.gotoTab}"]`);
+            if (tabButton && window.bootstrap) {
+                window.bootstrap.Tab.getOrCreateInstance(tabButton).show();
+            }
+        });
+    });
+
+    // ---------------- ASSIGNED ORDERS SEARCH ----------------
+    document.getElementById('assigned-orders-search')?.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+        document.querySelectorAll('#assigned-orders-list > .req-card').forEach(card => {
+            const matches = query === '' || card.textContent.toLowerCase().includes(query);
+            card.style.display = matches ? '' : 'none';
+        });
     });
 </script>
 </body>

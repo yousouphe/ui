@@ -6,7 +6,7 @@ $token = trim((string)($_GET['token'] ?? ''));
 
 if ($token === '') {
     http_response_code(404);
-    exit('Tracking link not found.');
+    exit(t('track.link_not_found'));
 }
 
 $stmt = $pdo->prepare('
@@ -21,7 +21,7 @@ $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$booking) {
     http_response_code(404);
-    exit('Tracking link not found or has expired.');
+    exit(t('track.link_expired'));
 }
 
 $hasRider = !empty($booking['selected_rider_user_id']);
@@ -32,11 +32,11 @@ $hasRouteCoords = $booking['pickup_latitude'] !== null
 $statusLabel = booking_status_label((string) $booking['booking_status']);
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e(current_locale()) ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Tracking <?= e($booking['booking_code']) ?> | SwiftDrop</title>
+    <title><?= e(t('track.live_tracking')) ?>: <?= e($booking['booking_code']) ?> | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <?php if ($hasRider && $hasRouteCoords): ?>
@@ -57,9 +57,16 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <span class="navbar-brand fw-bold">SwiftDrop</span>
-        <span class="text-soft small">Live Tracking</span>
+    <div class="container d-flex justify-content-between align-items-center">
+        <div>
+            <span class="navbar-brand fw-bold"><?= e(t('common.brand')) ?></span>
+            <span class="text-soft small"><?= e(t('track.live_tracking')) ?></span>
+        </div>
+        <div class="small">
+            <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/track&token=' . urlencode($token))) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+            &middot;
+            <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/track&token=' . urlencode($token))) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+        </div>
     </div>
 </nav>
 
@@ -74,7 +81,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
         </div>
 
         <?php if ($booking['booking_status'] === 'cancelled'): ?>
-            <div class="alert alert-danger mb-0">This delivery was cancelled.</div>
+            <div class="alert alert-danger mb-0"><?= e(t('track.cancelled_notice')) ?></div>
         <?php else: ?>
 
         <?php if ($hasRider): ?>
@@ -82,39 +89,39 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
             <div class="rider-avatar"><i class="fa-solid fa-motorcycle"></i></div>
             <div class="flex-grow-1">
                 <div class="fw-bold"><?= e((string) $booking['rider_name']) ?></div>
-                <div class="text-soft small">Your delivery rider</div>
+                <div class="text-soft small"><?= e(t('track.your_delivery_rider')) ?></div>
             </div>
             <?php if (!empty($booking['rider_phone'])): ?>
             <a class="btn btn-sm btn-outline-info" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $booking['rider_phone'])) ?>">
-                <i class="fa-solid fa-phone me-1"></i>Call
+                <i class="fa-solid fa-phone me-1"></i><?= e(t('track.call')) ?>
             </a>
             <?php endif; ?>
         </div>
         <?php else: ?>
-        <div class="alert alert-info mb-3">A rider hasn't been assigned yet. This page will update automatically once one is on the way.</div>
+        <div class="alert alert-info mb-3"><?= e(t('track.no_rider_assigned')) ?></div>
         <?php endif; ?>
 
         <div class="row g-3 mb-3">
             <div class="col-md-6">
-                <div class="small text-soft mb-2"><strong>Pickup:</strong> <?= e($booking['pickup_address']) ?></div>
-                <div class="small text-soft mb-2"><strong>Delivery:</strong> <?= e($booking['delivery_address']) ?></div>
+                <div class="small text-soft mb-2"><strong><?= e(t('booking.pickup_label')) ?></strong> <?= e($booking['pickup_address']) ?></div>
+                <div class="small text-soft mb-2"><strong><?= e(t('booking.delivery_label')) ?></strong> <?= e($booking['delivery_address']) ?></div>
                 <?php if (trim((string) ($booking['item_description'] ?? '')) !== ''): ?>
-                    <div class="small text-soft mb-2"><strong>Package:</strong> <?= e($booking['item_description']) ?></div>
+                    <div class="small text-soft mb-2"><strong><?= e(t('booking.package_label')) ?></strong> <?= e($booking['item_description']) ?></div>
                 <?php endif; ?>
             </div>
             <div class="col-md-6">
                 <?php if ($hasRider): ?>
-                    <div class="small text-soft mb-2"><strong>Distance / ETA:</strong> <span id="eta_text">--</span></div>
+                    <div class="small text-soft mb-2"><strong><?= e(t('track.distance_eta_label')) ?></strong> <span id="eta_text">--</span></div>
                 <?php endif; ?>
                 <?php if (!empty($booking['estimated_value'])): ?>
-                    <div class="small text-soft mb-2"><strong>Est. Value:</strong> &#8358;<?= number_format((float) $booking['estimated_value'], 2) ?></div>
+                    <div class="small text-soft mb-2"><strong><?= e(t('booking.est_value_label')) ?></strong> &#8358;<?= number_format((float) $booking['estimated_value'], 2) ?></div>
                 <?php endif; ?>
             </div>
         </div>
 
         <?php if (!empty($booking['item_image_path'])): ?>
             <div class="mb-3">
-                <img src="<?= e(url_path($booking['item_image_path'])) ?>" class="img-fluid rounded" style="max-height:160px" alt="Package photo">
+                <img src="<?= e(url_path($booking['item_image_path'])) ?>" class="img-fluid rounded" style="max-height:160px" alt="<?= e(t('booking.package_photo_alt')) ?>">
             </div>
         <?php endif; ?>
 
@@ -124,32 +131,39 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
 
         <?php if (!empty($booking['delivery_proof_image'])): ?>
             <div class="mt-3">
-                <div class="small fw-bold mb-2">Proof of Delivery</div>
-                <img src="<?= e(url_path($booking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                <div class="small fw-bold mb-2"><?= e(t('booking.proof_of_delivery')) ?></div>
+                <img src="<?= e(url_path($booking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="<?= e(t('track.proof_alt')) ?>">
             </div>
         <?php endif; ?>
 
         <?php endif; ?>
     </div>
 
-    <p class="text-soft small text-center">Sent via SwiftDrop Logistics</p>
+    <p class="text-soft small text-center"><?= e(t('track.sent_via')) ?></p>
 </div>
 
 <?php if ($booking['booking_status'] !== 'cancelled'): ?>
 <script>
     const TRACK_TOKEN = <?= json_encode($token) ?>;
 
-    const bookingStatusLabels = {
-        draft: 'Draft',
-        submitted: 'Finding Rider',
-        matched: 'Rider Assigned',
-        accepted: 'Rider Heading to Pickup',
-        arrived_at_pickup: 'Rider at Pickup',
-        package_received: 'In Transit',
-        in_transit: 'In Transit',
-        delivered: 'Delivered',
-        cancelled: 'Cancelled'
-    };
+    const bookingStatusLabels = <?= json_encode([
+        'draft' => t('status.draft'),
+        'submitted' => t('status.submitted'),
+        'matched' => t('status.matched'),
+        'accepted' => t('status.accepted'),
+        'arrived_at_pickup' => t('status.arrived_at_pickup'),
+        'package_received' => t('status.package_received'),
+        'in_transit' => t('status.in_transit'),
+        'delivered' => t('status.delivered'),
+        'cancelled' => t('status.cancelled'),
+    ], JSON_UNESCAPED_UNICODE) ?>;
+
+    const TRACK_I18N = <?= json_encode([
+        'pickupPin' => t('map.pickup_pin'),
+        'deliveryPin' => t('map.delivery_pin'),
+        'riderPin' => t('map.rider_pin'),
+        'calculating' => t('track.calculating'),
+    ], JSON_UNESCAPED_UNICODE) ?>;
 
     function formatBookingStatus(status) {
         return bookingStatusLabels[status] || String(status || '').replace(/_/g, ' ');
@@ -197,8 +211,8 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
         html: '<div style="color:#22c55e;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box-open"></i></div>',
         className: '', iconSize: [26, 26], iconAnchor: [13, 13]
     });
-    L.marker(pickupCoords, { icon: pickupIcon }).addTo(map).bindPopup('Pickup');
-    L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(map).bindPopup('Delivery');
+    L.marker(pickupCoords, { icon: pickupIcon }).addTo(map).bindPopup(TRACK_I18N.pickupPin);
+    L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(map).bindPopup(TRACK_I18N.deliveryPin);
 
     // Draw the full pickup-to-delivery trip once as a fixed reference line - the rider marker
     // then just moves along/near it as their live position updates, rather than redrawing a
@@ -232,7 +246,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
                 className: '', iconSize: [30, 30], iconAnchor: [15, 15]
             });
             if (!riderMarker) {
-                riderMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(map).bindPopup('Rider');
+                riderMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(map).bindPopup(TRACK_I18N.riderPin);
             } else {
                 riderMarker.setLatLng(riderLatLng);
                 riderMarker.setIcon(riderIcon);
@@ -250,7 +264,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
             currentTrackTarget = targetKey;
 
             const etaText = document.getElementById('eta_text');
-            if (etaText) etaText.textContent = 'Calculating...';
+            if (etaText) etaText.textContent = TRACK_I18N.calculating;
 
             const leg = await fetchMapboxRoute([riderLatLng, target]);
             if (leg) {

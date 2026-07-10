@@ -49,6 +49,39 @@ function e(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
+const SUPPORTED_LOCALES = ['en', 'ha'];
+
+function current_locale(): string {
+    $locale = $_SESSION['locale'] ?? $_COOKIE['locale'] ?? 'en';
+    return in_array($locale, SUPPORTED_LOCALES, true) ? $locale : 'en';
+}
+
+function set_locale(string $locale): void {
+    if (!in_array($locale, SUPPORTED_LOCALES, true)) {
+        return;
+    }
+    $_SESSION['locale'] = $locale;
+    setcookie('locale', $locale, time() + 60 * 60 * 24 * 365, '/');
+}
+
+function translations(): array {
+    static $cache = [];
+    $locale = current_locale();
+    if (!isset($cache[$locale])) {
+        $path = __DIR__ . '/../lang/' . $locale . '.php';
+        $cache[$locale] = is_file($path) ? require $path : [];
+    }
+    return $cache[$locale];
+}
+
+function t(string $key, array $replacements = []): string {
+    $text = translations()[$key] ?? $key;
+    foreach ($replacements as $k => $v) {
+        $text = str_replace(':' . $k, (string) $v, $text);
+    }
+    return $text;
+}
+
 function csrf_token(): string {
     if (empty($_SESSION['_csrf_token'])) {
         $_SESSION['_csrf_token'] = bin2hex(random_bytes(32));
@@ -271,16 +304,7 @@ function haversine_sql(string $latField, string $lngField, float $lat, float $ln
 }
 
 function booking_status_label(string $status): string {
-    $labels = [
-        'draft' => 'Draft',
-        'submitted' => 'Finding Rider',
-        'matched' => 'Rider Assigned',
-        'accepted' => 'Rider Heading to Pickup',
-        'arrived_at_pickup' => 'Rider at Pickup',
-        'package_received' => 'In Transit',
-        'in_transit' => 'In Transit',
-        'delivered' => 'Delivered',
-        'cancelled' => 'Cancelled',
-    ];
-    return $labels[$status] ?? ucwords(str_replace('_', ' ', $status));
+    $key = 'status.' . $status;
+    $label = t($key);
+    return $label !== $key ? $label : ucwords(str_replace('_', ' ', $status));
 }

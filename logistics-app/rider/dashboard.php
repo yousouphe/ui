@@ -88,11 +88,11 @@ $historyRows = array_filter($allRequests, fn($req) =>
 );
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e(current_locale()) ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>My Deliveries | SwiftDrop</title>
+    <title><?= e(t('rider.deliveries.heading')) ?> | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -118,48 +118,53 @@ $historyRows = array_filter($allRequests, fn($req) =>
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/')) ?>">SwiftDrop</a>
-        <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i>Dashboard</a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/')) ?>"><?= e(t('common.brand')) ?></a>
+        <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
+            <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
+            <div class="small">
+                <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/dashboard')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+                &middot;
+                <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/dashboard')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+            </div>
         </div>
     </div>
 </nav>
 
 <div class="container py-5" id="deliveries-page">
-    <h1 class="h3 fw-bold mb-4">My Deliveries</h1>
+    <h1 class="h3 fw-bold mb-4"><?= e(t('rider.deliveries.heading')) ?></h1>
 
     <div class="row g-4 mb-4">
         <div class="col-md-6 col-xl-3">
             <div class="summary-card">
-                <div class="stat-label">Total Paid Today</div>
+                <div class="stat-label"><?= e(t('rider.deliveries.total_paid_today')) ?></div>
                 <div class="money-big">&#8358;<?= number_format($totalPaidToday, 2) ?></div>
             </div>
         </div>
         <div class="col-md-6 col-xl-3">
             <div class="summary-card">
-                <div class="stat-label">Total Paid This Week</div>
+                <div class="stat-label"><?= e(t('rider.deliveries.total_paid_week')) ?></div>
                 <div class="money-big">&#8358;<?= number_format($totalPaidWeek, 2) ?></div>
             </div>
         </div>
         <div class="col-md-6 col-xl-3">
             <div class="summary-card">
-                <div class="stat-label">Total Paid This Month</div>
+                <div class="stat-label"><?= e(t('rider.deliveries.total_paid_month')) ?></div>
                 <div class="money-big">&#8358;<?= number_format($totalPaidMonth, 2) ?></div>
             </div>
         </div>
         <div class="col-md-6 col-xl-3">
             <div class="summary-card">
-                <div class="stat-label">Total Paid Overall</div>
+                <div class="stat-label"><?= e(t('rider.deliveries.total_paid_overall')) ?></div>
                 <div class="money-big">&#8358;<?= number_format($totalPaidOverall, 2) ?></div>
             </div>
         </div>
     </div>
 
     <ul class="nav nav-tabs mb-4" id="deliveriesTabs">
-        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#orders" type="button">Orders</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#payments" type="button">Payments</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#history" type="button">History</button></li>
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#orders" type="button"><?= e(t('rider.deliveries.tab.orders')) ?></button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#payments" type="button"><?= e(t('rider.deliveries.tab.payments')) ?></button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#history" type="button"><?= e(t('rider.deliveries.tab.history')) ?></button></li>
     </ul>
 
     <div class="tab-content">
@@ -167,30 +172,30 @@ $historyRows = array_filter($allRequests, fn($req) =>
             <div class="row g-4">
                 <div class="col-lg-4">
                     <div class="cardx p-4 h-100">
-                        <h2 class="h5 fw-bold mb-3">Order Status Summary</h2>
-                        <div class="mini-row d-flex justify-content-between"><span>Matched</span><strong><?= count($matchedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Accepted</span><strong><?= count($acceptedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Arrived at pickup</span><strong><?= count($pickupBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Package received</span><strong><?= count($packageReceivedBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>In transit</span><strong><?= count($inTransitBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Delivered</span><strong><?= count($deliveredBookings) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Cancelled</span><strong><?= count($cancelledBookings) ?></strong></div>
+                        <h2 class="h5 fw-bold mb-3"><?= e(t('rider.deliveries.order_status_summary')) ?></h2>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('matched')) ?></span><strong><?= count($matchedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('accepted')) ?></span><strong><?= count($acceptedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('arrived_at_pickup')) ?></span><strong><?= count($pickupBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('package_received')) ?></span><strong><?= count($packageReceivedBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('in_transit')) ?></span><strong><?= count($inTransitBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('delivered')) ?></span><strong><?= count($deliveredBookings) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(booking_status_label('cancelled')) ?></span><strong><?= count($cancelledBookings) ?></strong></div>
                     </div>
                 </div>
 
                 <div class="col-lg-8">
                     <div class="cardx p-4">
                         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                            <h2 class="h5 fw-bold mb-0">All Assigned Orders</h2>
+                            <h2 class="h5 fw-bold mb-0"><?= e(t('rider.deliveries.all_assigned_orders')) ?></h2>
                             <?php if (!empty($allAssignedBookings)): ?>
                             <div class="order-search-wrap">
                                 <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="search" class="form-control form-control-sm" id="assigned-orders-search" placeholder="Search by code, item, sender...">
+                                <input type="search" class="form-control form-control-sm" id="assigned-orders-search" placeholder="<?= e(t('rider.deliveries.search_placeholder')) ?>">
                             </div>
                             <?php endif; ?>
                         </div>
                         <?php if (empty($allAssignedBookings)): ?>
-                            <div class="text-soft">No assigned orders yet.</div>
+                            <div class="text-soft"><?= e(t('rider.deliveries.no_assigned_orders')) ?></div>
                         <?php else: ?>
                             <div id="assigned-orders-list">
                             <?php foreach ($allAssignedBookings as $b): ?>
@@ -201,13 +206,13 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                             <div class="small text-soft"><?= e($b['item_name'] ?? 'Package') ?></div>
                                         </div>
                                         <div class="d-flex gap-2 flex-wrap">
-                                            <span class="badge <?= e(badge_class((string) ($b['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string) ($b['booking_status'] ?? 'unknown'))) ?></span>
-                                            <span class="badge <?= e(badge_class((string) ($b['payment_status'] ?? 'pending'))) ?>"><?= e((string) ($b['payment_status'] ?? 'pending')) ?></span>
+                                            <span class="badge <?= e(badge_class((string) ($b['booking_status'] ?? ''))) ?>"><?= e(booking_status_label((string) ($b['booking_status'] ?? 'unknown'))) ?></span>
+                                            <span class="badge <?= e(badge_class((string) ($b['payment_status'] ?? 'pending'))) ?>"><?= e(booking_status_label((string) ($b['payment_status'] ?? 'pending'))) ?></span>
                                         </div>
                                     </div>
-                                    <div class="small text-soft mb-1">Sender: <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' &middot; ' . e($b['sender_phone']) : '' ?></div>
-                                    <div class="small text-soft mb-1">Pickup: <?= e($b['pickup_address'] ?? '') ?></div>
-                                    <div class="small text-soft mb-2">Delivery: <?= e($b['delivery_address'] ?? '') ?></div>
+                                    <div class="small text-soft mb-1"><?= e(t('rider.sender_prefix')) ?> <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' &middot; ' . e($b['sender_phone']) : '' ?></div>
+                                    <div class="small text-soft mb-1"><?= e(t('booking.pickup_label')) ?> <?= e($b['pickup_address'] ?? '') ?></div>
+                                    <div class="small text-soft mb-2"><?= e(t('booking.delivery_label')) ?> <?= e($b['delivery_address'] ?? '') ?></div>
                                     <div class="price-tag">&#8358;<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></div>
                                 </div>
                             <?php endforeach; ?>
@@ -222,19 +227,19 @@ $historyRows = array_filter($allRequests, fn($req) =>
             <div class="row g-4">
                 <div class="col-lg-5">
                     <div class="cardx p-4 h-100">
-                        <h2 class="h5 fw-bold mb-3">Payment Summary</h2>
-                        <div class="mini-row d-flex justify-content-between"><span>Paid deliveries</span><strong><?= count($paidEarningRows) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Unpaid deliveries</span><strong><?= count($unpaidEarningRows) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Outstanding amount</span><strong>&#8358;<?= number_format($totalOutstanding, 2) ?></strong></div>
-                        <div class="mini-row d-flex justify-content-between"><span>Total expected</span><strong>&#8358;<?= number_format($totalExpectedOverall, 2) ?></strong></div>
+                        <h2 class="h5 fw-bold mb-3"><?= e(t('rider.deliveries.payment_summary')) ?></h2>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(t('rider.deliveries.paid_deliveries')) ?></span><strong><?= count($paidEarningRows) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(t('rider.deliveries.unpaid_deliveries')) ?></span><strong><?= count($unpaidEarningRows) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(t('rider.deliveries.outstanding_amount')) ?></span><strong>&#8358;<?= number_format($totalOutstanding, 2) ?></strong></div>
+                        <div class="mini-row d-flex justify-content-between"><span><?= e(t('rider.deliveries.total_expected')) ?></span><strong>&#8358;<?= number_format($totalExpectedOverall, 2) ?></strong></div>
                     </div>
                 </div>
 
                 <div class="col-lg-7">
                     <div class="cardx p-4">
-                        <h2 class="h5 fw-bold mb-3">Earnings Details</h2>
+                        <h2 class="h5 fw-bold mb-3"><?= e(t('rider.deliveries.earnings_details')) ?></h2>
                         <?php if (empty($deliveredEarningRows)): ?>
-                            <div class="text-soft">No delivered jobs yet.</div>
+                            <div class="text-soft"><?= e(t('rider.deliveries.no_delivered_jobs')) ?></div>
                         <?php else: ?>
                             <?php foreach ($deliveredEarningRows as $row): ?>
                                 <div class="req-card p-3">
@@ -246,12 +251,12 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                         <div class="text-end">
                                             <div class="price-tag">&#8358;<?= number_format((float) ($row['agreed_cost'] ?? 0), 2) ?></div>
                                             <span class="badge <?= e(badge_class((string) ($row['payment_status'] ?? 'pending'))) ?>">
-                                                <?= e((string) ($row['payment_status'] ?? 'pending')) ?>
+                                                <?= e(booking_status_label((string) ($row['payment_status'] ?? 'pending'))) ?>
                                             </span>
                                         </div>
                                     </div>
                                     <div class="small text-soft mt-2">
-                                        Delivered on <?= e((string) ($row['updated_at'] ?? $row['created_at'] ?? '')) ?>
+                                        <?= e(t('rider.deliveries.delivered_on_prefix')) ?> <?= e((string) ($row['updated_at'] ?? $row['created_at'] ?? '')) ?>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -263,9 +268,9 @@ $historyRows = array_filter($allRequests, fn($req) =>
 
         <div class="tab-pane fade" id="history">
             <div class="cardx p-4">
-                <h2 class="h5 fw-bold mb-3">Request / Order History</h2>
+                <h2 class="h5 fw-bold mb-3"><?= e(t('rider.deliveries.request_order_history')) ?></h2>
                 <?php if (empty($historyRows)): ?>
-                    <div class="text-soft">No request history yet.</div>
+                    <div class="text-soft"><?= e(t('rider.deliveries.no_request_history')) ?></div>
                 <?php else: ?>
                     <?php foreach ($historyRows as $req): ?>
                         <div class="req-card p-3">
@@ -275,13 +280,13 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                     <div class="small text-soft"><?= e($req['item_name'] ?? '') ?></div>
                                 </div>
                                 <div class="d-flex gap-2 flex-wrap">
-                                    <span class="badge <?= e(badge_class((string) ($req['request_status'] ?? 'pending'))) ?>"><?= e((string) ($req['request_status'] ?? 'pending')) ?></span>
-                                    <span class="badge <?= e(badge_class((string) ($req['booking_status'] ?? ''))) ?>"><?= e(str_replace('_', ' ', (string) ($req['booking_status'] ?? 'unknown'))) ?></span>
+                                    <span class="badge <?= e(badge_class((string) ($req['request_status'] ?? 'pending'))) ?>"><?= e(booking_status_label((string) ($req['request_status'] ?? 'pending'))) ?></span>
+                                    <span class="badge <?= e(badge_class((string) ($req['booking_status'] ?? ''))) ?>"><?= e(booking_status_label((string) ($req['booking_status'] ?? 'unknown'))) ?></span>
                                 </div>
                             </div>
-                            <div class="small text-soft mb-1">Pickup: <?= e($req['pickup_address'] ?? '') ?></div>
-                            <div class="small text-soft mb-1">Delivery: <?= e($req['delivery_address'] ?? '') ?></div>
-                            <div class="small text-soft">Offer / Value: &#8358;<?= number_format((float) ($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0), 2) ?></div>
+                            <div class="small text-soft mb-1"><?= e(t('booking.pickup_label')) ?> <?= e($req['pickup_address'] ?? '') ?></div>
+                            <div class="small text-soft mb-1"><?= e(t('booking.delivery_label')) ?> <?= e($req['delivery_address'] ?? '') ?></div>
+                            <div class="small text-soft"><?= e(t('rider.deliveries.offer_value_prefix')) ?> &#8358;<?= number_format((float) ($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0), 2) ?></div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>

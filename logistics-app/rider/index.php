@@ -409,19 +409,19 @@ $senderConfirmedHandover =
 // ---------------- TARGET SWITCHING ----------------
 $targetLat = null;
 $targetLng = null;
-$targetLabel = 'Destination';
+$targetLabel = t('map.delivery_pin');
 $targetAddress = '';
 
 if ($activeBooking) {
     if (in_array($currentStatus, ['matched', 'accepted'], true)) {
         $targetLat = $pickupLat;
         $targetLng = $pickupLng;
-        $targetLabel = 'Pickup';
+        $targetLabel = t('map.pickup_pin');
         $targetAddress = (string)($activeBooking['pickup_address'] ?? '');
     } else {
         $targetLat = $destLat;
         $targetLng = $destLng;
-        $targetLabel = 'Destination';
+        $targetLabel = t('map.delivery_pin');
         $targetAddress = (string)($activeBooking['delivery_address'] ?? '');
     }
 }
@@ -579,7 +579,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <?php if (empty($pendingOffers)): ?>
         <div class="text-center py-5 text-soft">
             <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
-            <p class="mb-0">Scanning for nearby orders...</p>
+            <p class="mb-0"><?= e(t('rider.scanning_for_orders')) ?></p>
         </div>
     <?php else: ?>
         <div class="row g-3">
@@ -590,12 +590,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                             <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
                             <span class="small text-soft">#<?= htmlspecialchars($req['booking_code']) ?></span>
                         </div>
-                        <div class="small text-soft mb-2">Sender: <?= htmlspecialchars($req['sender_name'] ?? 'Unknown') ?></div>
+                        <div class="small text-soft mb-2"><?= e(t('rider.sender_prefix')) ?> <?= htmlspecialchars($req['sender_name'] ?? 'Unknown') ?></div>
                         <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= htmlspecialchars($req['pickup_address']) ?></p>
                         <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= htmlspecialchars($req['delivery_address']) ?></p>
                         <form class="offer-action-form d-flex gap-2" method="post" action="#">
                             <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
-                            <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                            <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted"><?= e(t('rider.accept_offer')) ?></button>
                             <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
                         </form>
                     </div>
@@ -644,12 +644,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 }
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e(current_locale()) ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
-    <title>Rider Dashboard | SwiftDrop</title>
+    <title><?= e(t('rider.dashboard_heading')) ?> | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -747,10 +747,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>">SwiftDrop</a>
-        <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Deliveries</a>
-            <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>"><?= e(t('common.brand')) ?></a>
+        <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
+            <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
+            <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
+            <div class="small">
+                <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+                &middot;
+                <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+            </div>
         </div>
     </div>
 </nav>
@@ -775,22 +780,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
         <div>
-            <h1 class="h3 fw-bold mb-1">Rider Dashboard</h1>
-            <p class="text-soft mb-0">Track your current job, or stay online for new offers.</p>
+            <h1 class="h3 fw-bold mb-1"><?= e(t('rider.dashboard_heading')) ?></h1>
+            <p class="text-soft mb-0"><?= e(t('rider.dashboard_subheading')) ?></p>
         </div>
     </div>
 
     <?php if (!$activeBooking): ?>
     <div class="cardx p-4 mb-4" id="offers">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <h2 class="h5 fw-bold mb-0">New Offers</h2>
+            <h2 class="h5 fw-bold mb-0"><?= e(t('rider.new_offers')) ?></h2>
             <span class="request-indicator" id="new-request-indicator" style="<?= empty($pendingOffers) ? '' : 'display:inline-flex;' ?>"><?= count($pendingOffers) ?></span>
         </div>
         <div id="offers-list-wrap">
             <?php if (empty($pendingOffers)): ?>
                 <div class="text-center py-5 text-soft">
                     <i class="fa-solid fa-satellite-dish fa-3x mb-3 opacity-25"></i>
-                    <p class="mb-0">Scanning for nearby orders...</p>
+                    <p class="mb-0"><?= e(t('rider.scanning_for_orders')) ?></p>
                 </div>
             <?php else: ?>
                 <div class="row g-3">
@@ -801,12 +806,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
                                     <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
                                 </div>
-                                <div class="small text-soft mb-2">Sender: <?= e($req['sender_name'] ?? 'Unknown') ?></div>
+                                <div class="small text-soft mb-2"><?= e(t('rider.sender_prefix')) ?> <?= e($req['sender_name'] ?? 'Unknown') ?></div>
                                 <p class="small mb-2"><i class="fa-solid fa-map-pin me-2 text-warning"></i><?= e($req['pickup_address']) ?></p>
                                 <p class="small mb-3"><i class="fa-solid fa-location-dot me-2 text-info"></i><?= e($req['delivery_address']) ?></p>
                                 <form class="offer-action-form d-flex gap-2" method="post" action="#">
                                     <input type="hidden" name="request_id" value="<?= (int)$req['id'] ?>">
-                                    <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted">ACCEPT OFFER</button>
+                                    <button class="btn btn-success flex-grow-1 fw-bold" type="submit" name="action" value="accepted"><?= e(t('rider.accept_offer')) ?></button>
                                     <button class="btn btn-outline-danger" type="submit" name="action" value="rejected"><i class="fa-solid fa-xmark"></i></button>
                                 </form>
                             </div>
@@ -824,39 +829,39 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                 <?php if ($activeBooking): ?>
                     <div class="stats-bar d-flex justify-content-between align-items-center flex-wrap">
                         <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
-                            <div class="stat-label">Current Job Value</div>
+                            <div class="stat-label"><?= e(t('rider.stat.current_job_value')) ?></div>
                             <div class="stat-value text-info">₦<?= number_format($bookingAmount, 2) ?></div>
                         </div>
                         <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
-                            <div class="stat-label">Distance</div>
+                            <div class="stat-label"><?= e(t('rider.stat.distance')) ?></div>
                             <div class="stat-value" id="distance_display">--</div>
                         </div>
                         <div class="text-center flex-fill border-end border-secondary border-opacity-25 px-2">
-                            <div class="stat-label">ETA</div>
+                            <div class="stat-label"><?= e(t('rider.stat.eta')) ?></div>
                             <div class="stat-value" id="eta_display">--</div>
                         </div>
                         <div class="text-center flex-fill px-2">
-                            <div class="stat-label">System</div>
-                            <div id="sync_status" class="stat-value small text-success">READY</div>
+                            <div class="stat-label"><?= e(t('rider.stat.system')) ?></div>
+                            <div id="sync_status" class="stat-value small text-success"><?= e(t('rider.sync.ready')) ?></div>
                         </div>
                     </div>
                 <?php else: ?>
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h2 class="h5 fw-bold mb-0">Rider Radar</h2>
-                        <span id="sync_status" class="badge bg-dark border border-secondary text-info">OFFLINE</span>
+                        <h2 class="h5 fw-bold mb-0"><?= e(t('rider.rider_radar')) ?></h2>
+                        <span id="sync_status" class="badge bg-dark border border-secondary text-info"><?= e(t('rider.sync.offline')) ?></span>
                     </div>
                 <?php endif; ?>
 
                 <div class="d-flex justify-content-end mb-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="map-toggle-btn">
-                        <i class="fa-solid fa-chevron-down me-1"></i><span id="map-toggle-label">Show Map</span>
+                        <i class="fa-solid fa-chevron-down me-1"></i><span id="map-toggle-label"><?= e(t('booking.show_map')) ?></span>
                     </button>
                 </div>
 
                 <div id="nav_map_wrap" class="collapsed">
                     <div id="nav_map">
                         <div class="map-legend">
-                            <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#38bdf8;margin-right:6px"></span>Rider</div>
+                            <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#38bdf8;margin-right:6px"></span><?= e(t('map.rider_pin')) ?></div>
                             <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:6px"></span><span id="target_label"><?= e($targetLabel) ?></span></div>
                         </div>
                     </div>
@@ -864,9 +869,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
                 <div class="system-msg" id="geo_message">
                     <?php if ($activeBooking): ?>
-                        Current target: <strong><?= e($targetLabel) ?></strong> — <?= e($targetAddress) ?>
+                        <?= e(t('rider.current_target_prefix')) ?> <strong><?= e($targetLabel) ?></strong> — <?= e($targetAddress) ?>
                     <?php else: ?>
-                        Toggle online to go online. If GPS is unavailable, the map still shows your last known saved position.
+                        <?= e(t('rider.toggle_online_hint')) ?>
                     <?php endif; ?>
                 </div>
 
@@ -876,22 +881,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                         <span class="online-toggle-slider"></span>
                     </label>
                     <div>
-                        <div class="fw-bold" id="online-toggle-label"><?= $isOnline ? 'You are Online' : 'You are Offline' ?></div>
-                        <div class="small text-soft">Go online to start receiving delivery offers</div>
+                        <div class="fw-bold" id="online-toggle-label"><?= e($isOnline ? t('rider.you_are_online') : t('rider.you_are_offline')) ?></div>
+                        <div class="small text-soft"><?= e(t('rider.go_online_hint')) ?></div>
                     </div>
                 </div>
 
                 <?php if ($activeBooking): ?>
                     <div class="req-card p-3 border-info shadow-sm">
                         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                            <span class="badge <?= e(badge_class($currentStatus)) ?>" id="active-booking-status-badge"><?= e(strtoupper(str_replace('_', ' ', (string)$currentStatus))) ?></span>
+                            <span class="badge <?= e(badge_class($currentStatus)) ?>" id="active-booking-status-badge"><?= e(mb_strtoupper(booking_status_label((string)$currentStatus))) ?></span>
                             <div class="d-flex gap-2">
                                 <a href="tel:<?= e($activeBooking['sender_phone']) ?>" class="btn btn-sm btn-dark border-secondary rounded-pill px-3">
                                     <i class="fa-solid fa-phone"></i>
                                 </a>
                                 <?php if ($targetLat !== null && $targetLng !== null): ?>
                                     <a href="<?= e($mapLink) ?>" target="_blank" class="btn btn-sm btn-primary rounded-pill px-3 fw-bold">
-                                        <i class="fa-solid fa-diamond-turn-right me-1"></i> NAVIGATE
+                                        <i class="fa-solid fa-diamond-turn-right me-1"></i> <?= e(t('rider.navigate')) ?>
                                     </a>
                                 <?php endif; ?>
                             </div>
@@ -899,11 +904,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <div class="small text-soft">Booking</div>
+                                <div class="small text-soft"><?= e(t('rider.booking_label')) ?></div>
                                 <div class="fw-bold"><?= e($activeBooking['booking_code'] ?? '') ?></div>
                             </div>
                             <div class="col-md-6">
-                                <div class="small text-soft">Sender</div>
+                                <div class="small text-soft"><?= e(t('rider.sender_label')) ?></div>
                                 <div class="fw-bold"><?= e($activeBooking['sender_name'] ?? '') ?></div>
                             </div>
                         </div>
@@ -912,16 +917,16 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                             <i class="fa-solid fa-location-dot me-2 text-danger"></i>
                             <span id="target_address_text"><?= e($targetAddress) ?></span>
                         </p>
-                        <p class="small text-soft mb-3">Item: <?= e($activeBooking['item_name'] ?? '') ?></p>
+                        <p class="small text-soft mb-3"><?= e(t('rider.item_prefix')) ?> <?= e($activeBooking['item_name'] ?? '') ?></p>
 
                         <?php if ($currentStatus === 'arrived_at_pickup'): ?>
                             <div class="system-msg mb-3" id="sender_handover_notice">
                                 <?php if ($senderConfirmedHandover): ?>
                                     <i class="fa-solid fa-circle-check text-success me-2"></i>
-                                    Sender has confirmed package handover. You can now mark package received.
+                                    <?= e(t('rider.handover_confirmed_notice')) ?>
                                 <?php else: ?>
                                     <i class="fa-solid fa-handshake-angle text-warning me-2"></i>
-                                    Waiting for sender confirmation before you can select <strong>Received Package</strong>.
+                                    <?= t('rider.handover_waiting_notice', ['action' => '<strong>' . e(t('rider.received_package_label')) . '</strong>']) ?>
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
@@ -933,13 +938,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                             disabled
                             data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
                         >
-                            CHECKING LOCATION...
+                            <?= e(t('rider.checking_location')) ?>
                         </button>
                     </div>
                 <?php else: ?>
                     <div class="system-msg mb-0">
                         <i class="fa-solid fa-satellite-dish me-2 text-info"></i>
-                        No active delivery right now. Stay online to receive new offers.
+                        <?= e(t('rider.no_active_delivery')) ?>
                     </div>
                 <?php endif; ?>
             </div>
@@ -953,20 +958,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content bg-white text-dark border-0 shadow-lg">
             <div class="modal-header border-bottom">
-                <h5 class="modal-title">New Delivery Request</h5>
+                <h5 class="modal-title"><?= e(t('modal.new_delivery_request_title')) ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="new-request-modal-body">
-                Waiting for request details...
+                <?= e(t('modal.waiting_for_request_details')) ?>
             </div>
             <div class="modal-footer border-top">
                 <form id="new-request-reject-form" class="me-2">
                     <input type="hidden" name="request_id" id="modal-request-id-reject">
-                    <button class="btn btn-outline-danger" type="submit">Reject</button>
+                    <button class="btn btn-outline-danger" type="submit"><?= e(t('common.reject')) ?></button>
                 </form>
                 <form id="new-request-accept-form">
                     <input type="hidden" name="request_id" id="modal-request-id-accept">
-                    <button class="btn btn-success" type="submit">Accept</button>
+                    <button class="btn btn-success" type="submit"><?= e(t('common.accept')) ?></button>
                 </form>
             </div>
         </div>
@@ -974,7 +979,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 </div>
 
 <?php if ($canChat): ?>
-<button type="button" class="sticky-chat-btn" id="open-chat-btn" title="Open chat">
+<button type="button" class="sticky-chat-btn" id="open-chat-btn" title="<?= e(t('chat.open_chat_title')) ?>">
     <i class="fa-solid fa-comments"></i>
 </button>
 
@@ -983,20 +988,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="chat-header-info">
             <div class="chat-avatar position-relative"><i class="fa-solid fa-user"></i><span class="presence-dot" id="chat-presence-dot"></span></div>
             <div>
-                <div class="fw-bold"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
-                <div class="small text-soft" id="chat-presence-label">Your sender</div>
+                <div class="fw-bold"><?= e((string)($activeBooking['sender_name'] ?? t('chat.default_sender_name'))) ?></div>
+                <div class="small text-soft" id="chat-presence-label"><?= e(t('chat.your_sender')) ?></div>
             </div>
         </div>
         <div class="chat-header-actions">
             <?php if (!empty($activeBooking['sender_phone'])): ?>
-            <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="Call sender's phone">
+            <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $activeBooking['sender_phone'])) ?>" title="<?= e(t('chat.call_sender_phone_title')) ?>">
                 <i class="fa-solid fa-phone"></i>
             </a>
             <?php endif; ?>
-            <button type="button" class="chat-icon-btn" id="chat-call-btn" title="Internet call">
+            <button type="button" class="chat-icon-btn" id="chat-call-btn" title="<?= e(t('chat.internet_call_title')) ?>">
                 <i class="fa-solid fa-phone-volume"></i>
             </button>
-            <button type="button" class="chat-icon-btn" id="close-chat-btn" title="Close chat">
+            <button type="button" class="chat-icon-btn" id="close-chat-btn" title="<?= e(t('chat.close_chat_title')) ?>">
                 <i class="fa-solid fa-xmark"></i>
             </button>
         </div>
@@ -1007,25 +1012,25 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <form id="chat-form" class="chat-input-row">
         <input type="hidden" id="chat-booking-id" value="<?= (int)$activeBooking['id'] ?>">
         <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
-        <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="Record voice note">
+        <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="<?= e(t('chat.record_voice_note')) ?>">
             <i class="fa-solid fa-microphone"></i>
-            <span class="voice-btn-label visually-hidden">Record Voice</span>
+            <span class="voice-btn-label visually-hidden"><?= e(t('chat.record_voice_label')) ?></span>
         </button>
-        <textarea id="chat-message-input" class="chat-text-input" placeholder="Type a message..." rows="1"></textarea>
-        <button type="submit" class="chat-send-btn" title="Send">
+        <textarea id="chat-message-input" class="chat-text-input" placeholder="<?= e(t('chat.message_placeholder')) ?>" rows="1"></textarea>
+        <button type="submit" class="chat-send-btn" title="<?= e(t('chat.send_title')) ?>">
             <i class="fa-solid fa-paper-plane"></i>
         </button>
     </form>
 </div>
 <div class="call-panel" id="call-panel">
     <div class="call-panel-avatar"><i class="fa-solid fa-user"></i></div>
-    <div class="fw-bold mb-1">Internet Call</div>
-    <div class="small text-soft" id="call-status-text">Ready to connect.</div>
+    <div class="fw-bold mb-1"><?= e(t('call.internet_call')) ?></div>
+    <div class="small text-soft" id="call-status-text"><?= e(t('call.ready_to_connect')) ?></div>
     <div class="small fw-bold" id="call-timer"></div>
     <audio id="remote-audio" autoplay playsinline></audio>
     <div class="call-actions">
-        <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
-        <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="End call" aria-label="End call"><i class="fa-solid fa-phone-slash"></i></button>
+        <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="<?= e(t('call.accept_call_title')) ?>" aria-label="<?= e(t('call.accept_call_title')) ?>"><i class="fa-solid fa-phone"></i></button>
+        <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="<?= e(t('call.end_call_title')) ?>" aria-label="<?= e(t('call.end_call_title')) ?>"><i class="fa-solid fa-phone-slash"></i></button>
     </div>
 </div>
 <?php endif; ?>
@@ -1049,6 +1054,97 @@ const ajaxUpdateLocationUrl = <?= json_encode($ajaxUpdateLocationUrl) ?>;
 const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
 const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+
+const STATUS_LABELS = <?= json_encode([
+    'matched' => t('status.matched'),
+    'accepted' => t('status.accepted'),
+    'arrived_at_pickup' => t('status.arrived_at_pickup'),
+    'package_received' => t('status.package_received'),
+    'in_transit' => t('status.in_transit'),
+    'delivered' => t('status.delivered'),
+    'cancelled' => t('status.cancelled'),
+], JSON_UNESCAPED_UNICODE) ?>;
+
+function statusBadgeText(status) {
+    const key = String(status || '');
+    return (STATUS_LABELS[key] || key.replaceAll('_', ' ')).toUpperCase();
+}
+
+const I18N = <?= json_encode([
+    'showMap' => t('booking.show_map'),
+    'hideMap' => t('booking.hide_map'),
+    'noRouteDetails' => t('rider.route.no_details'),
+    'routeTargetLabel' => t('rider.route.target_label'),
+    'routeAddressLabel' => t('rider.route.address_label'),
+    'routeDistanceLabel' => t('rider.route.distance_label'),
+    'routeTimeLabel' => t('rider.route.time_label'),
+    'noTurnByTurn' => t('rider.route.no_turn_by_turn'),
+    'routeFetchError' => t('rider.route.fetch_error'),
+    'routeServiceUnavailable' => t('rider.route.service_unavailable'),
+    'geoUnableFetch' => t('rider.geo.unable_fetch'),
+    'geoPermissionDenied' => t('rider.geo.permission_denied'),
+    'geoPositionUnavailable' => t('rider.geo.position_unavailable'),
+    'geoTimeout' => t('rider.geo.timeout'),
+    'geoHttpsRequired' => t('rider.geo.https_required'),
+    'geoNotSupported' => t('rider.geo.not_supported'),
+    'geoTrackingStarted' => t('rider.geo.tracking_started'),
+    'geoTrackingStopped' => t('rider.geo.tracking_stopped'),
+    'geoSyncFailed' => t('rider.geo.sync_failed'),
+    'geoCannotMarkReceived' => t('rider.geo.cannot_mark_received'),
+    'youAreOnline' => t('rider.you_are_online'),
+    'youAreOffline' => t('rider.you_are_offline'),
+    'workflowFailed' => t('rider.workflow_failed'),
+    'statusUpdated' => t('rider.status_updated'),
+    'actionFailed' => t('rider.action_failed'),
+    'syncLive' => t('rider.sync.live'),
+    'syncGpsIssue' => t('rider.sync.gps_issue'),
+    'syncOffline' => t('rider.sync.offline'),
+    'btnIHaveArrived' => t('rider.btn.i_have_arrived'),
+    'btnHeadingToPickup' => t('rider.btn.heading_to_pickup'),
+    'btnConfirmPackageReceived' => t('rider.btn.confirm_package_received'),
+    'btnWaitingForSenderConfirmation' => t('rider.btn.waiting_for_sender_confirmation'),
+    'btnCompleteDelivery' => t('rider.btn.complete_delivery'),
+    'btnHeadingToDelivery' => t('rider.btn.heading_to_delivery'),
+    'btnNoActiveStep' => t('rider.btn.no_active_step'),
+    'pickupPin' => t('map.pickup_pin'),
+    'deliveryPin' => t('map.delivery_pin'),
+    'riderPin' => t('map.rider_pin'),
+    'requestFailed' => t('rider.request_failed'),
+    'requestUpdated' => t('rider.request_updated'),
+    'newRequestNotificationTitle' => t('rider.new_request_notification_title'),
+    'handoverConfirmedNotice' => t('rider.handover_confirmed_notice'),
+    'handoverWaitingNotice' => t('rider.handover_waiting_notice', ['action' => '<strong>' . t('rider.received_package_label') . '</strong>']),
+    'bookingLabel' => t('rider.booking_label'),
+    'senderLabel' => t('rider.sender_label'),
+    'itemPrefix' => t('rider.item_prefix'),
+    'itemLabel' => t('rider.item_label'),
+    'pickupLabel' => t('booking.pickup_label'),
+    'deliveryLabel' => t('booking.delivery_label'),
+    'callIncomingRinging' => t('call.incoming_ringing'),
+    'callServiceUnavailable' => t('call.service_unavailable'),
+    'callServiceUnavailableRetry' => t('call.service_unavailable_retry'),
+    'callNoAnswer' => t('call.no_answer'),
+    'callConnected' => t('call.connected'),
+    'callConnectionFailed' => t('call.connection_failed'),
+    'callEnded' => t('call.ended'),
+    'callFailed' => t('call.failed'),
+    'callSenderOfflinePhone' => t('call.sender_offline_calling_phone'),
+    'callSenderOfflineNoPhone' => t('call.sender_offline_no_phone'),
+    'callConnecting' => t('call.connecting'),
+    'callRinging' => t('call.ringing'),
+    'presenceOnline' => t('chat.presence_online'),
+    'presenceOffline' => t('chat.presence_offline'),
+    'recordVoice' => t('chat.record_voice_label'),
+    'stopRecording' => t('chat.stop_recording'),
+    'tickRead' => t('chat.tick_read'),
+    'tickDelivered' => t('chat.tick_delivered'),
+    'tickSent' => t('chat.tick_sent'),
+    'noMessagesYet' => t('chat.no_messages_yet'),
+    'voiceUploadFailed' => t('rider.voice_note_upload_failed'),
+    'recordVoiceFailed' => t('rider.record_voice_failed'),
+    'messageSendFailed' => t('rider.message_send_failed'),
+    'sendingEllipsis' => t('rider.sending_ellipsis'),
+], JSON_UNESCAPED_UNICODE) ?>;
 
 // STUN alone only works when both sides can find a direct path (same network, lenient
 // NAT). Most real phones on mobile data sit behind carrier-grade/symmetric NAT, so a TURN
@@ -1259,7 +1355,7 @@ function getCurrentTarget() {
             type: 'pickup',
             lat: pickup.lat,
             lng: pickup.lng,
-            label: 'Pickup',
+            label: I18N.pickupPin,
             address: pickupAddress
         };
     }
@@ -1269,7 +1365,7 @@ function getCurrentTarget() {
             type: 'delivery',
             lat: dest.lat,
             lng: dest.lng,
-            label: 'Destination',
+            label: I18N.deliveryPin,
             address: deliveryAddress
         };
     }
@@ -1278,11 +1374,11 @@ function getCurrentTarget() {
 }
 
 function explainGeoError(err) {
-    if (!err) return 'Unable to fetch current location.';
-    if (err.code === 1) return 'Location permission was denied.';
-    if (err.code === 2) return 'Position unavailable. The device could not get a reliable fix.';
-    if (err.code === 3) return 'Location request timed out.';
-    return 'Unable to fetch current location.';
+    if (!err) return I18N.geoUnableFetch;
+    if (err.code === 1) return I18N.geoPermissionDenied;
+    if (err.code === 2) return I18N.geoPositionUnavailable;
+    if (err.code === 3) return I18N.geoTimeout;
+    return I18N.geoUnableFetch;
 }
 
 function formatDistance(meters) {
@@ -1310,7 +1406,7 @@ function initMap() {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(state.map);
 
-    state.riderMarker = L.marker([initialRider.lat, initialRider.lng], { title: 'Rider' }).addTo(state.map);
+    state.riderMarker = L.marker([initialRider.lat, initialRider.lng], { title: I18N.riderPin }).addTo(state.map);
 
     const target = getCurrentTarget();
     if (target && target.lat !== null && target.lng !== null) {
@@ -1330,15 +1426,15 @@ function clearRoute() {
 
 function renderRouteDetails(route, target) {
     if (!route) {
-        if (routeDetailsBody) routeDetailsBody.textContent = 'No route details available.';
+        if (routeDetailsBody) routeDetailsBody.textContent = I18N.noRouteDetails;
         return;
     }
 
     const summary = `
-        <div class="mb-2"><strong>Target:</strong> ${escapeHtml(target.label)}</div>
-        <div class="mb-2"><strong>Address:</strong> ${escapeHtml(target.address || '-')}</div>
-        <div class="mb-2"><strong>Road distance:</strong> ${escapeHtml(formatDistance(route.summary.totalDistance))}</div>
-        <div class="mb-3"><strong>Estimated time:</strong> ${escapeHtml(formatDuration(route.summary.totalTime))}</div>
+        <div class="mb-2"><strong>${I18N.routeTargetLabel}</strong> ${escapeHtml(target.label)}</div>
+        <div class="mb-2"><strong>${I18N.routeAddressLabel}</strong> ${escapeHtml(target.address || '-')}</div>
+        <div class="mb-2"><strong>${I18N.routeDistanceLabel}</strong> ${escapeHtml(formatDistance(route.summary.totalDistance))}</div>
+        <div class="mb-3"><strong>${I18N.routeTimeLabel}</strong> ${escapeHtml(formatDuration(route.summary.totalTime))}</div>
     `;
 
     const instructions = (route.instructions || []).slice(0, 8).map(step => {
@@ -1346,7 +1442,7 @@ function renderRouteDetails(route, target) {
     }).join('');
 
     if (routeDetailsBody) {
-        routeDetailsBody.innerHTML = summary + (instructions || '<div>No turn-by-turn instructions.</div>');
+        routeDetailsBody.innerHTML = summary + (instructions || `<div>${I18N.noTurnByTurn}</div>`);
     }
 }
 
@@ -1386,7 +1482,7 @@ function buildRoute(fromLat, fromLng, toLat, toLng) {
         },
         createMarker: function(i, wp) {
             if (i === 0) {
-                state.riderMarker = L.marker(wp.latLng, { title: 'Rider' });
+                state.riderMarker = L.marker(wp.latLng, { title: I18N.riderPin });
                 return state.riderMarker;
             } else {
                 state.targetMarker = L.marker(wp.latLng, { title: target.label });
@@ -1409,8 +1505,8 @@ function buildRoute(fromLat, fromLng, toLat, toLng) {
     });
 
     state.routingControl.on('routingerror', function() {
-        if (routeDetailsBody) routeDetailsBody.textContent = 'Unable to fetch road route details right now.';
-        if (geoMessage) geoMessage.textContent = 'Routing service is temporarily unavailable.';
+        if (routeDetailsBody) routeDetailsBody.textContent = I18N.routeFetchError;
+        if (geoMessage) geoMessage.textContent = I18N.routeServiceUnavailable;
     });
 }
 
@@ -1438,36 +1534,36 @@ function updateWorkflowButton(distance) {
         if (distance !== null && distance <= 300) {
             btnWorkflow.disabled = false;
             btnWorkflow.classList.add('btn-success');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-location-crosshairs me-2"></i>I HAVE ARRIVED';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-location-crosshairs me-2"></i>' + I18N.btnIHaveArrived;
         } else {
             btnWorkflow.disabled = true;
             btnWorkflow.classList.add('btn-secondary');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-route me-2"></i>HEADING TO PICKUP';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-route me-2"></i>' + I18N.btnHeadingToPickup;
         }
     } else if (currentStatus === 'arrived_at_pickup') {
         if (senderHandoverConfirmed) {
             btnWorkflow.disabled = false;
             btnWorkflow.classList.add('btn-warning');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-box-open me-2"></i>CONFIRM PACKAGE RECEIVED';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-box-open me-2"></i>' + I18N.btnConfirmPackageReceived;
         } else {
             btnWorkflow.disabled = true;
             btnWorkflow.classList.add('btn-danger');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-handshake-angle me-2"></i>WAITING FOR SENDER CONFIRMATION';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-handshake-angle me-2"></i>' + I18N.btnWaitingForSenderConfirmation;
         }
     } else if (currentStatus === 'package_received' || currentStatus === 'in_transit') {
         if (distance !== null && distance <= 300) {
             btnWorkflow.disabled = false;
             btnWorkflow.classList.add('btn-success');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-circle-check me-2"></i>COMPLETE DELIVERY';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-circle-check me-2"></i>' + I18N.btnCompleteDelivery;
         } else {
             btnWorkflow.disabled = true;
             btnWorkflow.classList.add('btn-secondary');
-            btnWorkflow.innerHTML = '<i class="fa-solid fa-truck-fast me-2"></i>HEADING TO DELIVERY';
+            btnWorkflow.innerHTML = '<i class="fa-solid fa-truck-fast me-2"></i>' + I18N.btnHeadingToDelivery;
         }
     } else {
         btnWorkflow.disabled = true;
         btnWorkflow.classList.add('btn-secondary');
-        btnWorkflow.innerHTML = 'NO ACTIVE STEP';
+        btnWorkflow.innerHTML = I18N.btnNoActiveStep;
     }
 }
 
@@ -1481,7 +1577,7 @@ async function runWorkflowAction() {
     } else if (currentStatus === 'arrived_at_pickup') {
         if (!senderHandoverConfirmed) {
             if (geoMessage) {
-                geoMessage.textContent = 'You cannot mark package received until the sender confirms handover.';
+                geoMessage.textContent = I18N.geoCannotMarkReceived;
             }
             return;
         }
@@ -1508,15 +1604,15 @@ async function runWorkflowAction() {
         const data = await response.json();
 
         if (!response.ok || !data.success) {
-            throw new Error(data.message || 'Workflow action failed.');
+            throw new Error(data.message || I18N.workflowFailed);
         }
 
         currentStatus = data.new_status;
-        if (geoMessage) geoMessage.textContent = data.message || 'Status updated.';
+        if (geoMessage) geoMessage.textContent = data.message || I18N.statusUpdated;
 
         const activeBadge = document.getElementById('active-booking-status-badge');
         if (activeBadge) {
-            activeBadge.textContent = String(currentStatus || '').replaceAll('_', ' ').toUpperCase();
+            activeBadge.textContent = statusBadgeText(currentStatus);
         }
 
         if (currentStatus === 'delivered') {
@@ -1528,7 +1624,7 @@ async function runWorkflowAction() {
         const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
         updateMapAndTargetUI(lat, lng);
     } catch (err) {
-        if (geoMessage) geoMessage.textContent = err.message || 'Action failed.';
+        if (geoMessage) geoMessage.textContent = err.message || I18N.actionFailed;
         btnWorkflow.disabled = false;
     }
 }
@@ -1540,18 +1636,18 @@ async function toggleStatus() {
 
     if (isActivating) {
         if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-            if (geoMessage) geoMessage.textContent = 'GPS may fail because browser location usually requires HTTPS or localhost.';
+            if (geoMessage) geoMessage.textContent = I18N.geoHttpsRequired;
         }
 
         if (!navigator.geolocation) {
-            if (geoMessage) geoMessage.textContent = 'Geolocation is not supported on this browser.';
+            if (geoMessage) geoMessage.textContent = I18N.geoNotSupported;
             onlineToggleInput.checked = false;
             return;
         }
 
         navigator.geolocation.getCurrentPosition(
             () => {
-                if (onlineToggleLabel) onlineToggleLabel.innerText = 'You are Online';
+                if (onlineToggleLabel) onlineToggleLabel.innerText = I18N.youAreOnline;
                 startTracking();
                 updateServerStatus('available');
             },
@@ -1562,10 +1658,10 @@ async function toggleStatus() {
             { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
         );
     } else {
-        if (onlineToggleLabel) onlineToggleLabel.innerText = 'You are Offline';
+        if (onlineToggleLabel) onlineToggleLabel.innerText = I18N.youAreOffline;
         stopTracking();
         updateServerStatus('offline');
-        if (geoMessage) geoMessage.textContent = 'Tracking stopped.';
+        if (geoMessage) geoMessage.textContent = I18N.geoTrackingStopped;
     }
 }
 
@@ -1576,8 +1672,8 @@ function startTracking() {
         navigator.geolocation.clearWatch(watchId);
     }
 
-    if (syncStatus) syncStatus.innerText = 'LIVE';
-    if (geoMessage) geoMessage.textContent = 'Tracking started...';
+    if (syncStatus) syncStatus.innerText = I18N.syncLive;
+    if (geoMessage) geoMessage.textContent = I18N.geoTrackingStarted;
 
     watchId = navigator.geolocation.watchPosition(
         async (pos) => {
@@ -1593,12 +1689,12 @@ function startTracking() {
                     body: JSON.stringify({ latitude, longitude, status: 'available', csrf_token: CSRF_TOKEN })
                 });
             } catch (e) {
-                if (geoMessage) geoMessage.textContent = 'Live location updated on screen, but server sync failed.';
+                if (geoMessage) geoMessage.textContent = I18N.geoSyncFailed;
             }
         },
         (err) => {
             if (geoMessage) geoMessage.textContent = explainGeoError(err);
-            if (syncStatus) syncStatus.innerText = 'GPS ISSUE';
+            if (syncStatus) syncStatus.innerText = I18N.syncGpsIssue;
 
             const fallbackLat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
             const fallbackLng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
@@ -1613,7 +1709,7 @@ function stopTracking() {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
     }
-    if (syncStatus) syncStatus.innerText = 'OFFLINE';
+    if (syncStatus) syncStatus.innerText = I18N.syncOffline;
 }
 
 async function updateServerStatus(status) {
@@ -1657,21 +1753,21 @@ async function handleOfferAction(requestId, action, button) {
         const result = await response.json();
 
         if (!response.ok || !result.success) {
-            throw new Error(result.message || 'Unable to process request.');
+            throw new Error(result.message || I18N.requestFailed);
         }
 
         if (state.requestModal) {
             state.requestModal.hide();
         }
 
-        showToast(result.message || 'Request updated successfully.', 'success');
+        showToast(result.message || I18N.requestUpdated, 'success');
         await refreshSnapshot();
 
         if (action === 'accepted') {
             window.location.reload();
         }
     } catch (err) {
-        showToast(err.message || 'Unable to process request.', 'danger');
+        showToast(err.message || I18N.requestFailed, 'danger');
         if (button) {
             button.disabled = false;
             button.innerHTML = originalHtml;
@@ -1785,14 +1881,14 @@ function updateSummaryUI(data) {
 
         const activeBadge = document.getElementById('active-booking-status-badge');
         if (activeBadge && currentStatus) {
-            activeBadge.textContent = String(currentStatus).replaceAll('_', ' ').toUpperCase();
+            activeBadge.textContent = statusBadgeText(currentStatus);
         }
 
         const handoverNotice = document.getElementById('sender_handover_notice');
         if (handoverNotice && currentStatus === 'arrived_at_pickup') {
             handoverNotice.innerHTML = senderHandoverConfirmed
-                ? '<i class="fa-solid fa-circle-check text-success me-2"></i>Sender has confirmed package handover. You can now mark package received.'
-                : '<i class="fa-solid fa-handshake-angle text-warning me-2"></i>Waiting for sender confirmation before you can select <strong>Received Package</strong>.';
+                ? '<i class="fa-solid fa-circle-check text-success me-2"></i>' + I18N.handoverConfirmedNotice
+                : '<i class="fa-solid fa-handshake-angle text-warning me-2"></i>' + I18N.handoverWaitingNotice;
         }
 
         updateWorkflowButton(state.latestRouteDistanceMeters);
@@ -1808,11 +1904,11 @@ function showNewRequestPopup(req) {
 
     if (modalBody) {
         modalBody.innerHTML = `
-            <div class="mb-2"><strong>Booking:</strong> #${escapeHtml(req.booking_code)}</div>
-            <div class="mb-2"><strong>Sender:</strong> ${escapeHtml(req.sender_name)}</div>
-            <div class="mb-2"><strong>Item:</strong> ${escapeHtml(req.item_name)}</div>
-            <div class="mb-2"><strong>Pickup:</strong> ${escapeHtml(req.pickup_address)}</div>
-            <div class="mb-3"><strong>Delivery:</strong> ${escapeHtml(req.delivery_address)}</div>
+            <div class="mb-2"><strong>${I18N.bookingLabel}:</strong> #${escapeHtml(req.booking_code)}</div>
+            <div class="mb-2"><strong>${I18N.senderLabel}:</strong> ${escapeHtml(req.sender_name)}</div>
+            <div class="mb-2"><strong>${I18N.itemLabel}:</strong> ${escapeHtml(req.item_name)}</div>
+            <div class="mb-2"><strong>${I18N.pickupPin}:</strong> ${escapeHtml(req.pickup_address)}</div>
+            <div class="mb-3"><strong>${I18N.deliveryPin}:</strong> ${escapeHtml(req.delivery_address)}</div>
             <div class="price-tag">₦${Number(req.proposed_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         `;
     }
@@ -1859,7 +1955,7 @@ async function refreshSnapshot() {
             if (data.popup_request) {
                 showNewRequestPopup(data.popup_request);
                 showBrowserNotification(
-                    'New delivery request',
+                    I18N.newRequestNotificationTitle,
                     `Booking #${data.popup_request.booking_code} · ₦${Number(data.popup_request.proposed_cost || 0).toLocaleString()}`
                 );
             }
@@ -1913,12 +2009,12 @@ function initChat() {
     function buildStatusTicks(msg) {
         if (!msg.is_me) return '';
         if (msg.read_at_formatted) {
-            return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="Read ${escapeHtml(msg.read_at_formatted)}"></i>`;
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="${I18N.tickRead} ${escapeHtml(msg.read_at_formatted)}"></i>`;
         }
         if (msg.delivered_at_formatted) {
-            return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="Delivered ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="${I18N.tickDelivered} ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
         }
-        return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="Sent"></i>`;
+        return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="${I18N.tickSent}"></i>`;
     }
 
     function renderChatContent(rawMessage) {
@@ -1942,7 +2038,7 @@ function initChat() {
 
         if (replaceAll) {
             if (!messages || !messages.length) {
-                chatMessages.innerHTML = '<div class="text-soft small text-center py-4">No messages yet.</div>';
+                chatMessages.innerHTML = '<div class="text-soft small text-center py-4">' + I18N.noMessagesYet + '</div>';
                 chatHasRenderedOnce = true;
                 return;
             }
@@ -2016,7 +2112,7 @@ function initChat() {
             const result = await res.json();
             counterpartOnline = !!(result.success && result.online);
             if (presenceDot) presenceDot.classList.toggle('online', counterpartOnline);
-            if (presenceLabel) presenceLabel.textContent = counterpartOnline ? 'Online' : 'Offline';
+            if (presenceLabel) presenceLabel.textContent = counterpartOnline ? I18N.presenceOnline : I18N.presenceOffline;
         } catch (err) { /* ignore */ }
     }
 
@@ -2083,7 +2179,7 @@ function initChat() {
                 pendingIncomingCall = incomingCall;
                 if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                if (callStatusText) callStatusText.textContent = I18N.callIncomingRinging;
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                 if (endCallBtn) endCallBtn.style.display = '';
                 startRingback();
@@ -2093,7 +2189,7 @@ function initChat() {
             });
             peer.on('error', function (err) {
                 console.error('Peer error:', err);
-                if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
+                if (callStatusText) callStatusText.textContent = I18N.callServiceUnavailable;
                 state.peerReadyPromise = null;
                 resolve(null);
             });
@@ -2132,7 +2228,7 @@ function initChat() {
         const noAnswerTimer = setTimeout(() => {
             if (!connected && state.currentCall === call) {
                 call.close();
-                if (callStatusText) callStatusText.textContent = 'No answer.';
+                if (callStatusText) callStatusText.textContent = I18N.callNoAnswer;
             }
         }, 30000);
         call.on('stream', function (remoteStream) {
@@ -2141,7 +2237,7 @@ function initChat() {
             clearTimeout(noAnswerTimer);
             if (remoteAudio) remoteAudio.srcObject = remoteStream;
             if (callPanel) callPanel.style.display = 'block';
-            if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
+            if (callStatusText) callStatusText.textContent = I18N.callConnected;
             if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
             startCallTimer();
         });
@@ -2150,7 +2246,7 @@ function initChat() {
                 const iceState = call.peerConnection.iceConnectionState;
                 console.log('Call ICE connection state:', iceState);
                 if (iceState === 'failed' && callStatusText) {
-                    callStatusText.textContent = 'Connection failed - poor network path between callers.';
+                    callStatusText.textContent = I18N.callConnectionFailed;
                 }
             });
         }
@@ -2158,11 +2254,11 @@ function initChat() {
             clearTimeout(noAnswerTimer);
             pendingIncomingCall = null;
             state.currentCall = null;
-            finishCallUI(callStatusText && callStatusText.textContent === 'No answer.' ? 'No answer.' : 'Call ended.');
+            finishCallUI(callStatusText && callStatusText.textContent === I18N.callNoAnswer ? I18N.callNoAnswer : I18N.callEnded);
         });
         call.on('error', function () {
             clearTimeout(noAnswerTimer);
-            finishCallUI('Call failed.');
+            finishCallUI(I18N.callFailed);
         });
     }
 
@@ -2170,19 +2266,19 @@ function initChat() {
         if (!chatBookingId || !chatReceiverId) return;
         if (!counterpartOnline) {
             if (phoneCallLink) {
-                if (callStatusText) callStatusText.textContent = 'Sender appears offline — calling their phone instead.';
+                if (callStatusText) callStatusText.textContent = I18N.callSenderOfflinePhone;
                 phoneCallLink.click();
             } else if (callStatusText) {
-                callStatusText.textContent = 'Sender appears offline and has no phone number on file.';
+                callStatusText.textContent = I18N.callSenderOfflineNoPhone;
             }
             return;
         }
         try {
             if (callPanel) callPanel.style.display = 'block';
-            if (callStatusText) callStatusText.textContent = 'Connecting…';
+            if (callStatusText) callStatusText.textContent = I18N.callConnecting;
             const peer = await ensurePeerReady();
             if (!peer) {
-                if (callStatusText) callStatusText.textContent = 'Call service unavailable. Please try again.';
+                if (callStatusText) callStatusText.textContent = I18N.callServiceUnavailableRetry;
                 return;
             }
             await fetch(`${realtimeBaseUrl}?action=call_create`, {
@@ -2190,14 +2286,14 @@ function initChat() {
                 body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
             const localStream = await ensureLocalAudioStream();
-            if (callStatusText) callStatusText.textContent = 'Ringing…';
+            if (callStatusText) callStatusText.textContent = I18N.callRinging;
             startRingback();
             const call = peer.call(peerIdFor(chatReceiverId), localStream);
             bindActiveCall(call);
         } catch (err) {
             console.error(err);
             stopRingback();
-            if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
+            if (callStatusText) callStatusText.textContent = err.message || I18N.callFailed;
         }
     }
 
@@ -2215,7 +2311,7 @@ function initChat() {
             pendingIncomingCall = null;
         } catch (err) {
             console.error(err);
-            if (callStatusText) callStatusText.textContent = err.message || 'Unable to accept call.';
+            if (callStatusText) callStatusText.textContent = err.message || I18N.callFailed;
         }
     }
 
@@ -2236,7 +2332,7 @@ function initChat() {
         } catch (err) {
             console.error(err);
         } finally {
-            finishCallUI('Call ended.');
+            finishCallUI(I18N.callEnded);
         }
     }
 
@@ -2256,7 +2352,7 @@ function initChat() {
             const call = result.call || {};
             if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                if (callStatusText) callStatusText.textContent = I18N.callIncomingRinging;
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                 startRingback();
             }
@@ -2277,7 +2373,7 @@ function initChat() {
         });
         const result = await response.json();
         if (!response.ok || !result.success) {
-            throw new Error(result.message || 'Unable to upload voice note.');
+            throw new Error(result.message || I18N.voiceUploadFailed);
         }
         await fetchChatMessages(true);
     }
@@ -2298,15 +2394,15 @@ function initChat() {
                 stream.getTracks().forEach(track => track.stop());
                 const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
                 if (voiceBtn) voiceBtn.classList.remove('recording-live');
-                if (voiceBtnLabel) voiceBtnLabel.textContent = 'Record Voice';
+                if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.recordVoice;
                 await uploadVoiceNote(blob);
             };
             mediaRecorder.start();
             if (voiceBtn) voiceBtn.classList.add('recording-live');
-            if (voiceBtnLabel) voiceBtnLabel.textContent = 'Stop Recording';
+            if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.stopRecording;
         } catch (err) {
             console.error(err);
-            showToast(err.message || 'Unable to record voice note.', 'danger');
+            showToast(err.message || I18N.recordVoiceFailed, 'danger');
         }
     }
 
@@ -2363,7 +2459,7 @@ function initChat() {
         const submitBtn = chatForm.querySelector('button[type="submit"]');
         const originalHtml = submitBtn.innerHTML;
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>' + I18N.sendingEllipsis;
 
         try {
             const response = await fetch(safeAbsoluteUrl(chatSendUrl), {
@@ -2383,13 +2479,13 @@ function initChat() {
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                throw new Error(result.message || 'Unable to send message.');
+                throw new Error(result.message || I18N.messageSendFailed);
             }
 
             chatMessageInput.value = '';
             await fetchChatMessages(true);
         } catch (err) {
-            showToast(err.message || 'Unable to send message.', 'danger');
+            showToast(err.message || I18N.messageSendFailed, 'danger');
         } finally {
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalHtml;
@@ -2431,7 +2527,7 @@ function initPage() {
     const navMapWrap = document.getElementById('nav_map_wrap');
     mapToggleBtn?.addEventListener('click', function () {
         const collapsed = navMapWrap.classList.toggle('collapsed');
-        if (mapToggleLabel) mapToggleLabel.textContent = collapsed ? 'Show Map' : 'Hide Map';
+        if (mapToggleLabel) mapToggleLabel.textContent = collapsed ? I18N.showMap : I18N.hideMap;
         this.querySelector('i')?.classList.toggle('fa-chevron-down', collapsed);
         this.querySelector('i')?.classList.toggle('fa-chevron-up', !collapsed);
         if (!collapsed && state.map) {

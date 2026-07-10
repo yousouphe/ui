@@ -418,12 +418,12 @@ $selectedDeliveryLat = $selectedBooking['delivery_latitude'] ?? '';
 $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 ?>
 <!doctype html>
-<html lang="en">
+<html lang="<?= e(current_locale()) ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
-    <title>Sender Hub | SwiftDrop</title>
+    <title><?= e(t('sender.page_title')) ?></title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -538,11 +538,16 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>">SwiftDrop</a>
-        <div class="navbar-nav ms-auto flex-row gap-3">
-            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i>My Orders</a>
-            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i>New Order</a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>">Logout</a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>"><?= e(t('common.brand')) ?></a>
+        <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
+            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
+            <div class="small">
+                <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+                &middot;
+                <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+            </div>
         </div>
     </div>
 </nav>
@@ -571,65 +576,65 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php if ($showWizard): ?>
         <div class="cardx p-4 p-lg-5 mb-5" id="new-order-panel">
             <div class="wizard-steps">
-                <div class="wizard-step-dot current" data-step-dot="1"><span class="num">1</span> Addresses</div>
+                <div class="wizard-step-dot current" data-step-dot="1"><span class="num">1</span> <?= e(t('wizard.step1.label')) ?></div>
                 <div class="wizard-step-sep"></div>
-                <div class="wizard-step-dot" data-step-dot="2"><span class="num">2</span> Item details</div>
+                <div class="wizard-step-dot" data-step-dot="2"><span class="num">2</span> <?= e(t('wizard.step2.label')) ?></div>
                 <div class="wizard-step-sep"></div>
-                <div class="wizard-step-dot" data-step-dot="3"><span class="num">3</span> Photo &amp; send</div>
+                <div class="wizard-step-dot" data-step-dot="3"><span class="num">3</span> <?= e(t('wizard.step3.label')) ?></div>
             </div>
 
             <form method="post" enctype="multipart/form-data" id="booking-form">
                 <?= csrf_field() ?>
 
                 <div class="wizard-pane active" data-step="1">
-                    <h2 class="h4 fw-bold mb-1">Send a package?</h2>
-                    <p class="text-soft mb-4">Enter where we're picking up and where it's going.</p>
+                    <h2 class="h4 fw-bold mb-1"><?= e(t('wizard.step1.heading')) ?></h2>
+                    <p class="text-soft mb-4"><?= e(t('wizard.step1.subheading')) ?></p>
 
                     <div class="cardx p-3 mb-4">
-                        <h3 class="h5">Pickup location</h3>
-                        <label class="form-label">Pickup address</label>
+                        <h3 class="h5"><?= e(t('wizard.pickup_location')) ?></h3>
+                        <label class="form-label"><?= e(t('wizard.pickup_address_label')) ?></label>
                         <div class="address-search">
                             <div class="input-group">
-                                <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                <button class="btn btn-outline-secondary" type="button" id="use_current_pickup" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
+                                <button class="btn btn-outline-secondary" type="button" id="use_current_pickup" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
                             <div class="address-suggestions" id="pickup_suggestions"></div>
                         </div>
                         <div class="small mt-2">
-                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i><?= e(t('wizard.pick_on_map')) ?></a>
                         </div>
                         <input type="hidden" id="pickup_latitude" name="pickup_latitude" value="<?= e(old('pickup_latitude')) ?>">
                         <input type="hidden" id="pickup_longitude" name="pickup_longitude" value="<?= e(old('pickup_longitude')) ?>">
                     </div>
 
                     <div class="cardx p-3 mb-4">
-                        <h3 class="h5">Destination</h3>
-                        <label class="form-label">Delivery address</label>
+                        <h3 class="h5"><?= e(t('wizard.destination')) ?></h3>
+                        <label class="form-label"><?= e(t('wizard.delivery_address_label')) ?></label>
                         <div class="address-search">
                             <div class="input-group">
-                                <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="Search address, estate, market, landmark...">
-                                <button class="btn btn-outline-secondary" type="button" id="use_current_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
+                                <button class="btn btn-outline-secondary" type="button" id="use_current_delivery" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
                             <div class="address-suggestions" id="delivery_suggestions"></div>
                         </div>
                         <div class="small mt-2">
-                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i>Can't find it? Pick on map</a>
+                            <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i><?= e(t('wizard.pick_on_map')) ?></a>
                         </div>
                         <input type="hidden" id="delivery_latitude" name="delivery_latitude" value="<?= e(old('delivery_latitude')) ?>">
                         <input type="hidden" id="delivery_longitude" name="delivery_longitude" value="<?= e(old('delivery_longitude')) ?>">
                     </div>
 
-                    <div class="small text-danger mb-3 d-none" id="step1-error">Please set both a pickup and a delivery address.</div>
+                    <div class="small text-danger mb-3 d-none" id="step1-error"><?= e(t('wizard.step1.error')) ?></div>
                     <div class="d-flex justify-content-end">
-                        <button class="btn btn-primary" type="button" data-wizard-next="2">Next<i class="fa-solid fa-arrow-right ms-2"></i></button>
+                        <button class="btn btn-primary" type="button" data-wizard-next="2"><?= e(t('wizard.next')) ?><i class="fa-solid fa-arrow-right ms-2"></i></button>
                     </div>
                 </div>
 
                 <div id="route_map_card" style="display:none;">
                     <div class="cardx p-3 mb-4">
                         <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
-                            <h3 class="h5 mb-0">Route preview</h3>
-                            <span class="badge text-bg-warning" id="map_mode_label" style="display:none;">Mode: none</span>
+                            <h3 class="h5 mb-0"><?= e(t('wizard.route_preview')) ?></h3>
+                            <span class="badge text-bg-warning" id="map_mode_label" style="display:none;"><?= e(t('wizard.mode_none')) ?></span>
                             <span class="small text-soft" id="route_summary"></span>
                         </div>
                         <div id="booking_map" class="map-wrap"></div>
@@ -637,68 +642,68 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 </div>
 
                 <div class="wizard-pane" data-step="2">
-                    <h2 class="h4 fw-bold mb-1">What are you sending?</h2>
-                    <p class="text-soft mb-4">Recipient and item details, plus a quick look at the route.</p>
+                    <h2 class="h4 fw-bold mb-1"><?= e(t('wizard.step2.heading')) ?></h2>
+                    <p class="text-soft mb-4"><?= e(t('wizard.step2.subheading')) ?></p>
 
                     <div class="row g-4">
                         <div class="col-md-6">
-                            <label class="form-label">Recipient name</label>
+                            <label class="form-label"><?= e(t('wizard.recipient_name_label')) ?></label>
                             <input class="form-control" name="recipient_name" value="<?= e(old('recipient_name')) ?>">
                             <?php if (!empty($errors['recipient_name'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_name']) ?></div><?php endif; ?>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Recipient phone</label>
+                            <label class="form-label"><?= e(t('wizard.recipient_phone_label')) ?></label>
                             <input class="form-control" name="recipient_phone" value="<?= e(old('recipient_phone')) ?>">
                             <?php if (!empty($errors['recipient_phone'])): ?><div class="small text-danger mt-1"><?= e($errors['recipient_phone']) ?></div><?php endif; ?>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Item name</label>
+                            <label class="form-label"><?= e(t('wizard.item_name_label')) ?></label>
                             <input class="form-control" name="item_name" value="<?= e(old('item_name')) ?>">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Item category</label>
+                            <label class="form-label"><?= e(t('wizard.item_category_label')) ?></label>
                             <?php $selectedCategory = old('item_category'); ?>
                             <select class="form-select" name="item_category">
-                                <option value="">Select category</option>
-                                <option value="document" <?= $selectedCategory === 'document' ? 'selected' : '' ?>>Document</option>
-                                <option value="food" <?= $selectedCategory === 'food' ? 'selected' : '' ?>>Food</option>
-                                <option value="parcel" <?= $selectedCategory === 'parcel' ? 'selected' : '' ?>>Parcel</option>
-                                <option value="fragile" <?= $selectedCategory === 'fragile' ? 'selected' : '' ?>>Fragile</option>
+                                <option value=""><?= e(t('wizard.select_category')) ?></option>
+                                <option value="document" <?= $selectedCategory === 'document' ? 'selected' : '' ?>><?= e(t('wizard.category.document')) ?></option>
+                                <option value="food" <?= $selectedCategory === 'food' ? 'selected' : '' ?>><?= e(t('wizard.category.food')) ?></option>
+                                <option value="parcel" <?= $selectedCategory === 'parcel' ? 'selected' : '' ?>><?= e(t('wizard.category.parcel')) ?></option>
+                                <option value="fragile" <?= $selectedCategory === 'fragile' ? 'selected' : '' ?>><?= e(t('wizard.category.fragile')) ?></option>
                             </select>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Item description</label>
+                            <label class="form-label"><?= e(t('wizard.item_description_label')) ?></label>
                             <textarea class="form-control" name="item_description" rows="3"><?= e(old('item_description')) ?></textarea>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Estimated value</label>
+                            <label class="form-label"><?= e(t('wizard.estimated_value_label')) ?></label>
                             <input class="form-control" name="estimated_value" value="<?= e(old('estimated_value')) ?>">
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Special instructions</label>
+                            <label class="form-label"><?= e(t('wizard.special_instructions_label')) ?></label>
                             <textarea class="form-control" name="special_instructions" rows="2"><?= e(old('special_instructions')) ?></textarea>
                         </div>
                     </div>
 
                     <div class="d-flex justify-content-between mt-4">
-                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="1"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
-                        <button class="btn btn-primary" type="button" data-wizard-next="3">Next<i class="fa-solid fa-arrow-right ms-2"></i></button>
+                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="1"><i class="fa-solid fa-arrow-left me-2"></i><?= e(t('wizard.back')) ?></button>
+                        <button class="btn btn-primary" type="button" data-wizard-next="3"><?= e(t('wizard.next')) ?><i class="fa-solid fa-arrow-right ms-2"></i></button>
                     </div>
                 </div>
 
                 <div class="wizard-pane" data-step="3">
-                    <h2 class="h4 fw-bold mb-1">Add a photo</h2>
-                    <p class="text-soft mb-4">Optional - add one if you'd like the rider to see the item before pickup.</p>
+                    <h2 class="h4 fw-bold mb-1"><?= e(t('wizard.step3.heading')) ?></h2>
+                    <p class="text-soft mb-4"><?= e(t('wizard.step3.subheading')) ?></p>
 
-                    <label class="form-label">Item image (optional)</label>
+                    <label class="form-label"><?= e(t('wizard.item_image_label')) ?></label>
                     <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
                     <?php if (!empty($errors['item_image'])): ?><div class="small text-danger mt-1"><?= e($errors['item_image']) ?></div><?php endif; ?>
 
                     <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mt-4">
-                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i>Back</button>
+                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i><?= e(t('wizard.back')) ?></button>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft">Save as Draft</button>
-                            <button class="btn btn-primary flex-fill" type="submit" name="submit_booking">Send Package</button>
+                            <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft"><?= e(t('wizard.save_draft')) ?></button>
+                            <button class="btn btn-primary flex-fill" type="submit" name="submit_booking"><?= e(t('wizard.send_package')) ?></button>
                         </div>
                     </div>
                 </div>
@@ -711,25 +716,25 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="cardx p-4 mb-4">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
                         <div>
-                            <h2 class="h4 fw-bold mb-1">Sending from <?= e($selectedBooking['pickup_address']) ?></h2>
-                            <p class="text-soft mb-0">to <?= e($selectedBooking['delivery_address']) ?></p>
+                            <h2 class="h4 fw-bold mb-1"><?= e(t('booking.sending_from')) ?> <?= e($selectedBooking['pickup_address']) ?></h2>
+                            <p class="text-soft mb-0"><?= e(t('dashboard.to_prefix')) ?> <?= e($selectedBooking['delivery_address']) ?></p>
                         </div>
                         <span class="text-soft small"><?= e($selectedBooking['booking_code']) ?></span>
                     </div>
                     <div class="mt-3 d-flex flex-wrap gap-2 action-stack-inline">
                         <?php if ($canEditDetails): ?>
                             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
-                                <i class="fa-solid fa-pen me-2"></i>Edit Details
+                                <i class="fa-solid fa-pen me-2"></i><?= e(t('booking.edit_details')) ?>
                             </button>
                         <?php endif; ?>
                         <?php if ($canChangeDelivery): ?>
                             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
-                                <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
+                                <i class="fa-solid fa-location-dot me-2"></i><?= e(t('booking.change_delivery_address')) ?>
                             </button>
                         <?php endif; ?>
                         <?php if ($canCancel): ?>
                             <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
-                                <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                                <i class="fa-solid fa-ban me-2"></i><?= e(t('booking.cancel_order')) ?>
                             </button>
                         <?php endif; ?>
                     </div>
@@ -744,7 +749,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     <div class="d-flex flex-wrap gap-2">
                         <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e(booking_status_label((string) $selectedBooking['booking_status'])) ?></span></span>
                         <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> &#8358;<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
-                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
+                        <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e(booking_status_label((string) ($selectedBooking['payment_status'] ?? 'unpaid'))) ?></span></span>
                         <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
                     </div>
                 </div>
@@ -753,42 +758,42 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <div class="small text-soft mb-2"><strong>Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
-                        <div class="small text-soft mb-2"><strong>Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
-                        <div class="small text-soft mb-2"><strong>Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.recipient_label')) ?></strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.pickup_label')) ?></strong> <?= e($selectedBooking['pickup_address']) ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.delivery_label')) ?></strong> <?= e($selectedBooking['delivery_address']) ?></div>
                         <?php if (trim((string) ($selectedBooking['item_description'] ?? '')) !== ''): ?>
-                            <div class="small text-soft mb-2"><strong>Package:</strong> <?= e($selectedBooking['item_description']) ?></div>
+                            <div class="small text-soft mb-2"><strong><?= e(t('booking.package_label')) ?></strong> <?= e($selectedBooking['item_description']) ?></div>
                         <?php endif; ?>
                         <?php if (!empty($selectedBooking['estimated_value'])): ?>
-                            <div class="small text-soft mb-2"><strong>Est. Value:</strong> &#8358;<?= number_format((float) $selectedBooking['estimated_value'], 2) ?></div>
+                            <div class="small text-soft mb-2"><strong><?= e(t('booking.est_value_label')) ?></strong> &#8358;<?= number_format((float) $selectedBooking['estimated_value'], 2) ?></div>
                         <?php endif; ?>
                     </div>
                     <div class="col-md-6">
-                        <div class="small text-soft mb-2"><strong>Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
-                        <div class="small text-soft mb-2"><strong>Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
-                        <div class="small text-soft mb-2"><strong>Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.distance_label')) ?></strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.rider_label')) ?></strong> <?= e((string) ($selectedBooking['rider_name'] ?? t('booking.not_assigned_yet'))) ?></div>
+                        <div class="small text-soft mb-2"><strong><?= e(t('booking.rider_phone_label')) ?></strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
                         <?php if (trim((string) ($selectedBooking['special_instructions'] ?? '')) !== ''): ?>
-                            <div class="small text-soft mb-2"><strong>Instructions:</strong> <?= e($selectedBooking['special_instructions']) ?></div>
+                            <div class="small text-soft mb-2"><strong><?= e(t('booking.instructions_label')) ?></strong> <?= e($selectedBooking['special_instructions']) ?></div>
                         <?php endif; ?>
                     </div>
                 </div>
 
                 <?php if (!empty($selectedBooking['item_image_path'])): ?>
                     <div class="mt-2">
-                        <img src="<?= e(url_path($selectedBooking['item_image_path'])) ?>" class="img-fluid rounded" style="max-height:160px" alt="Package photo">
+                        <img src="<?= e(url_path($selectedBooking['item_image_path'])) ?>" class="img-fluid rounded" style="max-height:160px" alt="<?= e(t('booking.package_photo_alt')) ?>">
                     </div>
                 <?php endif; ?>
 
                 <div class="mt-3 d-flex justify-content-between flex-wrap gap-2">
                     <?php if ($canTrack && !empty($selectedBooking['sender_tracking_token'])): ?>
                         <button type="button" class="btn btn-sm btn-outline-info" id="share-tracking-btn" data-tracking-url="<?= e(url_path('bookings/track.php?token=' . urlencode($selectedBooking['sender_tracking_token']))) ?>">
-                            <i class="fa-solid fa-share-nodes me-1"></i>Share Tracking Link
+                            <i class="fa-solid fa-share-nodes me-1"></i><?= e(t('booking.share_tracking_link')) ?>
                         </button>
                     <?php else: ?>
                         <span></span>
                     <?php endif; ?>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="detail-map-toggle-btn">
-                        <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label">Show Map</span>
+                        <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label"><?= e(t('booking.show_map')) ?></span>
                     </button>
                 </div>
                 <div id="detail_map_wrap" class="collapsed mb-3">
@@ -797,15 +802,15 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
                 <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
                     <div class="mb-3">
-                        <div class="small fw-bold mb-2">Proof of Delivery</div>
-                        <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                        <div class="small fw-bold mb-2"><?= e(t('booking.proof_of_delivery')) ?></div>
+                        <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="<?= e(t('booking.proof_of_delivery')) ?>">
                     </div>
                 <?php endif; ?>
 
                 <?php if ($isDelivered): ?>
                     <div class="delivery-feedback-card mb-3">
                         <?php if ($existingRating): ?>
-                            <div class="small fw-bold mb-1">Your rating</div>
+                            <div class="small fw-bold mb-1"><?= e(t('rating.your_rating')) ?></div>
                             <div class="star-rating-display mb-1">
                                 <?php for ($i = 1; $i <= 5; $i++): ?>
                                     <i class="fa-solid fa-star<?= $i <= (int) $existingRating['rating'] ? '' : ' star-empty' ?>"></i>
@@ -815,7 +820,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                 <div class="text-soft small">"<?= e($existingRating['review_text']) ?>"</div>
                             <?php endif; ?>
                         <?php else: ?>
-                            <div class="small fw-bold mb-2">Rate your rider</div>
+                            <div class="small fw-bold mb-2"><?= e(t('rating.rate_your_rider')) ?></div>
                             <form id="rate-rider-form">
                                 <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
                                 <div class="star-rating-input mb-2" id="star-rating-input">
@@ -824,13 +829,13 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                     <?php endfor; ?>
                                 </div>
                                 <input type="hidden" name="rating" id="rate-rider-value" value="0">
-                                <textarea class="form-control form-control-sm mb-2" name="review_text" rows="2" placeholder="Optional review..."></textarea>
-                                <button class="btn btn-sm btn-primary" type="submit">Submit Rating</button>
+                                <textarea class="form-control form-control-sm mb-2" name="review_text" rows="2" placeholder="<?= e(t('rating.optional_review')) ?>"></textarea>
+                                <button class="btn btn-sm btn-primary" type="submit"><?= e(t('rating.submit')) ?></button>
                                 <div class="small text-danger mt-2 d-none" id="rate-rider-error"></div>
                             </form>
                         <?php endif; ?>
                         <button class="btn btn-sm btn-outline-danger mt-2" type="button" data-bs-toggle="modal" data-bs-target="#reportProblemModal">
-                            <i class="fa-solid fa-triangle-exclamation me-1"></i>Report a Problem
+                            <i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.report_problem')) ?>
                         </button>
                     </div>
                 <?php endif; ?>
@@ -838,48 +843,48 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="action-stack">
                     <?php if ($canPay): ?>
                         <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
-                            Pay &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                            <?= e(t('booking.pay_prefix')) ?> &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
                         </button>
                     <?php endif; ?>
 
                     <?php if ($canEditDetails): ?>
                         <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
-                            <i class="fa-solid fa-pen me-2"></i>Edit Details
+                            <i class="fa-solid fa-pen me-2"></i><?= e(t('booking.edit_details')) ?>
                         </button>
                     <?php endif; ?>
 
                     <?php if ($canChangeDelivery): ?>
                         <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
-                            <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
+                            <i class="fa-solid fa-location-dot me-2"></i><?= e(t('booking.change_delivery_address')) ?>
                         </button>
                     <?php endif; ?>
 
                     <?php if ($canIssueItem): ?>
                         <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
-                            <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
+                            <i class="fa-solid fa-box-open me-2"></i><?= e(t('booking.issue_item_to_rider')) ?>
                         </button>
                     <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
                         <div class="alert alert-info mb-0">
-                            <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
+                            <i class="fa-solid fa-circle-check me-2"></i><?= e(t('booking.item_already_issued')) ?>
                         </div>
                     <?php endif; ?>
 
                     <?php if ($canCancel): ?>
                         <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
-                            <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                            <i class="fa-solid fa-ban me-2"></i><?= e(t('booking.cancel_order')) ?>
                         </button>
                     <?php endif; ?>
 
                     <?php if ($canRebook): ?>
                         <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
-                            <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
+                            <i class="fa-solid fa-rotate-right me-2"></i><?= e(t('booking.book_another_rider')) ?>
                         </button>
                     <?php endif; ?>
                 </div>
 
                 <?php if ($cancellationReason !== ''): ?>
                     <div class="cancel-reason-box">
-                        <div class="fw-bold mb-1">Cancellation Reason</div>
+                        <div class="fw-bold mb-1"><?= e(t('booking.cancellation_reason')) ?></div>
                         <div class="small"><?= e($cancellationReason) ?></div>
                     </div>
                 <?php endif; ?>
@@ -890,14 +895,14 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="rider-float-bar" id="rider-float-bar">
                     <div class="rider-float-header">
                         <div>
-                            <strong id="rider-float-title">Finding a rider</strong>
-                            <span class="text-soft small ms-2" id="rider-float-subtitle">Scanning nearby...</span>
+                            <strong id="rider-float-title"><?= e(t('match.finding_rider')) ?></strong>
+                            <span class="text-soft small ms-2" id="rider-float-subtitle"><?= e(t('match.scanning_nearby')) ?></span>
                         </div>
                     </div>
                     <div class="rider-float-list" id="rider-list-container">
                         <div class="text-center py-3">
                             <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                            <span class="ms-2 text-soft small">Scanning for nearby riders...</span>
+                            <span class="ms-2 text-soft small"><?= e(t('match.scanning_for_riders')) ?></span>
                         </div>
                     </div>
                 </div>
@@ -909,19 +914,19 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
-                        <h5 class="modal-title">Cancel Order</h5>
+                        <h5 class="modal-title"><?= e(t('booking.cancel_order')) ?></h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <p class="text-soft">Are you sure you want to cancel this order? Please provide a reason.</p>
+                        <p class="text-soft"><?= e(t('modal.cancel_confirm_text')) ?></p>
                         <input type="hidden" id="cancel-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
-                        <label class="form-label">Reason for cancellation</label>
-                        <textarea id="cancel-reason" class="form-control" rows="4" placeholder="State why you want to cancel this order"></textarea>
-                        <div class="small text-danger mt-2 d-none" id="cancel-reason-error">Cancellation reason is required.</div>
+                        <label class="form-label"><?= e(t('modal.cancellation_reason_label')) ?></label>
+                        <textarea id="cancel-reason" class="form-control" rows="4" placeholder="<?= e(t('modal.cancellation_reason_placeholder')) ?>"></textarea>
+                        <div class="small text-danger mt-2 d-none" id="cancel-reason-error"><?= e(t('modal.cancellation_reason_required')) ?></div>
                     </div>
                     <div class="modal-footer border-top">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="button" class="btn btn-danger" id="confirm-cancel-booking-btn">Confirm Cancel</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.close')) ?></button>
+                        <button type="button" class="btn btn-danger" id="confirm-cancel-booking-btn"><?= e(t('modal.confirm_cancel')) ?></button>
                     </div>
                 </div>
             </div>
@@ -933,27 +938,27 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <form id="report-problem-form">
                         <div class="modal-header border-bottom">
-                            <h5 class="modal-title">Report a Problem</h5>
+                            <h5 class="modal-title"><?= e(t('complaint.report_problem')) ?></h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
                             <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
-                            <label class="form-label">What went wrong?</label>
+                            <label class="form-label"><?= e(t('complaint.what_went_wrong')) ?></label>
                             <select class="form-select mb-3" name="category" required>
-                                <option value="">Choose a category...</option>
-                                <option value="damaged_item">Item arrived damaged</option>
-                                <option value="late_delivery">Delivery was late</option>
-                                <option value="wrong_item">Wrong item delivered</option>
-                                <option value="rider_behavior">Issue with rider's conduct</option>
-                                <option value="other">Other</option>
+                                <option value=""><?= e(t('complaint.choose_category')) ?></option>
+                                <option value="damaged_item"><?= e(t('complaint.category.damaged_item')) ?></option>
+                                <option value="late_delivery"><?= e(t('complaint.category.late_delivery')) ?></option>
+                                <option value="wrong_item"><?= e(t('complaint.category.wrong_item')) ?></option>
+                                <option value="rider_behavior"><?= e(t('complaint.category.rider_behavior')) ?></option>
+                                <option value="other"><?= e(t('complaint.category.other')) ?></option>
                             </select>
-                            <label class="form-label">Details</label>
-                            <textarea class="form-control" name="message" rows="4" placeholder="Describe what happened" required></textarea>
+                            <label class="form-label"><?= e(t('complaint.details_label')) ?></label>
+                            <textarea class="form-control" name="message" rows="4" placeholder="<?= e(t('complaint.details_placeholder')) ?>" required></textarea>
                             <div class="small text-danger mt-2 d-none" id="report-problem-error"></div>
                         </div>
                         <div class="modal-footer border-top">
-                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-danger">Submit Report</button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.cancel')) ?></button>
+                            <button type="submit" class="btn btn-danger"><?= e(t('complaint.submit_report')) ?></button>
                         </div>
                     </form>
                 </div>
@@ -965,16 +970,16 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
-                        <h5 class="modal-title">Issue Item To Rider</h5>
+                        <h5 class="modal-title"><?= e(t('booking.issue_item_to_rider')) ?></h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <p class="mb-0 text-soft">Confirm that you have physically handed over the item to the rider.</p>
+                        <p class="mb-0 text-soft"><?= e(t('modal.issue_item_confirm_text')) ?></p>
                         <input type="hidden" id="issue-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
                     </div>
                     <div class="modal-footer border-top">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">No</button>
-                        <button type="button" class="btn btn-info fw-bold" id="confirm-issue-item-btn">Yes, Issue Item</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.no')) ?></button>
+                        <button type="button" class="btn btn-info fw-bold" id="confirm-issue-item-btn"><?= e(t('modal.yes_issue_item')) ?></button>
                     </div>
                 </div>
             </div>
@@ -985,7 +990,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
-                        <h5 class="modal-title">Edit Booking Details</h5>
+                        <h5 class="modal-title"><?= e(t('modal.edit_booking_details_title')) ?></h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <form id="edit-details-form">
@@ -993,47 +998,47 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                             <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
                             <div class="row g-3">
                                 <div class="col-md-6">
-                                    <label class="form-label">Recipient name</label>
+                                    <label class="form-label"><?= e(t('wizard.recipient_name_label')) ?></label>
                                     <input class="form-control" name="recipient_name" value="<?= e($selectedBooking['recipient_name']) ?>" required>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Recipient phone</label>
+                                    <label class="form-label"><?= e(t('wizard.recipient_phone_label')) ?></label>
                                     <input class="form-control" name="recipient_phone" value="<?= e($selectedBooking['recipient_phone']) ?>" required>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Item name</label>
+                                    <label class="form-label"><?= e(t('wizard.item_name_label')) ?></label>
                                     <input class="form-control" name="item_name" value="<?= e($selectedBooking['item_name']) ?>" required>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Item category</label>
+                                    <label class="form-label"><?= e(t('wizard.item_category_label')) ?></label>
                                     <select class="form-select" name="item_category" required>
-                                        <?php foreach (['document' => 'Document', 'food' => 'Food', 'parcel' => 'Parcel', 'fragile' => 'Fragile'] as $val => $label): ?>
-                                            <option value="<?= $val ?>" <?= $selectedBooking['item_category'] === $val ? 'selected' : '' ?>><?= $label ?></option>
+                                        <?php foreach (['document' => t('wizard.category.document'), 'food' => t('wizard.category.food'), 'parcel' => t('wizard.category.parcel'), 'fragile' => t('wizard.category.fragile')] as $val => $label): ?>
+                                            <option value="<?= $val ?>" <?= $selectedBooking['item_category'] === $val ? 'selected' : '' ?>><?= e($label) ?></option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
                                 <div class="col-12">
-                                    <label class="form-label">Item description</label>
+                                    <label class="form-label"><?= e(t('wizard.item_description_label')) ?></label>
                                     <textarea class="form-control" name="item_description" rows="3"><?= e((string) ($selectedBooking['item_description'] ?? '')) ?></textarea>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Estimated value</label>
+                                    <label class="form-label"><?= e(t('wizard.estimated_value_label')) ?></label>
                                     <input class="form-control" name="estimated_value" value="<?= e((string) ($selectedBooking['estimated_value'] ?? '')) ?>">
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label">Replace photo (optional)</label>
+                                    <label class="form-label"><?= e(t('modal.replace_photo_label')) ?></label>
                                     <input class="form-control" type="file" name="item_image" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
                                 </div>
                                 <div class="col-12">
-                                    <label class="form-label">Special instructions</label>
+                                    <label class="form-label"><?= e(t('wizard.special_instructions_label')) ?></label>
                                     <textarea class="form-control" name="special_instructions" rows="2"><?= e((string) ($selectedBooking['special_instructions'] ?? '')) ?></textarea>
                                 </div>
                             </div>
                             <div class="small text-danger mt-2 d-none" id="edit-details-error"></div>
                         </div>
                         <div class="modal-footer border-top">
-                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary fw-bold">Save Changes</button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.cancel')) ?></button>
+                            <button type="submit" class="btn btn-primary fw-bold"><?= e(t('modal.save_changes')) ?></button>
                         </div>
                     </form>
                 </div>
@@ -1046,18 +1051,18 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
-                        <h5 class="modal-title">Change Delivery Address</h5>
+                        <h5 class="modal-title"><?= e(t('booking.change_delivery_address')) ?></h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <form id="change-delivery-form">
                         <div class="modal-body">
                             <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
-                            <p class="text-soft small">If a rider has already agreed a price, it will be recalculated based on the new distance.</p>
-                            <label class="form-label">New delivery address</label>
+                            <p class="text-soft small"><?= e(t('modal.recalc_price_note')) ?></p>
+                            <label class="form-label"><?= e(t('modal.new_delivery_address_label')) ?></label>
                             <div class="address-search">
                                 <div class="input-group">
-                                    <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="Search address, estate, market, landmark...">
-                                    <button class="btn btn-outline-secondary" type="button" id="use_current_edit_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                    <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
+                                    <button class="btn btn-outline-secondary" type="button" id="use_current_edit_delivery" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                                 </div>
                                 <div class="address-suggestions" id="edit_delivery_suggestions"></div>
                             </div>
@@ -1066,8 +1071,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                             <div class="small text-danger mt-2 d-none" id="change-delivery-error"></div>
                         </div>
                         <div class="modal-footer border-top">
-                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary fw-bold">Update Address</button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.cancel')) ?></button>
+                            <button type="submit" class="btn btn-primary fw-bold"><?= e(t('modal.update_address')) ?></button>
                         </div>
                     </form>
                 </div>
@@ -1077,7 +1082,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php endif; ?>
 
         <?php if ($canChat): ?>
-        <button type="button" class="sticky-chat-btn" id="open-chat-btn" title="Open chat">
+        <button type="button" class="sticky-chat-btn" id="open-chat-btn" title="<?= e(t('chat.open_chat_title')) ?>">
             <i class="fa-solid fa-comments"></i>
         </button>
 
@@ -1086,20 +1091,20 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="chat-header-info">
                     <div class="chat-avatar position-relative"><i class="fa-solid fa-motorcycle"></i><span class="presence-dot" id="chat-presence-dot"></span></div>
                     <div>
-                        <div class="fw-bold"><?= e((string)($selectedBooking['rider_name'] ?? 'Rider')) ?></div>
-                        <div class="small text-soft" id="chat-presence-label">Your rider</div>
+                        <div class="fw-bold"><?= e((string)($selectedBooking['rider_name'] ?? t('chat.default_rider_name'))) ?></div>
+                        <div class="small text-soft" id="chat-presence-label"><?= e(t('chat.your_rider')) ?></div>
                     </div>
                 </div>
                 <div class="chat-header-actions">
                     <?php if (!empty($selectedBooking['rider_phone'])): ?>
-                    <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $selectedBooking['rider_phone'])) ?>" title="Call rider's phone">
+                    <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $selectedBooking['rider_phone'])) ?>" title="<?= e(t('chat.call_rider_phone_title')) ?>">
                         <i class="fa-solid fa-phone"></i>
                     </a>
                     <?php endif; ?>
-                    <button type="button" class="chat-icon-btn" id="chat-call-btn" title="Internet call">
+                    <button type="button" class="chat-icon-btn" id="chat-call-btn" title="<?= e(t('chat.internet_call_title')) ?>">
                         <i class="fa-solid fa-phone-volume"></i>
                     </button>
-                    <button type="button" class="chat-icon-btn" id="close-chat-btn" title="Close chat">
+                    <button type="button" class="chat-icon-btn" id="close-chat-btn" title="<?= e(t('chat.close_chat_title')) ?>">
                         <i class="fa-solid fa-xmark"></i>
                     </button>
                 </div>
@@ -1110,25 +1115,25 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <form id="chat-form" class="chat-input-row">
                 <input type="hidden" id="chat-booking-id" value="<?= (int)$selectedBooking['id'] ?>">
                 <input type="hidden" id="chat-receiver-id" value="<?= (int)$chatReceiverId ?>">
-                <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="Record voice note">
+                <button type="button" class="chat-icon-btn chat-mic-btn" id="chat-voice-btn" title="<?= e(t('chat.record_voice_note')) ?>">
                     <i class="fa-solid fa-microphone"></i>
-                    <span class="voice-btn-label visually-hidden">Record Voice</span>
+                    <span class="voice-btn-label visually-hidden"><?= e(t('chat.record_voice_label')) ?></span>
                 </button>
-                <textarea id="chat-message-input" class="chat-text-input" placeholder="Type a message..." rows="1"></textarea>
-                <button type="submit" class="chat-send-btn" title="Send">
+                <textarea id="chat-message-input" class="chat-text-input" placeholder="<?= e(t('chat.message_placeholder')) ?>" rows="1"></textarea>
+                <button type="submit" class="chat-send-btn" title="<?= e(t('chat.send_title')) ?>">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
             </form>
         </div>
         <div class="call-panel" id="call-panel">
             <div class="call-panel-avatar"><i class="fa-solid fa-motorcycle"></i></div>
-            <div class="fw-bold mb-1">Internet Call</div>
-            <div class="small text-soft" id="call-status-text">Ready to connect.</div>
+            <div class="fw-bold mb-1"><?= e(t('call.internet_call')) ?></div>
+            <div class="small text-soft" id="call-status-text"><?= e(t('call.ready_to_connect')) ?></div>
             <div class="small fw-bold" id="call-timer"></div>
             <audio id="remote-audio" autoplay playsinline></audio>
             <div class="call-actions">
-                <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
-                <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="End call" aria-label="End call"><i class="fa-solid fa-phone-slash"></i></button>
+                <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="<?= e(t('call.accept_call_title')) ?>" aria-label="<?= e(t('call.accept_call_title')) ?>"><i class="fa-solid fa-phone"></i></button>
+                <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="<?= e(t('call.end_call_title')) ?>" aria-label="<?= e(t('call.end_call_title')) ?>"><i class="fa-solid fa-phone-slash"></i></button>
             </div>
         </div>
         <?php endif; ?>
@@ -1143,6 +1148,52 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <script>
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
+
+const I18N = <?= json_encode([
+    'tapMapToSet' => t('map.tap_to_set'),
+    'calculatingRoute' => t('map.calculating_route'),
+    'showMap' => t('booking.show_map'),
+    'hideMap' => t('booking.hide_map'),
+    'findingRider' => t('match.finding_rider'),
+    'scanningNearby' => t('match.scanning_nearby'),
+    'waitingForRider' => t('match.waiting_for_rider'),
+    'requestingRider' => t('match.requesting_rider'),
+    'chooseVehicleType' => t('match.choose_vehicle_type'),
+    'riderFound' => t('match.rider_found'),
+    'pickOneToMatch' => t('match.pick_one_to_match'),
+    'matchingYouNow' => t('match.matching_you_now'),
+    'noMoreNearbyShort' => t('match.no_more_nearby_short'),
+    'ratingStarRequired' => t('rating.star_required'),
+    'addressPickFromSuggestions' => t('address.pick_from_suggestions'),
+    'callIncomingRinging' => t('call.incoming_ringing'),
+    'callServiceUnavailable' => t('call.service_unavailable'),
+    'callServiceUnavailableRetry' => t('call.service_unavailable_retry'),
+    'callNoAnswer' => t('call.no_answer'),
+    'callConnected' => t('call.connected'),
+    'callConnectionFailed' => t('call.connection_failed'),
+    'callEnded' => t('call.ended'),
+    'callFailed' => t('call.failed'),
+    'callRiderOfflinePhone' => t('call.rider_offline_calling_phone'),
+    'callRiderOfflineNoPhone' => t('call.rider_offline_no_phone'),
+    'callConnecting' => t('call.connecting'),
+    'callRinging' => t('call.ringing'),
+    'presenceOnline' => t('chat.presence_online'),
+    'presenceOffline' => t('chat.presence_offline'),
+    'recordVoice' => t('chat.record_voice_label'),
+    'stopRecording' => t('chat.stop_recording'),
+    'tickRead' => t('chat.tick_read'),
+    'tickDelivered' => t('chat.tick_delivered'),
+    'tickSent' => t('chat.tick_sent'),
+    'waitingForThemToRespond' => t('match.waiting_for_them'),
+    'scanningForRiders' => t('match.scanning_for_riders'),
+    'noMatchingAddress' => t('address.no_match'),
+    'noMessagesYet' => t('chat.no_messages_yet'),
+    'routeSummary' => t('map.route_summary'),
+    'pickupPin' => t('map.pickup_pin'),
+    'deliveryPin' => t('map.delivery_pin'),
+    'riderPin' => t('map.rider_pin'),
+    'locatingAddress' => t('map.locating_address'),
+], JSON_UNESCAPED_UNICODE) ?>;
 
 // STUN alone only works when both sides can find a direct path (same network, lenient
 // NAT). Most real phones on mobile data sit behind carrier-grade/symmetric NAT, so a TURN
@@ -1455,7 +1506,7 @@ function initSenderWorkspace() {
             revealMap();
             if (modeLabel) {
                 modeLabel.style.display = '';
-                modeLabel.textContent = 'Tap the map to set ' + mode.toUpperCase();
+                modeLabel.textContent = I18N.tapMapToSet + ' ' + mode.toUpperCase();
                 modeLabel.className = 'badge ' + (mode === 'pickup' ? 'text-bg-warning' : 'text-bg-info');
             }
             bookingMapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1463,7 +1514,7 @@ function initSenderWorkspace() {
 
         async function reverseGeocode(lat, lng, targetInput) {
             if (!targetInput) return;
-            targetInput.value = 'Locating address...';
+            targetInput.value = I18N.locatingAddress;
             try {
                 const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
                 const data = await res.json();
@@ -1486,7 +1537,7 @@ function initSenderWorkspace() {
             const map = ensureBookingMap();
             if (type === 'pickup') {
                 if (pickupMarker) map.removeLayer(pickupMarker);
-                pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup('Pickup').openPopup();
+                pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(I18N.pickupPin).openPopup();
                 if (pickupLat) pickupLat.value = lat.toFixed(7);
                 if (pickupLng) pickupLng.value = lng.toFixed(7);
                 pickupMarker.on('dragend', async (e) => {
@@ -1496,7 +1547,7 @@ function initSenderWorkspace() {
                 });
             } else {
                 if (deliveryMarker) map.removeLayer(deliveryMarker);
-                deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup('Delivery').openPopup();
+                deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(I18N.deliveryPin).openPopup();
                 if (deliveryLat) deliveryLat.value = lat.toFixed(7);
                 if (deliveryLng) deliveryLng.value = lng.toFixed(7);
                 deliveryMarker.on('dragend', async (e) => {
@@ -1517,7 +1568,7 @@ function initSenderWorkspace() {
                 bookingRoutingControl.remove();
                 bookingRoutingControl = null;
             }
-            if (routeSummary) routeSummary.textContent = 'Calculating route...';
+            if (routeSummary) routeSummary.textContent = I18N.calculatingRoute;
 
             const route = await fetchMapboxRoute([from, to]);
             if (!route) {
@@ -1532,13 +1583,13 @@ function initSenderWorkspace() {
 
             const km = (route.distanceMeters / 1000).toFixed(1);
             const mins = Math.round(route.durationSec / 60);
-            if (routeSummary) routeSummary.textContent = `${km} km · ~${mins} min drive`;
+            if (routeSummary) routeSummary.textContent = I18N.routeSummary.replace(':km', km).replace(':mins', mins);
         }
 
         function renderSuggestions(container, items, onPick) {
             if (!container) return;
             if (!items.length) {
-                container.innerHTML = '<div class="address-suggestion-empty">No matching Nigerian address found.</div>';
+                container.innerHTML = '<div class="address-suggestion-empty">' + I18N.noMatchingAddress + '</div>';
                 container.classList.add('show');
                 return;
             }
@@ -1683,7 +1734,7 @@ function initSenderWorkspace() {
     const detailMapWrap = root.querySelector('#detail_map_wrap');
     detailMapToggleBtn?.addEventListener('click', function () {
         const collapsed = detailMapWrap.classList.toggle('collapsed');
-        if (detailMapToggleLabel) detailMapToggleLabel.textContent = collapsed ? 'Show Map' : 'Hide Map';
+        if (detailMapToggleLabel) detailMapToggleLabel.textContent = collapsed ? I18N.showMap : I18N.hideMap;
         this.querySelector('i')?.classList.toggle('fa-chevron-down', collapsed);
         this.querySelector('i')?.classList.toggle('fa-chevron-up', !collapsed);
         if (!collapsed && workspaceState.detailMap) {
@@ -1747,8 +1798,8 @@ function initSenderWorkspace() {
             html: '<div style="color:#22c55e;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box-open"></i></div>',
             className: '', iconSize: [26, 26], iconAnchor: [13, 13]
         });
-        L.marker(pickupCoords, { icon: pickupIcon }).addTo(workspaceState.detailMap).bindPopup("Pickup");
-        L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(workspaceState.detailMap).bindPopup("Delivery");
+        L.marker(pickupCoords, { icon: pickupIcon }).addTo(workspaceState.detailMap).bindPopup(I18N.pickupPin);
+        L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(workspaceState.detailMap).bindPopup(I18N.deliveryPin);
 
         setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
 
@@ -1809,7 +1860,7 @@ function initSenderWorkspace() {
                     });
 
                     if (!workspaceState.trackingMarker) {
-                        workspaceState.trackingMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(workspaceState.detailMap).bindPopup('Rider');
+                        workspaceState.trackingMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(workspaceState.detailMap).bindPopup(I18N.riderPin);
                     } else {
                         workspaceState.trackingMarker.setLatLng(riderLatLng);
                         workspaceState.trackingMarker.setIcon(riderIcon);
@@ -1953,7 +2004,7 @@ function initSenderWorkspace() {
 
             function startWaitingForResponse(rider) {
                 workspaceState.matchPhase = 'waiting';
-                if (floatTitle) floatTitle.textContent = 'Waiting for rider';
+                if (floatTitle) floatTitle.textContent = I18N.waitingForRider;
                 if (floatSubtitle) floatSubtitle.textContent = `${escapeForRiderCard(rider.full_name)} · ${vehicleLabel(rider.vehicle_type)}`;
                 const listContainer = root.querySelector('#rider-list-container');
                 if (listContainer) {
@@ -1962,7 +2013,7 @@ function initSenderWorkspace() {
                             <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
                             <div class="fw-bold">${escapeForRiderCard(rider.full_name)}</div>
                             <div class="text-soft small">${vehicleLabel(rider.vehicle_type)} &middot; ₦${Number(rider.suggested_fee).toLocaleString()}</div>
-                            <div class="text-soft small mt-1">Waiting for them to respond...</div>
+                            <div class="text-soft small mt-1">${I18N.waitingForThemToRespond}</div>
                         </div>`;
                 }
                 stopRequestStatusPoll();
@@ -1971,7 +2022,7 @@ function initSenderWorkspace() {
 
             async function sendRiderRequest(rider) {
                 workspaceState.matchPhase = 'matching';
-                if (floatTitle) floatTitle.textContent = 'Requesting rider';
+                if (floatTitle) floatTitle.textContent = I18N.requestingRider;
                 if (floatSubtitle) floatSubtitle.textContent = `${escapeForRiderCard(rider.full_name)} · ${vehicleLabel(rider.vehicle_type)}`;
                 const listContainer = root.querySelector('#rider-list-container');
                 if (listContainer) {
@@ -2011,8 +2062,8 @@ function initSenderWorkspace() {
             }
 
             function renderGroupPicker(groups) {
-                if (floatTitle) floatTitle.textContent = groups.length > 1 ? 'Choose a vehicle type' : 'Rider found';
-                if (floatSubtitle) floatSubtitle.textContent = groups.length > 1 ? 'Pick one to match with the nearest rider' : 'Matching you now...';
+                if (floatTitle) floatTitle.textContent = groups.length > 1 ? I18N.chooseVehicleType : I18N.riderFound;
+                if (floatSubtitle) floatSubtitle.textContent = groups.length > 1 ? I18N.pickOneToMatch : I18N.matchingYouNow;
 
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
@@ -2068,17 +2119,17 @@ function initSenderWorkspace() {
                     if (availableRiders.length === 0) {
                         if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
                         if (riders.length > 0 && workspaceState.matchExcludedRiderIds.size > 0) {
-                            if (floatTitle) floatTitle.textContent = 'Finding a rider';
-                            if (floatSubtitle) floatSubtitle.textContent = 'No more nearby riders right now';
+                            if (floatTitle) floatTitle.textContent = I18N.findingRider;
+                            if (floatSubtitle) floatSubtitle.textContent = I18N.noMoreNearbyShort;
                             listContainer.innerHTML = '<div class="text-center text-soft small py-3">No more nearby riders responded. We will keep scanning.</div>';
                             workspaceState.matchExcludedRiderIds.clear();
                         } else {
-                            if (floatTitle) floatTitle.textContent = 'Finding a rider';
-                            if (floatSubtitle) floatSubtitle.textContent = 'Scanning nearby...';
+                            if (floatTitle) floatTitle.textContent = I18N.findingRider;
+                            if (floatSubtitle) floatSubtitle.textContent = I18N.scanningNearby;
                             listContainer.innerHTML = `
                                 <div class="text-center py-3">
                                     <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                                    <span class="ms-2 text-soft small">Scanning for nearby riders...</span>
+                                    <span class="ms-2 text-soft small">${I18N.scanningForRiders}</span>
                                 </div>`;
                         }
                         return;
@@ -2098,8 +2149,8 @@ function initSenderWorkspace() {
 
                     if (groups.length === 1) {
                         const group = groups[0];
-                        if (floatTitle) floatTitle.textContent = 'Rider found';
-                        if (floatSubtitle) floatSubtitle.textContent = 'Matching you now...';
+                        if (floatTitle) floatTitle.textContent = I18N.riderFound;
+                        if (floatSubtitle) floatSubtitle.textContent = I18N.matchingYouNow;
                         if (!workspaceState.autoMatchTimer) {
                             listContainer.innerHTML = `
                                 <div class="text-center py-4">
@@ -2365,7 +2416,7 @@ function initSenderWorkspace() {
 
         if (!rateRiderValue || Number(rateRiderValue.value) < 1) {
             if (errorBox) {
-                errorBox.textContent = 'Please select a star rating.';
+                errorBox.textContent = I18N.ratingStarRequired;
                 errorBox.classList.remove('d-none');
             }
             return;
@@ -2487,7 +2538,7 @@ function initSenderWorkspace() {
 
         function renderEditDeliverySuggestions(items, onPick) {
             if (!items.length) {
-                editDeliverySuggestions.innerHTML = '<div class="address-suggestion-empty">No matching Nigerian address found.</div>';
+                editDeliverySuggestions.innerHTML = '<div class="address-suggestion-empty">' + I18N.noMatchingAddress + '</div>';
                 editDeliverySuggestions.classList.add('show');
                 return;
             }
@@ -2558,7 +2609,7 @@ function initSenderWorkspace() {
                 navigator.geolocation.getCurrentPosition(
                     async (pos) => {
                         const { latitude, longitude } = pos.coords;
-                        if (editDeliveryAddress) editDeliveryAddress.value = 'Locating address...';
+                        if (editDeliveryAddress) editDeliveryAddress.value = I18N.locatingAddress;
                         try {
                             const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
                             const data = await res.json();
@@ -2593,7 +2644,7 @@ function initSenderWorkspace() {
 
             if (!editDeliveryLat?.value || !editDeliveryLng?.value) {
                 if (errorBox) {
-                    errorBox.textContent = 'Please pick an address from the suggestions list.';
+                    errorBox.textContent = I18N.addressPickFromSuggestions;
                     errorBox.classList.remove('d-none');
                 }
                 return;
@@ -2663,12 +2714,12 @@ function initSenderWorkspace() {
         function buildStatusTicks(msg) {
             if (!msg.is_me) return '';
             if (msg.read_at_formatted) {
-                return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="Read ${escapeHtml(msg.read_at_formatted)}"></i>`;
+                return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="${I18N.tickRead} ${escapeHtml(msg.read_at_formatted)}"></i>`;
             }
             if (msg.delivered_at_formatted) {
-                return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="Delivered ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
+                return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="${I18N.tickDelivered} ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
             }
-            return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="Sent"></i>`;
+            return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="${I18N.tickSent}"></i>`;
         }
 
         function renderChatContent(rawMessage) {
@@ -2692,7 +2743,7 @@ function initSenderWorkspace() {
 
             if (replaceAll) {
                 if (!messages || !messages.length) {
-                    chatMessages.innerHTML = '<div class="text-soft small text-center py-4">No messages yet.</div>';
+                    chatMessages.innerHTML = '<div class="text-soft small text-center py-4">' + I18N.noMessagesYet + '</div>';
                     chatHasRenderedOnce = true;
                     return;
                 }
@@ -2766,7 +2817,7 @@ function initSenderWorkspace() {
                 const result = await res.json();
                 counterpartOnline = !!(result.success && result.online);
                 if (presenceDot) presenceDot.classList.toggle('online', counterpartOnline);
-                if (presenceLabel) presenceLabel.textContent = counterpartOnline ? 'Online' : 'Offline';
+                if (presenceLabel) presenceLabel.textContent = counterpartOnline ? I18N.presenceOnline : I18N.presenceOffline;
             } catch (err) { /* ignore */ }
         }
 
@@ -2833,7 +2884,7 @@ function initSenderWorkspace() {
                     pendingIncomingCall = incomingCall;
                     if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
                     if (callPanel) callPanel.style.display = 'block';
-                    if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                    if (callStatusText) callStatusText.textContent = I18N.callIncomingRinging;
                     if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                     if (endCallBtn) endCallBtn.style.display = '';
                     startRingback();
@@ -2843,7 +2894,7 @@ function initSenderWorkspace() {
                 });
                 peer.on('error', function (err) {
                     console.error('Peer error:', err);
-                    if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
+                    if (callStatusText) callStatusText.textContent = I18N.callServiceUnavailable;
                     workspaceState.peerReadyPromise = null;
                     resolve(null);
                 });
@@ -2882,7 +2933,7 @@ function initSenderWorkspace() {
             const noAnswerTimer = setTimeout(() => {
                 if (!connected && workspaceState.currentCall === call) {
                     call.close();
-                    if (callStatusText) callStatusText.textContent = 'No answer.';
+                    if (callStatusText) callStatusText.textContent = I18N.callNoAnswer;
                 }
             }, 30000);
             call.on('stream', function (remoteStream) {
@@ -2891,7 +2942,7 @@ function initSenderWorkspace() {
                 clearTimeout(noAnswerTimer);
                 if (remoteAudio) remoteAudio.srcObject = remoteStream;
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
+                if (callStatusText) callStatusText.textContent = I18N.callConnected;
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
                 startCallTimer();
             });
@@ -2900,7 +2951,7 @@ function initSenderWorkspace() {
                     const state = call.peerConnection.iceConnectionState;
                     console.log('Call ICE connection state:', state);
                     if (state === 'failed' && callStatusText) {
-                        callStatusText.textContent = 'Connection failed - poor network path between callers.';
+                        callStatusText.textContent = I18N.callConnectionFailed;
                     }
                 });
             }
@@ -2908,11 +2959,11 @@ function initSenderWorkspace() {
                 clearTimeout(noAnswerTimer);
                 pendingIncomingCall = null;
                 workspaceState.currentCall = null;
-                finishCallUI(callStatusText && callStatusText.textContent === 'No answer.' ? 'No answer.' : 'Call ended.');
+                finishCallUI(callStatusText && callStatusText.textContent === I18N.callNoAnswer ? I18N.callNoAnswer : I18N.callEnded);
             });
             call.on('error', function () {
                 clearTimeout(noAnswerTimer);
-                finishCallUI('Call failed.');
+                finishCallUI(I18N.callFailed);
             });
         }
 
@@ -2920,19 +2971,19 @@ function initSenderWorkspace() {
             if (!chatBookingId || !chatReceiverId) return;
             if (!counterpartOnline) {
                 if (phoneCallLink) {
-                    if (callStatusText) callStatusText.textContent = 'Rider appears offline — calling their phone instead.';
+                    if (callStatusText) callStatusText.textContent = I18N.callRiderOfflinePhone;
                     phoneCallLink.click();
                 } else if (callStatusText) {
-                    callStatusText.textContent = 'Rider appears offline and has no phone number on file.';
+                    callStatusText.textContent = I18N.callRiderOfflineNoPhone;
                 }
                 return;
             }
             try {
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Connecting…';
+                if (callStatusText) callStatusText.textContent = I18N.callConnecting;
                 const peer = await ensurePeerReady();
                 if (!peer) {
-                    if (callStatusText) callStatusText.textContent = 'Call service unavailable. Please try again.';
+                    if (callStatusText) callStatusText.textContent = I18N.callServiceUnavailableRetry;
                     return;
                 }
                 await fetch(`${realtimeBaseUrl}?action=call_create`, {
@@ -2940,7 +2991,7 @@ function initSenderWorkspace() {
                     body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
                 const localStream = await ensureLocalAudioStream();
-                if (callStatusText) callStatusText.textContent = 'Ringing…';
+                if (callStatusText) callStatusText.textContent = I18N.callRinging;
                 startRingback();
                 const call = peer.call(peerIdFor(chatReceiverId), localStream);
                 bindActiveCall(call);
@@ -3006,7 +3057,7 @@ function initSenderWorkspace() {
                 const call = result.call || {};
                 if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                     if (callPanel) callPanel.style.display = 'block';
-                    if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                    if (callStatusText) callStatusText.textContent = I18N.callIncomingRinging;
                     if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                     startRingback();
                 }
@@ -3048,12 +3099,12 @@ function initSenderWorkspace() {
                     stream.getTracks().forEach(track => track.stop());
                     const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
                     if (voiceBtn) voiceBtn.classList.remove('recording-live');
-                    if (voiceBtnLabel) voiceBtnLabel.textContent = 'Record Voice';
+                    if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.recordVoice;
                     await uploadVoiceNote(blob);
                 };
                 mediaRecorder.start();
                 if (voiceBtn) voiceBtn.classList.add('recording-live');
-                if (voiceBtnLabel) voiceBtnLabel.textContent = 'Stop Recording';
+                if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.stopRecording;
             } catch (err) {
                 console.error(err);
                 alert(err.message || 'Unable to record voice note.');

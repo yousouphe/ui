@@ -1,40 +1,34 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_auth();
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json');
 
-$user = current_user();
-$bookingId = (int)($_GET['booking_id'] ?? 0);
+$token = trim((string)($_GET['token'] ?? ''));
 
-if ($bookingId <= 0) {
+if ($token === '') {
     echo json_encode(['status' => false]);
     exit;
 }
 
 $stmt = $pdo->prepare("
-    SELECT 
+    SELECT
         b.booking_status,
-        b.payment_status,
-        b.delivery_latitude,
-        b.delivery_longitude,
         b.pickup_latitude,
         b.pickup_longitude,
+        b.delivery_latitude,
+        b.delivery_longitude,
         rp.last_latitude,
         rp.last_longitude,
-        rp.availability_status,
         rp.vehicle_type,
         UNIX_TIMESTAMP(COALESCE(rp.last_location_updated_at, b.updated_at, b.created_at)) AS state_version
     FROM bookings b
-    LEFT JOIN rider_profiles rp 
-        ON rp.user_id = b.selected_rider_user_id
-    WHERE b.id = ?
-      AND b.sender_user_id = ?
+    LEFT JOIN rider_profiles rp ON rp.user_id = b.selected_rider_user_id
+    WHERE b.sender_tracking_token = ?
     LIMIT 1
 ");
-$stmt->execute([$bookingId, $user['id']]);
-$data = $stmt->fetch();
+$stmt->execute([$token]);
+$data = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$data) {
     echo json_encode(['status' => false]);
@@ -42,9 +36,8 @@ if (!$data) {
 }
 
 $etag = sha1(implode('|', [
-    $bookingId,
+    $token,
     $data['booking_status'] ?? '',
-    $data['payment_status'] ?? '',
     $data['last_latitude'] ?? '',
     $data['last_longitude'] ?? '',
     $data['state_version'] ?? ''
@@ -55,7 +48,6 @@ echo json_encode([
     'status' => true,
     'data' => [
         'booking_status' => $data['booking_status'],
-        'payment_status' => $data['payment_status'],
         'rider_lat' => $data['last_latitude'],
         'rider_lng' => $data['last_longitude'],
         'vehicle_type' => $data['vehicle_type'],

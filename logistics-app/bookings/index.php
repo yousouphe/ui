@@ -767,7 +767,14 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 <?php endif; ?>
 
-                <div class="mt-3 d-flex justify-content-end">
+                <div class="mt-3 d-flex justify-content-between flex-wrap gap-2">
+                    <?php if ($canTrack && !empty($selectedBooking['sender_tracking_token'])): ?>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="share-tracking-btn" data-tracking-url="<?= e(url_path('bookings/track.php?token=' . urlencode($selectedBooking['sender_tracking_token']))) ?>">
+                            <i class="fa-solid fa-share-nodes me-1"></i>Share Tracking Link
+                        </button>
+                    <?php else: ?>
+                        <span></span>
+                    <?php endif; ?>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="detail-map-toggle-btn">
                         <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label">Show Map</span>
                     </button>
@@ -1180,8 +1187,8 @@ function cleanupWorkspace() {
         try { workspaceState.peer.destroy(); } catch (e) {}
         workspaceState.peer = null;
     }
-    if (workspaceState.routingControl && workspaceState.detailMap) {
-        try { workspaceState.detailMap.removeControl(workspaceState.routingControl); } catch (e) {}
+    if (workspaceState.routingControl) {
+        try { workspaceState.routingControl.remove(); } catch (e) {}
         workspaceState.routingControl = null;
     }
     if (workspaceState.bookingMap) {
@@ -1590,6 +1597,32 @@ function initSenderWorkspace() {
         }
     });
 
+    const shareTrackingBtn = root.querySelector('#share-tracking-btn');
+    shareTrackingBtn?.addEventListener('click', async function () {
+        const url = this.dataset.trackingUrl;
+        const shareData = {
+            title: 'Track my delivery',
+            text: 'Track your delivery in real time on SwiftDrop:',
+            url
+        };
+        if (navigator.share) {
+            try {
+                await navigator.share(shareData);
+                return;
+            } catch (err) {
+                if (err && err.name === 'AbortError') return;
+            }
+        }
+        try {
+            await navigator.clipboard.writeText(url);
+            const original = this.innerHTML;
+            this.innerHTML = '<i class="fa-solid fa-check me-1"></i>Link Copied';
+            setTimeout(() => { this.innerHTML = original; }, 2000);
+        } catch (err) {
+            window.prompt('Copy this tracking link:', url);
+        }
+    });
+
     const detailMapEl = root.querySelector('#detail_map');
     const pickupLatVal = parseFloat(root.dataset.pickupLat || '');
     const pickupLngVal = parseFloat(root.dataset.pickupLng || '');
@@ -1612,11 +1645,34 @@ function initSenderWorkspace() {
             attribution: '© OpenStreetMap'
         }).addTo(workspaceState.detailMap);
 
-        L.marker(pickupCoords).addTo(workspaceState.detailMap).bindPopup("Pickup");
-        L.marker(deliveryCoords).addTo(workspaceState.detailMap).bindPopup("Delivery");
+        const pickupIcon = L.divIcon({
+            html: '<div style="color:#f59e0b;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box"></i></div>',
+            className: '', iconSize: [26, 26], iconAnchor: [13, 13]
+        });
+        const deliveryIcon = L.divIcon({
+            html: '<div style="color:#22c55e;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box-open"></i></div>',
+            className: '', iconSize: [26, 26], iconAnchor: [13, 13]
+        });
+        L.marker(pickupCoords, { icon: pickupIcon }).addTo(workspaceState.detailMap).bindPopup("Pickup");
+        L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(workspaceState.detailMap).bindPopup("Delivery");
 
         setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
 
+        // Draw the full pickup-to-delivery trip once as a fixed reference line - the rider
+        // marker then just moves along/near it as their live position updates, instead of
+        // redrawing a fresh line to a shifting target on every poll.
+        (async () => {
+            const tripRoute = await fetchMapboxRoute([pickupCoords, deliveryCoords]);
+            if (tripRoute) {
+                workspaceState.routingControl = L.polyline(tripRoute.latlngs, {
+                    color: '#38bdf8', weight: 5, opacity: 0.85
+                }).addTo(workspaceState.detailMap);
+            }
+        })();
+
+        function vehicleIconClass(type) {
+            return type === 'car' ? 'fa-car-side' : 'fa-motorcycle';
+        }
 
         if (canTrack) {
             let currentTrackTarget = null;
@@ -1653,11 +1709,16 @@ function initSenderWorkspace() {
                     if (!d.rider_lat || !d.rider_lng) return;
 
                     const riderLatLng = [parseFloat(d.rider_lat), parseFloat(d.rider_lng)];
+                    const riderIcon = L.divIcon({
+                        html: `<div style="color:#0ea5e9;font-size:24px;text-shadow:0 0 5px #fff;"><i class="fa-solid ${vehicleIconClass(d.vehicle_type)}"></i></div>`,
+                        className: '', iconSize: [30, 30], iconAnchor: [15, 15]
+                    });
 
                     if (!workspaceState.trackingMarker) {
-                        workspaceState.trackingMarker = L.marker(riderLatLng).addTo(workspaceState.detailMap).bindPopup('Rider');
+                        workspaceState.trackingMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(workspaceState.detailMap).bindPopup('Rider');
                     } else {
                         workspaceState.trackingMarker.setLatLng(riderLatLng);
+                        workspaceState.trackingMarker.setIcon(riderIcon);
                     }
 
                     // Match the rider-side target logic: pickup while matched/accepted (not yet
@@ -1669,32 +1730,22 @@ function initSenderWorkspace() {
                         target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
                     }
 
-                    // Only re-fetch the route when the target actually changes (pickup vs delivery)
-                    // or the rider has moved meaningfully - matching the pattern already used in
-                    // bookings/track.php. Re-fetching on every poll regardless of movement causes
-                    // unnecessary API calls every 10s.
+                    // Only re-fetch the ETA/distance figure when the target actually changes
+                    // (pickup vs delivery) or the rider has moved meaningfully. The fixed
+                    // pickup-to-delivery line stays as-is; this just recomputes the numbers.
                     const targetKey = JSON.stringify([target, riderLatLng]);
-                    if (workspaceState.routingControl && targetKey === currentTrackTarget) {
+                    if (targetKey === currentTrackTarget) {
                         return;
                     }
                     currentTrackTarget = targetKey;
 
-                    if (workspaceState.routingControl) {
-                        try { workspaceState.routingControl.remove(); } catch (e) {}
-                        workspaceState.routingControl = null;
-                    }
-
                     const etaText = root.querySelector('#eta_text');
                     if (etaText) etaText.innerText = 'Calculating...';
 
-                    const route = await fetchMapboxRoute([riderLatLng, target]);
-                    if (route) {
-                        workspaceState.routingControl = L.polyline(route.latlngs, {
-                            color: '#38bdf8', weight: 6
-                        }).addTo(workspaceState.detailMap);
-
-                        const distKm = (route.distanceMeters / 1000).toFixed(2);
-                        const etaMin = Math.round(route.durationSec / 60);
+                    const leg = await fetchMapboxRoute([riderLatLng, target]);
+                    if (leg) {
+                        const distKm = (leg.distanceMeters / 1000).toFixed(2);
+                        const etaMin = Math.round(leg.durationSec / 60);
                         if (etaText) etaText.innerText = `${etaMin} min · ${distKm} km`;
                     } else if (etaText) {
                         etaText.innerText = '--';

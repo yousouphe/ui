@@ -108,7 +108,7 @@ function realtime_insert_voice_message(PDO $pdo, int $bookingId, int $senderUser
 }
 
 $realtimeAction = trim((string)($_GET['action'] ?? $_POST['action'] ?? ''));
-if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload'], true)) {
+if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload', 'presence_ping', 'presence_check'], true)) {
     header('Content-Type: application/json');
 
     try {
@@ -125,15 +125,32 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
         $assetsRoot = realtime_base_dir();
         $callsDir = $assetsRoot . '/realtime_calls';
         $voiceDir = $assetsRoot . '/voice_notes';
+        $presenceDir = $assetsRoot . '/realtime_presence';
         realtime_ensure_dir($callsDir);
         realtime_ensure_dir($voiceDir);
+        realtime_ensure_dir($presenceDir);
 
         $callFile = $callsDir . '/booking_' . $bookingIdForRealtime . '.json';
         $currentUserId = (int)($user['id'] ?? 0);
         $counterpartId = (int)($ctx['counterpart_user_id'] ?? 0);
 
-        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload'], true)) {
+        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload', 'presence_ping'], true)) {
             require_csrf();
+        }
+
+        if ($realtimeAction === 'presence_ping') {
+            file_put_contents($presenceDir . '/user_' . $currentUserId . '.json', json_encode(['ts' => time()]));
+            respond_json(['success' => true]);
+        }
+
+        if ($realtimeAction === 'presence_check') {
+            $presenceFile = $presenceDir . '/user_' . $counterpartId . '.json';
+            $online = false;
+            if (is_file($presenceFile)) {
+                $presenceData = json_decode((string)file_get_contents($presenceFile), true) ?: [];
+                $online = (time() - (int)($presenceData['ts'] ?? 0)) <= 20;
+            }
+            respond_json(['success' => true, 'online' => $online]);
         }
 
         if ($realtimeAction === 'call_create') {
@@ -686,6 +703,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .chat-header { padding:14px 16px; border-bottom:1px solid rgba(15,42,68,.10); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
         .chat-header-info{display:flex;align-items:center;gap:10px}
         .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
+        .presence-dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:#9ca3af;border:2px solid #ffffff}
+        .presence-dot.online{background:#22c55e}
         .chat-header-actions{display:flex;align-items:center;gap:4px}
         .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .12s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;text-decoration:none;cursor:pointer}
         .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44;transform:translateY(-1px)}
@@ -697,6 +716,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .chat-bubble.them { align-self:flex-start; background:rgba(15,42,68,.10); color:#0f2c44; border-bottom-left-radius:4px; }
         .chat-time { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:4px; }
         .chat-status { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:2px; text-align:right; }
+        .chat-tick{font-size:.72rem}
+        .chat-tick-sent,.chat-tick-delivered{color:rgba(6,35,52,.5)}
+        .chat-tick-read{color:#0369a1}
         .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10);flex-shrink:0}
         .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
         .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
@@ -959,10 +981,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <div class="chat-panel" id="chat-panel">
     <div class="chat-header">
         <div class="chat-header-info">
-            <div class="chat-avatar"><i class="fa-solid fa-user"></i></div>
+            <div class="chat-avatar position-relative"><i class="fa-solid fa-user"></i><span class="presence-dot" id="chat-presence-dot"></span></div>
             <div>
                 <div class="fw-bold"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
-                <div class="small text-soft">Your sender</div>
+                <div class="small text-soft" id="chat-presence-label">Your sender</div>
             </div>
         </div>
         <div class="chat-header-actions">
@@ -999,6 +1021,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <div class="call-panel-avatar"><i class="fa-solid fa-user"></i></div>
     <div class="fw-bold mb-1">Internet Call</div>
     <div class="small text-soft" id="call-status-text">Ready to connect.</div>
+    <div class="small fw-bold" id="call-timer"></div>
     <audio id="remote-audio" autoplay playsinline></audio>
     <div class="call-actions">
         <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
@@ -1062,6 +1085,7 @@ const state = {
     snapshotInterval: null,
     chatInterval: null,
     callPollInterval: null,
+    presenceInterval: null,
     peer: null,
     currentCall: null,
     localCallStream: null,
@@ -1860,17 +1884,26 @@ function initChat() {
     const voiceBtnLabel = document.querySelector('.voice-btn-label');
     const callPanel = document.getElementById('call-panel');
     const callStatusText = document.getElementById('call-status-text');
+    const callTimerEl = document.getElementById('call-timer');
     const acceptCallBtn = document.getElementById('accept-call-btn');
     const endCallBtn = document.getElementById('end-call-btn');
     const remoteAudio = document.getElementById('remote-audio');
+    const presenceDot = document.getElementById('chat-presence-dot');
+    const presenceLabel = document.getElementById('chat-presence-label');
+    const phoneCallLink = document.querySelector('.chat-header-actions a[href^="tel:"]');
     const realtimeBaseUrl = <?= json_encode(url_path('rider/index.php')) ?>;
     const currentUserId = <?= (int)$user['id'] ?>;
+    let counterpartOnline = false;
 
-    function buildStatusText(msg) {
+    function buildStatusTicks(msg) {
         if (!msg.is_me) return '';
-        if (msg.read_at_formatted) return `Read ${escapeHtml(msg.read_at_formatted)}`;
-        if (msg.delivered_at_formatted) return `Delivered ${escapeHtml(msg.delivered_at_formatted)}`;
-        return 'Sent';
+        if (msg.read_at_formatted) {
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="Read ${escapeHtml(msg.read_at_formatted)}"></i>`;
+        }
+        if (msg.delivered_at_formatted) {
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="Delivered ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
+        }
+        return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="Sent"></i>`;
     }
 
     function renderChatContent(rawMessage) {
@@ -1905,7 +1938,7 @@ function initChat() {
             <div class="chat-bubble ${msg.is_me ? 'me' : 'them'}" data-message-id="${Number(msg.id || 0)}">
                 ${renderChatContent(msg.message)}
                 <span class="chat-time">${escapeHtml(msg.created_at_formatted || msg.created_at || '')}</span>
-                ${msg.is_me ? `<span class="chat-status">${buildStatusText(msg)}</span>` : ''}
+                ${msg.is_me ? `<span class="chat-status">${buildStatusTicks(msg)}</span>` : ''}
             </div>
         `).join('');
 
@@ -1951,6 +1984,73 @@ function initChat() {
         }
     }
 
+    async function pingPresence() {
+        if (!chatBookingId) return;
+        try {
+            await fetch(`${realtimeBaseUrl}?action=presence_ping`, {
+                method: 'POST',
+                body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
+            });
+        } catch (err) { /* ignore */ }
+    }
+
+    async function checkPresence() {
+        if (!chatBookingId) return;
+        try {
+            const res = await fetch(`${realtimeBaseUrl}?action=presence_check&booking_id=${encodeURIComponent(chatBookingId)}`, { cache: 'no-store' });
+            const result = await res.json();
+            counterpartOnline = !!(result.success && result.online);
+            if (presenceDot) presenceDot.classList.toggle('online', counterpartOnline);
+            if (presenceLabel) presenceLabel.textContent = counterpartOnline ? 'Online' : 'Offline';
+        } catch (err) { /* ignore */ }
+    }
+
+    let ringAudioCtx = null;
+    let ringInterval = null;
+
+    function startRingback() {
+        stopRingback();
+        try {
+            ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const playTone = () => {
+                if (!ringAudioCtx) return;
+                const osc = ringAudioCtx.createOscillator();
+                const gain = ringAudioCtx.createGain();
+                osc.frequency.value = 425;
+                gain.gain.value = 0.08;
+                osc.connect(gain).connect(ringAudioCtx.destination);
+                osc.start();
+                setTimeout(() => { try { osc.stop(); } catch (e) {} }, 1000);
+            };
+            playTone();
+            ringInterval = setInterval(playTone, 3000);
+        } catch (err) { /* Web Audio unavailable */ }
+    }
+
+    function stopRingback() {
+        if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+        if (ringAudioCtx) { ringAudioCtx.close().catch(() => {}); ringAudioCtx = null; }
+    }
+
+    let callTimerInterval = null;
+
+    function startCallTimer() {
+        stopCallTimer();
+        const startedAt = Date.now();
+        if (callTimerEl) callTimerEl.textContent = '00:00';
+        callTimerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+            const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const ss = String(elapsed % 60).padStart(2, '0');
+            if (callTimerEl) callTimerEl.textContent = `${mm}:${ss}`;
+        }, 1000);
+    }
+
+    function stopCallTimer() {
+        if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
+        if (callTimerEl) callTimerEl.textContent = '';
+    }
+
     function peerIdFor(userId) {
         return `booking-${chatBookingId}-user-${userId}`;
     }
@@ -1968,9 +2068,10 @@ function initChat() {
                 pendingIncomingCall = incomingCall;
                 if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
+                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                 if (endCallBtn) endCallBtn.style.display = '';
+                startRingback();
             });
             peer.on('disconnected', function () {
                 peer.reconnect();
@@ -1994,6 +2095,8 @@ function initChat() {
     let callPanelHideTimer = null;
 
     function finishCallUI(statusMessage) {
+        stopRingback();
+        stopCallTimer();
         if (remoteAudio) remoteAudio.srcObject = null;
         if (callStatusText) callStatusText.textContent = statusMessage;
         if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
@@ -2019,11 +2122,13 @@ function initChat() {
         }, 30000);
         call.on('stream', function (remoteStream) {
             connected = true;
+            stopRingback();
             clearTimeout(noAnswerTimer);
             if (remoteAudio) remoteAudio.srcObject = remoteStream;
             if (callPanel) callPanel.style.display = 'block';
             if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
             if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
+            startCallTimer();
         });
         call.on('close', function () {
             clearTimeout(noAnswerTimer);
@@ -2039,6 +2144,15 @@ function initChat() {
 
     async function startInternetCall() {
         if (!chatBookingId || !chatReceiverId) return;
+        if (!counterpartOnline) {
+            if (phoneCallLink) {
+                if (callStatusText) callStatusText.textContent = 'Sender appears offline — calling their phone instead.';
+                phoneCallLink.click();
+            } else if (callStatusText) {
+                callStatusText.textContent = 'Sender appears offline and has no phone number on file.';
+            }
+            return;
+        }
         try {
             if (callPanel) callPanel.style.display = 'block';
             if (callStatusText) callStatusText.textContent = 'Connecting…';
@@ -2052,11 +2166,13 @@ function initChat() {
                 body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
             const localStream = await ensureLocalAudioStream();
-            if (callStatusText) callStatusText.textContent = 'Calling sender over the internet…';
+            if (callStatusText) callStatusText.textContent = 'Ringing…';
+            startRingback();
             const call = peer.call(peerIdFor(chatReceiverId), localStream);
             bindActiveCall(call);
         } catch (err) {
             console.error(err);
+            stopRingback();
             if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
         }
     }
@@ -2064,6 +2180,7 @@ function initChat() {
     async function acceptInternetCall() {
         try {
             if (!pendingIncomingCall) return;
+            stopRingback();
             const localStream = await ensureLocalAudioStream();
             pendingIncomingCall.answer(localStream);
             bindActiveCall(pendingIncomingCall);
@@ -2115,8 +2232,9 @@ function initChat() {
             const call = result.call || {};
             if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
+                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
+                startRingback();
             }
         } catch (err) {
             console.error('Call polling failed:', err);
@@ -2174,11 +2292,16 @@ function initChat() {
         fetchChatMessages(true);
         ensurePeerReady();
         pollCallState();
+        pingPresence();
+        checkPresence();
         if (!state.chatInterval) {
             state.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
         }
         if (!state.callPollInterval) {
             state.callPollInterval = setInterval(() => pollCallState(), 4000);
+        }
+        if (!state.presenceInterval) {
+            state.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 12000);
         }
     });
 
@@ -2188,6 +2311,10 @@ function initChat() {
         if (state.chatInterval) {
             clearInterval(state.chatInterval);
             state.chatInterval = null;
+        }
+        if (state.presenceInterval) {
+            clearInterval(state.presenceInterval);
+            state.presenceInterval = null;
         }
     });
 

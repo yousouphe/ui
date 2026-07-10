@@ -87,7 +87,7 @@ function realtime_insert_voice_message(PDO $pdo, int $bookingId, int $senderUser
 }
 
 $realtimeAction = trim((string)($_GET['action'] ?? $_POST['action'] ?? ''));
-if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload'], true)) {
+if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload', 'presence_ping', 'presence_check'], true)) {
     header('Content-Type: application/json');
 
     try {
@@ -104,15 +104,32 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
         $assetsRoot = realtime_base_dir();
         $callsDir = $assetsRoot . '/realtime_calls';
         $voiceDir = $assetsRoot . '/voice_notes';
+        $presenceDir = $assetsRoot . '/realtime_presence';
         realtime_ensure_dir($callsDir);
         realtime_ensure_dir($voiceDir);
+        realtime_ensure_dir($presenceDir);
 
         $callFile = $callsDir . '/booking_' . $bookingIdForRealtime . '.json';
         $currentUserId = (int)($user['id'] ?? 0);
         $counterpartId = (int)($ctx['counterpart_user_id'] ?? 0);
 
-        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload'], true)) {
+        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload', 'presence_ping'], true)) {
             require_csrf();
+        }
+
+        if ($realtimeAction === 'presence_ping') {
+            file_put_contents($presenceDir . '/user_' . $currentUserId . '.json', json_encode(['ts' => time()]));
+            respond_json(['success' => true]);
+        }
+
+        if ($realtimeAction === 'presence_check') {
+            $presenceFile = $presenceDir . '/user_' . $counterpartId . '.json';
+            $online = false;
+            if (is_file($presenceFile)) {
+                $presenceData = json_decode((string)file_get_contents($presenceFile), true) ?: [];
+                $online = (time() - (int)($presenceData['ts'] ?? 0)) <= 20;
+            }
+            respond_json(['success' => true, 'online' => $online]);
         }
 
         if ($realtimeAction === 'call_create') {
@@ -427,6 +444,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .chat-header{padding:14px 16px;border-bottom:1px solid rgba(15,42,68,.10);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
         .chat-header-info{display:flex;align-items:center;gap:10px}
         .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
+        .presence-dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:#9ca3af;border:2px solid #ffffff}
+        .presence-dot.online{background:#22c55e}
         .chat-header-actions{display:flex;align-items:center;gap:4px}
         .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .12s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;text-decoration:none;cursor:pointer}
         .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44;transform:translateY(-1px)}
@@ -438,6 +457,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .chat-bubble.them{align-self:flex-start;background:rgba(15,42,68,.10);color:#0f2c44;border-bottom-left-radius:4px}
         .chat-time{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:4px}
         .chat-status{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:2px;text-align:right}
+        .chat-tick{font-size:.72rem}
+        .chat-tick-sent,.chat-tick-delivered{color:rgba(6,35,52,.5)}
+        .chat-tick-read{color:#0369a1}
         .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10);flex-shrink:0}
         .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
         .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
@@ -482,11 +504,12 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .rider-float-bar{position:fixed;left:0;right:0;bottom:0;z-index:1040;background:rgba(255,255,255,.97);backdrop-filter:blur(10px);border-top:1px solid rgba(56,189,248,.25);box-shadow:0 -12px 30px rgba(0,0,0,.35)}
         .rider-float-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(15,42,68,.10)}
         .rider-float-list{max-height:180px;overflow-y:auto;padding:.4rem .75rem}
-        .rider-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:.55rem .5rem;border-bottom:1px solid rgba(15,42,68,.08)}
-        .rider-row:last-child{border-bottom:none}
-        .rider-row-name{font-weight:600;font-size:.9rem}
-        .rider-row-actions{display:flex;align-items:center;gap:6px}
-        .rider-row-actions input[type="number"]{width:78px}
+        .vehicle-option-card{display:flex;align-items:center;gap:12px;padding:.75rem;border-radius:.9rem;border:1px solid rgba(15,42,68,.10);background:#ffffff;cursor:pointer;transition:.15s ease;margin-bottom:.5rem}
+        .vehicle-option-card:last-child{margin-bottom:0}
+        .vehicle-option-card:hover{border-color:#38bdf8;box-shadow:0 6px 16px rgba(56,189,248,.18);transform:translateY(-1px)}
+        .vehicle-option-icon{width:44px;height:44px;border-radius:50%;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.3);color:#0ea5e9;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+        .vehicle-option-info{flex:1;min-width:0}
+        .vehicle-option-price{font-weight:700;color:#0369a1;white-space:nowrap}
         body.has-rider-float-bar{padding-bottom:220px}
         @media (max-width:576px){
             .sticky-chat-btn{right:14px;bottom:230px}
@@ -809,12 +832,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="rider-float-bar" id="rider-float-bar">
                     <div class="rider-float-header">
                         <div>
-                            <strong>Nearby Riders</strong>
-                            <span class="text-soft small ms-2">Tap a rider to request them</span>
+                            <strong id="rider-float-title">Finding a rider</strong>
+                            <span class="text-soft small ms-2" id="rider-float-subtitle">Scanning nearby...</span>
                         </div>
-                        <button id="clear-route-btn" class="btn btn-sm btn-outline-warning" style="display:none;" onclick="clearActiveRoute()">
-                            <i class="fa-solid fa-xmark me-1"></i> Clear Route
-                        </button>
                     </div>
                     <div class="rider-float-list" id="rider-list-container">
                         <div class="text-center py-3">
@@ -972,10 +992,10 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <div class="chat-panel" id="chat-panel">
             <div class="chat-header">
                 <div class="chat-header-info">
-                    <div class="chat-avatar"><i class="fa-solid fa-motorcycle"></i></div>
+                    <div class="chat-avatar position-relative"><i class="fa-solid fa-motorcycle"></i><span class="presence-dot" id="chat-presence-dot"></span></div>
                     <div>
                         <div class="fw-bold"><?= e((string)($selectedBooking['rider_name'] ?? 'Rider')) ?></div>
-                        <div class="small text-soft">Your rider</div>
+                        <div class="small text-soft" id="chat-presence-label">Your rider</div>
                     </div>
                 </div>
                 <div class="chat-header-actions">
@@ -1012,6 +1032,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <div class="call-panel-avatar"><i class="fa-solid fa-motorcycle"></i></div>
             <div class="fw-bold mb-1">Internet Call</div>
             <div class="small text-soft" id="call-status-text">Ready to connect.</div>
+            <div class="small fw-bold" id="call-timer"></div>
             <audio id="remote-audio" autoplay playsinline></audio>
             <div class="call-actions">
                 <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
@@ -1097,9 +1118,14 @@ const workspaceState = {
     knownRiderIds: new Set(),
     pingSound: null,
     ridersInterval: null,
+    requestStatusInterval: null,
+    autoMatchTimer: null,
+    matchExcludedRiderIds: new Set(),
+    matchPhase: 'searching',
     trackingInterval: null,
     chatInterval: null,
     callPollInterval: null,
+    presenceInterval: null,
     peer: null,
     currentCall: null,
     localCallStream: null
@@ -1110,6 +1136,16 @@ function cleanupWorkspace() {
         clearInterval(workspaceState.ridersInterval);
         workspaceState.ridersInterval = null;
     }
+    if (workspaceState.requestStatusInterval) {
+        clearInterval(workspaceState.requestStatusInterval);
+        workspaceState.requestStatusInterval = null;
+    }
+    if (workspaceState.autoMatchTimer) {
+        clearTimeout(workspaceState.autoMatchTimer);
+        workspaceState.autoMatchTimer = null;
+    }
+    workspaceState.matchExcludedRiderIds = new Set();
+    workspaceState.matchPhase = 'searching';
     if (workspaceState.trackingInterval) {
         clearInterval(workspaceState.trackingInterval);
         workspaceState.trackingInterval = null;
@@ -1121,6 +1157,10 @@ function cleanupWorkspace() {
     if (workspaceState.callPollInterval) {
         clearInterval(workspaceState.callPollInterval);
         workspaceState.callPollInterval = null;
+    }
+    if (workspaceState.presenceInterval) {
+        clearInterval(workspaceState.presenceInterval);
+        workspaceState.presenceInterval = null;
     }
     if (workspaceState.currentCall) {
         try { workspaceState.currentCall.close(); } catch (e) {}
@@ -1150,7 +1190,6 @@ function cleanupWorkspace() {
     workspaceState.riderMarkers = {};
     workspaceState.knownRiderIds = new Set();
     workspaceState.pingSound = null;
-    window.clearActiveRoute = function () {};
 }
 
 async function ajaxLoadWorkspace(url, pushToHistory = true) {
@@ -1572,239 +1611,6 @@ function initSenderWorkspace() {
 
         setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
 
-        function clearRouteInternal() {
-            if (workspaceState.routingControl) {
-                try { workspaceState.routingControl.remove(); } catch (e) {}
-                workspaceState.routingControl = null;
-            }
-            const btn = root.querySelector('#clear-route-btn');
-            if (btn) btn.style.display = 'none';
-            root.querySelectorAll('.eta-badge').forEach(el => el.style.display = 'none');
-        }
-
-        window.clearActiveRoute = function () {
-            clearRouteInternal();
-            if (workspaceState.detailMap) workspaceState.detailMap.flyTo(pickupCoords, 13);
-        };
-
-        function stopRiderSearch() {
-            if (workspaceState.ridersInterval) {
-                clearInterval(workspaceState.ridersInterval);
-                workspaceState.ridersInterval = null;
-            }
-        }
-
-        if (shouldSearchRiders) {
-            workspaceState.pingSound = new Audio('assets/sounds/notification.mp3');
-
-            async function updateRiders() {
-                if (!shouldSearchRiders || selectedHasRider || ['matched', 'accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'arrived_at_pickup', 'package_received'].includes(String(selectedBookingStatus))) {
-                    stopRiderSearch();
-                    return;
-                }
-
-                try {
-                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`);
-                    const riders = await response.json();
-
-                    const listContainer = root.querySelector('#rider-list-container');
-                    if (!listContainer) {
-                        stopRiderSearch();
-                        return;
-                    }
-
-                    let html = '';
-                    let activeIds = new Set();
-                    let newRiderFound = false;
-
-                    riders.forEach(rider => {
-                        activeIds.add(rider.id);
-                        const latlng = [parseFloat(rider.last_latitude), parseFloat(rider.last_longitude)];
-
-                        if (!workspaceState.knownRiderIds.has(rider.id) && workspaceState.knownRiderIds.size > 0) {
-                            newRiderFound = true;
-                        }
-
-                        if (workspaceState.riderMarkers[rider.id]) {
-                            workspaceState.riderMarkers[rider.id].setLatLng(latlng);
-                        } else {
-                            const icon = L.divIcon({
-                                html: `<div style="color:${rider.vehicle_type === 'car' ? '#38bdf8' : '#fbbf24'};font-size:24px;text-shadow:0 0 5px #000;"><i class="fa-solid ${rider.vehicle_type === 'car' ? 'fa-car-side' : 'fa-motorcycle'}"></i></div>`,
-                                className: '',
-                                iconSize: [30, 30],
-                                iconAnchor: [15, 15]
-                            });
-                            workspaceState.riderMarkers[rider.id] = L.marker(latlng, { icon }).addTo(workspaceState.detailMap).bindPopup(`<b>${rider.full_name}</b>`);
-                        }
-
-                        html += `
-                            <div class="rider-row" id="rider-card-${rider.id}">
-                                <div class="rider-row-info">
-                                    <div class="rider-row-name">${rider.full_name}
-                                        <span class="badge bg-info ms-1">${parseFloat(rider.distance_km).toFixed(2)}km</span>
-                                        <span class="badge bg-dark border border-info text-info eta-badge ms-1" id="eta-${rider.id}" style="display:none;"></span>
-                                    </div>
-                                    <div class="text-soft small">${rider.vehicle_type === 'car' ? '🚗' : '🏍️'} ${rider.vehicle_type.toUpperCase()} &middot; ⭐ ${parseFloat(rider.rating).toFixed(1)}</div>
-                                </div>
-                                <div class="rider-row-actions">
-                                    <button class="btn btn-sm btn-outline-info rider-route-btn" data-rider-lat="${rider.last_latitude}" data-rider-lng="${rider.last_longitude}" data-rider-id="${rider.id}" title="Preview route">
-                                        <i class="fa-solid fa-route"></i>
-                                    </button>
-                                    <form class="rider-request-form d-flex gap-1 align-items-center">
-                                        <input type="hidden" name="booking_id" value="${selectedBookingId}">
-                                        <input type="hidden" name="rider_user_id" value="${rider.id}">
-                                        <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                                        <input class="form-control form-control-sm fw-bold text-info" type="number" name="proposed_cost" value="${rider.suggested_fee}" title="Proposed fee (₦)">
-                                        <button class="btn btn-sm btn-primary" type="submit">Request</button>
-                                    </form>
-                                </div>
-                            </div>`;
-                    });
-
-                    if (newRiderFound && workspaceState.pingSound) {
-                        workspaceState.pingSound.play().catch(() => {});
-                    }
-
-                    workspaceState.knownRiderIds = activeIds;
-                    listContainer.innerHTML = html || '<div class="text-center text-soft py-3">No active riders found in range.</div>';
-
-                    listContainer.querySelectorAll('.rider-route-btn').forEach(btn => {
-                        btn.addEventListener('click', async function () {
-                            const rLat = parseFloat(this.dataset.riderLat);
-                            const rLng = parseFloat(this.dataset.riderLng);
-                            const rId = this.dataset.riderId;
-
-                            clearRouteInternal();
-
-                            const clearBtn = root.querySelector('#clear-route-btn');
-                            if (clearBtn) clearBtn.style.display = 'inline-block';
-
-                            const badge = root.querySelector(`#eta-${rId}`);
-                            if (badge) {
-                                badge.style.display = 'inline-block';
-                                badge.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Calculating...';
-                            }
-
-                            const route = await fetchMapboxRoute([[rLat, rLng], pickupCoords, deliveryCoords]);
-
-                            if (route) {
-                                workspaceState.routingControl = L.polyline(route.latlngs, {
-                                    color: '#38bdf8', opacity: 0.8, weight: 5
-                                }).addTo(workspaceState.detailMap);
-
-                                if (badge) {
-                                    const mins = Math.round(route.durationSec / 60);
-                                    badge.innerHTML = `<i class="fa-regular fa-clock me-1"></i> ${mins}m ETA`;
-                                }
-                            } else if (badge) {
-                                badge.innerHTML = '<i class="fa-solid fa-triangle-exclamation me-1"></i> ETA unavailable';
-                            }
-
-                            workspaceState.detailMap.fitBounds([[rLat, rLng], pickupCoords, deliveryCoords], { padding: [50, 50] });
-                        });
-                    });
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-                    
-
-listContainer.querySelectorAll('.rider-request-form').forEach(form => {
-    form.addEventListener('submit', async function (event) {
-        event.preventDefault();
-
-        const btn = form.querySelector('button[type="submit"]');
-        const originalHtml = btn.innerHTML;
-        const container = root.querySelector('#alert-container');
-
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-
-        if (container) {
-            container.innerHTML = '';
-        }
-
-        try {
-            const formData = new FormData(form);
-
-            const response = await fetch('bookings/send_request.php', {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                body: formData
-            });
-
-            const rawText = await response.text();
-            let result = null;
-
-            try {
-                result = JSON.parse(rawText);
-            } catch (parseErr) {
-                throw new Error('Server did not return valid JSON. Response: ' + rawText);
-            }
-
-            if (!response.ok || !result.success) {
-                throw new Error(
-                    result.error ||
-                    result.debug ||
-                    result.message ||
-                    'Failed to send request.'
-                );
-            }
-
-            if (container) {
-                container.innerHTML = `
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        ${result.message || 'Rider request sent successfully.'}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                `;
-            }
-
-            ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
-
-        } catch (err) {
-            console.error('send_request error:', err);
-
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-
-            if (container) {
-                container.innerHTML = `
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        ${String(err.message || 'Failed to send request.')}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                `;
-            }
-        }
-    });
-});
-
-
-
-
-
-
-
-
-
-
-
-                } catch (err) {
-                    console.error("Update Error:", err);
-                }
-            }
-
-            updateRiders();
-            workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
-        }
 
         if (canTrack) {
             let currentTrackTarget = null;
@@ -1878,6 +1684,279 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             workspaceState.trackingInterval = setInterval(() => { if (!document.hidden) pollTracking(); }, 10000);
         }
     }
+
+        function stopRiderSearch() {
+            if (workspaceState.ridersInterval) {
+                clearInterval(workspaceState.ridersInterval);
+                workspaceState.ridersInterval = null;
+            }
+            if (workspaceState.requestStatusInterval) {
+                clearInterval(workspaceState.requestStatusInterval);
+                workspaceState.requestStatusInterval = null;
+            }
+            if (workspaceState.autoMatchTimer) {
+                clearTimeout(workspaceState.autoMatchTimer);
+                workspaceState.autoMatchTimer = null;
+            }
+        }
+
+        if (shouldSearchRiders) {
+            workspaceState.pingSound = new Audio('assets/sounds/notification.mp3');
+            workspaceState.matchExcludedRiderIds = workspaceState.matchExcludedRiderIds || new Set();
+            workspaceState.matchPhase = workspaceState.matchPhase || 'searching';
+
+            const floatTitle = root.querySelector('#rider-float-title');
+            const floatSubtitle = root.querySelector('#rider-float-subtitle');
+
+            function escapeForRiderCard(str) {
+                return String(str || '')
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;');
+            }
+
+            function vehicleLabel(type) {
+                return type === 'car' ? 'Car' : 'Bike';
+            }
+
+            function vehicleIcon(type) {
+                return type === 'car' ? 'fa-car-side' : 'fa-motorcycle';
+            }
+
+            function renderRiderMarkers(riders) {
+                const activeIds = new Set();
+                riders.forEach(rider => {
+                    activeIds.add(rider.id);
+                    if (!workspaceState.detailMap) return;
+                    const latlng = [parseFloat(rider.last_latitude), parseFloat(rider.last_longitude)];
+                    if (workspaceState.riderMarkers[rider.id]) {
+                        workspaceState.riderMarkers[rider.id].setLatLng(latlng);
+                    } else {
+                        const icon = L.divIcon({
+                            html: `<div style="color:${rider.vehicle_type === 'car' ? '#38bdf8' : '#fbbf24'};font-size:24px;text-shadow:0 0 5px #000;"><i class="fa-solid ${vehicleIcon(rider.vehicle_type)}"></i></div>`,
+                            className: '',
+                            iconSize: [30, 30],
+                            iconAnchor: [15, 15]
+                        });
+                        workspaceState.riderMarkers[rider.id] = L.marker(latlng, { icon }).addTo(workspaceState.detailMap).bindPopup(`<b>${escapeForRiderCard(rider.full_name)}</b>`);
+                    }
+                });
+                workspaceState.knownRiderIds = activeIds;
+            }
+
+            function stopRequestStatusPoll() {
+                if (workspaceState.requestStatusInterval) {
+                    clearInterval(workspaceState.requestStatusInterval);
+                    workspaceState.requestStatusInterval = null;
+                }
+            }
+
+            async function pollRequestStatus() {
+                if (workspaceState.matchPhase !== 'waiting') return;
+                try {
+                    const res = await fetch(`bookings/ajax_request_status.php?booking_id=${selectedBookingId}`, { cache: 'no-store' });
+                    const result = await res.json();
+                    if (!result.success) return;
+
+                    if (result.booking_status && result.booking_status !== 'submitted') {
+                        stopRequestStatusPoll();
+                        ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
+                        return;
+                    }
+
+                    const req = result.request;
+                    if (req && req.request_status === 'rejected') {
+                        workspaceState.matchExcludedRiderIds.add(Number(req.rider_user_id));
+                        workspaceState.matchPhase = 'searching';
+                        stopRequestStatusPoll();
+                        const listContainer = root.querySelector('#rider-list-container');
+                        if (listContainer) {
+                            listContainer.innerHTML = `<div class="text-center text-soft small py-3">${escapeForRiderCard(req.full_name)} wasn't able to take this delivery. Looking for another rider...</div>`;
+                        }
+                        updateRiders();
+                    }
+                } catch (err) {
+                    console.error('Request status poll failed:', err);
+                }
+            }
+
+            function startWaitingForResponse(rider) {
+                workspaceState.matchPhase = 'waiting';
+                if (floatTitle) floatTitle.textContent = 'Waiting for rider';
+                if (floatSubtitle) floatSubtitle.textContent = `${escapeForRiderCard(rider.full_name)} · ${vehicleLabel(rider.vehicle_type)}`;
+                const listContainer = root.querySelector('#rider-list-container');
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
+                            <div class="fw-bold">${escapeForRiderCard(rider.full_name)}</div>
+                            <div class="text-soft small">${vehicleLabel(rider.vehicle_type)} &middot; ₦${Number(rider.suggested_fee).toLocaleString()}</div>
+                            <div class="text-soft small mt-1">Waiting for them to respond...</div>
+                        </div>`;
+                }
+                stopRequestStatusPoll();
+                workspaceState.requestStatusInterval = setInterval(() => pollRequestStatus(), 3000);
+            }
+
+            async function sendRiderRequest(rider) {
+                workspaceState.matchPhase = 'matching';
+                if (floatTitle) floatTitle.textContent = 'Requesting rider';
+                if (floatSubtitle) floatSubtitle.textContent = `${escapeForRiderCard(rider.full_name)} · ${vehicleLabel(rider.vehicle_type)}`;
+                const listContainer = root.querySelector('#rider-list-container');
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                            <div class="mt-2 small">Sending request to ${escapeForRiderCard(rider.full_name)}...</div>
+                        </div>`;
+                }
+                try {
+                    const response = await fetch('bookings/send_request.php', {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new URLSearchParams({
+                            booking_id: String(selectedBookingId),
+                            rider_user_id: String(rider.id),
+                            proposed_cost: String(rider.suggested_fee),
+                            csrf_token: CSRF_TOKEN
+                        })
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.message || 'Failed to send request.');
+                    }
+                    startWaitingForResponse(rider);
+                } catch (err) {
+                    console.error('send_request error:', err);
+                    workspaceState.matchPhase = 'searching';
+                    if (listContainer) {
+                        listContainer.innerHTML = `<div class="text-center text-danger small py-3">${escapeForRiderCard(err.message || 'Failed to send request.')}</div>`;
+                    }
+                    setTimeout(() => updateRiders(), 2500);
+                }
+            }
+
+            function renderGroupPicker(groups) {
+                if (floatTitle) floatTitle.textContent = groups.length > 1 ? 'Choose a vehicle type' : 'Rider found';
+                if (floatSubtitle) floatSubtitle.textContent = groups.length > 1 ? 'Pick one to match with the nearest rider' : 'Matching you now...';
+
+                const listContainer = root.querySelector('#rider-list-container');
+                if (!listContainer) return;
+
+                listContainer.innerHTML = groups.map(g => `
+                    <div class="vehicle-option-card" data-vehicle-type="${g.vehicle_type}">
+                        <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(g.vehicle_type)}"></i></div>
+                        <div class="vehicle-option-info">
+                            <div class="fw-bold">${vehicleLabel(g.vehicle_type)}</div>
+                            <div class="text-soft small">${parseFloat(g.nearestRider.distance_km).toFixed(1)}km away &middot; ${g.count} available</div>
+                        </div>
+                        <div class="vehicle-option-price">₦${Number(g.nearestRider.suggested_fee).toLocaleString()}</div>
+                    </div>
+                `).join('');
+
+                listContainer.querySelectorAll('.vehicle-option-card').forEach(card => {
+                    card.addEventListener('click', function () {
+                        const type = this.dataset.vehicleType;
+                        const group = groups.find(g => g.vehicle_type === type);
+                        if (!group) return;
+                        sendRiderRequest(group.nearestRider);
+                    });
+                });
+            }
+
+            async function updateRiders() {
+                if (!shouldSearchRiders || selectedHasRider || ['matched', 'accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'arrived_at_pickup', 'package_received'].includes(String(selectedBookingStatus))) {
+                    stopRiderSearch();
+                    return;
+                }
+                if (workspaceState.matchPhase === 'waiting' || workspaceState.matchPhase === 'matching') {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`);
+                    const riders = await response.json();
+
+                    const listContainer = root.querySelector('#rider-list-container');
+                    if (!listContainer) {
+                        stopRiderSearch();
+                        return;
+                    }
+
+                    const newRiderFound = workspaceState.knownRiderIds.size > 0 && riders.some(r => !workspaceState.knownRiderIds.has(r.id));
+                    renderRiderMarkers(riders);
+                    if (newRiderFound && workspaceState.pingSound) {
+                        workspaceState.pingSound.play().catch(() => {});
+                    }
+
+                    const availableRiders = riders.filter(r => !workspaceState.matchExcludedRiderIds.has(r.id));
+
+                    if (availableRiders.length === 0) {
+                        if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
+                        if (riders.length > 0 && workspaceState.matchExcludedRiderIds.size > 0) {
+                            if (floatTitle) floatTitle.textContent = 'Finding a rider';
+                            if (floatSubtitle) floatSubtitle.textContent = 'No more nearby riders right now';
+                            listContainer.innerHTML = '<div class="text-center text-soft small py-3">No more nearby riders responded. We will keep scanning.</div>';
+                            workspaceState.matchExcludedRiderIds.clear();
+                        } else {
+                            if (floatTitle) floatTitle.textContent = 'Finding a rider';
+                            if (floatSubtitle) floatSubtitle.textContent = 'Scanning nearby...';
+                            listContainer.innerHTML = `
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                                    <span class="ms-2 text-soft small">Scanning for nearby riders...</span>
+                                </div>`;
+                        }
+                        return;
+                    }
+
+                    const groups = [];
+                    const seenTypes = new Set();
+                    availableRiders.forEach(r => {
+                        if (seenTypes.has(r.vehicle_type)) return;
+                        seenTypes.add(r.vehicle_type);
+                        groups.push({
+                            vehicle_type: r.vehicle_type,
+                            nearestRider: r,
+                            count: availableRiders.filter(x => x.vehicle_type === r.vehicle_type).length
+                        });
+                    });
+
+                    if (groups.length === 1) {
+                        const group = groups[0];
+                        if (floatTitle) floatTitle.textContent = 'Rider found';
+                        if (floatSubtitle) floatSubtitle.textContent = 'Matching you now...';
+                        if (!workspaceState.autoMatchTimer) {
+                            listContainer.innerHTML = `
+                                <div class="text-center py-4">
+                                    <div class="vehicle-option-icon mx-auto mb-2"><i class="fa-solid ${vehicleIcon(group.vehicle_type)}"></i></div>
+                                    <div class="fw-bold">${vehicleLabel(group.vehicle_type)} &middot; ₦${Number(group.nearestRider.suggested_fee).toLocaleString()}</div>
+                                    <div class="text-soft small">${group.count} available nearby</div>
+                                </div>`;
+                            workspaceState.autoMatchTimer = setTimeout(() => {
+                                workspaceState.autoMatchTimer = null;
+                                if (workspaceState.matchPhase === 'searching') {
+                                    sendRiderRequest(group.nearestRider);
+                                }
+                            }, 1400);
+                        }
+                        return;
+                    }
+
+                    if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
+                    renderGroupPicker(groups);
+                } catch (err) {
+                    console.error('Update Error:', err);
+                }
+            }
+
+            updateRiders();
+            workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
+        }
 
     if (canPay) {
         const payNowBtn = root.querySelector('#pay-now-btn');
@@ -2289,11 +2368,16 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         const callBtn = root.querySelector('#chat-call-btn');
         const callPanel = root.querySelector('#call-panel');
         const callStatusText = root.querySelector('#call-status-text');
+        const callTimerEl = root.querySelector('#call-timer');
         const acceptCallBtn = root.querySelector('#accept-call-btn');
         const endCallBtn = root.querySelector('#end-call-btn');
         const remoteAudio = root.querySelector('#remote-audio');
+        const presenceDot = root.querySelector('#chat-presence-dot');
+        const presenceLabel = root.querySelector('#chat-presence-label');
+        const phoneCallLink = root.querySelector('.chat-header-actions a[href^="tel:"]');
         const currentUserId = <?= (int)$user['id'] ?>;
         const realtimeBaseUrl = '<?= e(url_path('bookings/')) ?>';
+        let counterpartOnline = false;
 
         function escapeHtml(str) {
             return String(str)
@@ -2304,11 +2388,15 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 .replaceAll("'", '&#039;');
         }
 
-        function buildStatusText(msg) {
+        function buildStatusTicks(msg) {
             if (!msg.is_me) return '';
-            if (msg.read_at_formatted) return `Read ${escapeHtml(msg.read_at_formatted)}`;
-            if (msg.delivered_at_formatted) return `Delivered ${escapeHtml(msg.delivered_at_formatted)}`;
-            return 'Sent';
+            if (msg.read_at_formatted) {
+                return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="Read ${escapeHtml(msg.read_at_formatted)}"></i>`;
+            }
+            if (msg.delivered_at_formatted) {
+                return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="Delivered ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
+            }
+            return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="Sent"></i>`;
         }
 
         function renderChatContent(rawMessage) {
@@ -2343,7 +2431,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 <div class="chat-bubble ${msg.is_me ? 'me' : 'them'}" data-message-id="${Number(msg.id || 0)}">
                     ${renderChatContent(msg.message)}
                     <span class="chat-time">${escapeHtml(msg.created_at_formatted || msg.created_at || '')}</span>
-                    ${msg.is_me ? `<span class="chat-status">${buildStatusText(msg)}</span>` : ''}
+                    ${msg.is_me ? `<span class="chat-status">${buildStatusTicks(msg)}</span>` : ''}
                 </div>
             `).join('');
 
@@ -2389,6 +2477,73 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             }
         }
 
+        async function pingPresence() {
+            if (!chatBookingId) return;
+            try {
+                await fetch(`${realtimeBaseUrl}?action=presence_ping`, {
+                    method: 'POST',
+                    body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
+                });
+            } catch (err) { /* ignore */ }
+        }
+
+        async function checkPresence() {
+            if (!chatBookingId) return;
+            try {
+                const res = await fetch(`${realtimeBaseUrl}?action=presence_check&booking_id=${encodeURIComponent(chatBookingId)}`, { cache: 'no-store' });
+                const result = await res.json();
+                counterpartOnline = !!(result.success && result.online);
+                if (presenceDot) presenceDot.classList.toggle('online', counterpartOnline);
+                if (presenceLabel) presenceLabel.textContent = counterpartOnline ? 'Online' : 'Offline';
+            } catch (err) { /* ignore */ }
+        }
+
+        let ringAudioCtx = null;
+        let ringInterval = null;
+
+        function startRingback() {
+            stopRingback();
+            try {
+                ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const playTone = () => {
+                    if (!ringAudioCtx) return;
+                    const osc = ringAudioCtx.createOscillator();
+                    const gain = ringAudioCtx.createGain();
+                    osc.frequency.value = 425;
+                    gain.gain.value = 0.08;
+                    osc.connect(gain).connect(ringAudioCtx.destination);
+                    osc.start();
+                    setTimeout(() => { try { osc.stop(); } catch (e) {} }, 1000);
+                };
+                playTone();
+                ringInterval = setInterval(playTone, 3000);
+            } catch (err) { /* Web Audio unavailable */ }
+        }
+
+        function stopRingback() {
+            if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+            if (ringAudioCtx) { ringAudioCtx.close().catch(() => {}); ringAudioCtx = null; }
+        }
+
+        let callTimerInterval = null;
+
+        function startCallTimer() {
+            stopCallTimer();
+            const startedAt = Date.now();
+            if (callTimerEl) callTimerEl.textContent = '00:00';
+            callTimerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+                const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const ss = String(elapsed % 60).padStart(2, '0');
+                if (callTimerEl) callTimerEl.textContent = `${mm}:${ss}`;
+            }, 1000);
+        }
+
+        function stopCallTimer() {
+            if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
+            if (callTimerEl) callTimerEl.textContent = '';
+        }
+
         function peerIdFor(userId) {
             return `booking-${chatBookingId}-user-${userId}`;
         }
@@ -2406,9 +2561,10 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     pendingIncomingCall = incomingCall;
                     if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
                     if (callPanel) callPanel.style.display = 'block';
-                    if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
+                    if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
                     if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                     if (endCallBtn) endCallBtn.style.display = '';
+                    startRingback();
                 });
                 peer.on('disconnected', function () {
                     peer.reconnect();
@@ -2432,6 +2588,8 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         let callPanelHideTimer = null;
 
         function finishCallUI(statusMessage) {
+            stopRingback();
+            stopCallTimer();
             if (remoteAudio) remoteAudio.srcObject = null;
             if (callStatusText) callStatusText.textContent = statusMessage;
             if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
@@ -2457,11 +2615,13 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             }, 30000);
             call.on('stream', function (remoteStream) {
                 connected = true;
+                stopRingback();
                 clearTimeout(noAnswerTimer);
                 if (remoteAudio) remoteAudio.srcObject = remoteStream;
                 if (callPanel) callPanel.style.display = 'block';
                 if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
+                startCallTimer();
             });
             call.on('close', function () {
                 clearTimeout(noAnswerTimer);
@@ -2477,6 +2637,15 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
 
         async function startInternetCall() {
             if (!chatBookingId || !chatReceiverId) return;
+            if (!counterpartOnline) {
+                if (phoneCallLink) {
+                    if (callStatusText) callStatusText.textContent = 'Rider appears offline — calling their phone instead.';
+                    phoneCallLink.click();
+                } else if (callStatusText) {
+                    callStatusText.textContent = 'Rider appears offline and has no phone number on file.';
+                }
+                return;
+            }
             try {
                 if (callPanel) callPanel.style.display = 'block';
                 if (callStatusText) callStatusText.textContent = 'Connecting…';
@@ -2490,11 +2659,13 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                     body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
                 const localStream = await ensureLocalAudioStream();
-                if (callStatusText) callStatusText.textContent = 'Calling rider over the internet…';
+                if (callStatusText) callStatusText.textContent = 'Ringing…';
+                startRingback();
                 const call = peer.call(peerIdFor(chatReceiverId), localStream);
                 bindActiveCall(call);
             } catch (err) {
                 console.error(err);
+                stopRingback();
                 if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
             }
         }
@@ -2502,6 +2673,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         async function acceptInternetCall() {
             try {
                 if (!pendingIncomingCall) return;
+                stopRingback();
                 const localStream = await ensureLocalAudioStream();
                 pendingIncomingCall.answer(localStream);
                 bindActiveCall(pendingIncomingCall);
@@ -2553,8 +2725,9 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 const call = result.call || {};
                 if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                     if (callPanel) callPanel.style.display = 'block';
-                    if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
+                    if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
                     if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
+                    startRingback();
                 }
             } catch (err) {
                 console.error('Call polling failed:', err);
@@ -2612,11 +2785,16 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             fetchChatMessages(true);
             ensurePeerReady();
             pollCallState();
+            pingPresence();
+            checkPresence();
             if (!workspaceState.chatInterval) {
                 workspaceState.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
             }
             if (!workspaceState.callPollInterval) {
                 workspaceState.callPollInterval = setInterval(() => pollCallState(), 4000);
+            }
+            if (!workspaceState.presenceInterval) {
+                workspaceState.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 12000);
             }
         });
 
@@ -2626,6 +2804,10 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             if (workspaceState.chatInterval) {
                 clearInterval(workspaceState.chatInterval);
                 workspaceState.chatInterval = null;
+            }
+            if (workspaceState.presenceInterval) {
+                clearInterval(workspaceState.presenceInterval);
+                workspaceState.presenceInterval = null;
             }
         });
 

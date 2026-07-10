@@ -159,6 +159,7 @@ return [
     'booking.item_already_issued' => 'An riga an ba direba kaya.',
     'booking.book_another_rider' => 'Nemi Wani Direba',
     'booking.cancellation_reason' => 'Dalilin Soke Oda',
+    'booking.payment_confirmation_pending_block' => 'Za ku iya neman wani direba da zarar direbanku ya tabbatar ya karɓi kuɗin wannan isarwa.',
 
     // Ratings
     'rating.your_rating' => 'Ƙimar Da Ka Bayar',
@@ -345,6 +346,9 @@ return [
     'rider.record_voice_failed' => 'An kasa yin rikodin sauti.',
     'rider.message_send_failed' => 'An kasa aika saƙo.',
     'rider.sending_ellipsis' => 'Ana Aikawa...',
+    'rider.waiting_for_sender_payment' => 'Ana jiran mai turawa ya biya :amount kafin ku iya kammala wannan aiki.',
+    'rider.payment_received_notice' => 'An karɓi kuɗi. Tabbatar a ƙasa don kammala wannan aiki.',
+    'rider.confirm_payment_received' => 'Tabbatar An Karɓi Kuɗi',
 
     // Rider "My Deliveries" page
     'rider.deliveries.heading' => 'Kayan Da Zan Kai',

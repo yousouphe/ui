@@ -376,19 +376,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
 
 // ---------------- ACTIVE BOOKING ----------------
 $stmt = $pdo->prepare('
-    SELECT 
-        b.*, 
-        s.full_name AS sender_name, 
-        s.phone AS sender_phone 
-    FROM bookings b 
+    SELECT
+        b.*,
+        s.full_name AS sender_name,
+        s.phone AS sender_phone
+    FROM bookings b
     INNER JOIN users s ON s.id = b.sender_user_id
-    WHERE b.selected_rider_user_id = ? 
-      AND b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
+    WHERE b.selected_rider_user_id = ?
+      AND (
+        b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
+        OR (b.booking_status = "delivered" AND b.rider_payment_confirmed = 0)
+      )
     ORDER BY b.id DESC
     LIMIT 1
 ');
 $stmt->execute([$user['id']]);
 $activeBooking = $stmt->fetch(PDO::FETCH_ASSOC);
+$awaitingPaymentConfirmation = $activeBooking && ($activeBooking['booking_status'] ?? '') === 'delivered';
 
 $pickupLat = ($activeBooking && $activeBooking['pickup_latitude'] !== null) ? (float)$activeBooking['pickup_latitude'] : null;
 $pickupLng = ($activeBooking && $activeBooking['pickup_longitude'] !== null) ? (float)$activeBooking['pickup_longitude'] : null;
@@ -929,17 +933,39 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <?= t('rider.handover_waiting_notice', ['action' => '<strong>' . e(t('rider.received_package_label')) . '</strong>']) ?>
                                 <?php endif; ?>
                             </div>
+                        <?php elseif ($awaitingPaymentConfirmation): ?>
+                            <div class="system-msg mb-3" id="payment_confirmation_notice">
+                                <?php if (($activeBooking['payment_status'] ?? 'unpaid') !== 'paid'): ?>
+                                    <i class="fa-solid fa-hourglass-half text-warning me-2"></i>
+                                    <?= e(t('rider.waiting_for_sender_payment', ['amount' => '₦' . number_format($bookingAmount, 2)])) ?>
+                                <?php else: ?>
+                                    <i class="fa-solid fa-circle-check text-success me-2"></i>
+                                    <?= e(t('rider.payment_received_notice')) ?>
+                                <?php endif; ?>
+                            </div>
                         <?php endif; ?>
 
-                        <button
-                            type="button"
-                            id="btn_workflow"
-                            class="btn btn-secondary w-100 py-3 fw-bold pulse-btn"
-                            disabled
-                            data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
-                        >
-                            <?= e(t('rider.checking_location')) ?>
-                        </button>
+                        <?php if ($awaitingPaymentConfirmation): ?>
+                            <button
+                                type="button"
+                                id="btn_confirm_payment"
+                                class="btn <?= (($activeBooking['payment_status'] ?? 'unpaid') === 'paid') ? 'btn-success' : 'btn-secondary' ?> w-100 py-3 fw-bold"
+                                <?= (($activeBooking['payment_status'] ?? 'unpaid') === 'paid') ? '' : 'disabled' ?>
+                                data-booking-id="<?= (int) $activeBooking['id'] ?>"
+                            >
+                                <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= e(t('rider.confirm_payment_received')) ?>
+                            </button>
+                        <?php else: ?>
+                            <button
+                                type="button"
+                                id="btn_workflow"
+                                class="btn btn-secondary w-100 py-3 fw-bold pulse-btn"
+                                disabled
+                                data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
+                            >
+                                <?= e(t('rider.checking_location')) ?>
+                            </button>
+                        <?php endif; ?>
                     </div>
                 <?php else: ?>
                     <div class="system-msg mb-0">
@@ -1044,6 +1070,7 @@ const dashboardRoot = document.getElementById('rider-dashboard-root');
 const onlineToggleInput = document.getElementById('online-toggle-input');
 const onlineToggleLabel = document.getElementById('online-toggle-label');
 const btnWorkflow = document.getElementById('btn_workflow');
+const btnConfirmPayment = document.getElementById('btn_confirm_payment');
 const distDisplay = document.getElementById('distance_display');
 const etaDisplay = document.getElementById('eta_display');
 const syncStatus = document.getElementById('sync_status');
@@ -1166,6 +1193,7 @@ let lastKnownPosition = null;
 let currentStatus = <?= json_encode($currentStatus) ?>;
 const bookingId = <?= $activeBooking ? (int)$activeBooking['id'] : 'null' ?>;
 let senderHandoverConfirmed = <?= json_encode($senderConfirmedHandover) ?>;
+let activePaymentStatus = <?= json_encode((string) ($activeBooking['payment_status'] ?? '')) ?>;
 
 const pickup = {
     lat: <?= $pickupLat !== null ? json_encode($pickupLat) : 'null' ?>,
@@ -1629,6 +1657,34 @@ async function runWorkflowAction() {
     }
 }
 
+async function runConfirmPaymentAction() {
+    if (!bookingId || !btnConfirmPayment || btnConfirmPayment.disabled) return;
+
+    btnConfirmPayment.disabled = true;
+    const originalHtml = btnConfirmPayment.innerHTML;
+    btnConfirmPayment.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+        const response = await fetch(safeAbsoluteUrl('rider/ajax_confirm_payment.php'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ booking_id: bookingId, csrf_token: CSRF_TOKEN })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || I18N.workflowFailed);
+        }
+
+        window.location.reload();
+    } catch (err) {
+        if (geoMessage) geoMessage.textContent = err.message || I18N.actionFailed;
+        btnConfirmPayment.disabled = false;
+        btnConfirmPayment.innerHTML = originalHtml;
+    }
+}
+
 async function toggleStatus() {
     if (!onlineToggleInput) return;
 
@@ -1876,6 +1932,15 @@ function updateSummaryUI(data) {
     }
 
     if (data.active_booking && bookingId && data.active_booking.id === Number(bookingId)) {
+        // A payment_status flip (sender just paid) changes which button/notice the
+        // delivered-but-unconfirmed card should show - that's server-rendered, so reload
+        // rather than trying to patch the payment-confirmation section in place.
+        if (currentStatus === 'delivered' && data.active_booking.payment_status !== activePaymentStatus) {
+            window.location.reload();
+            return;
+        }
+        activePaymentStatus = data.active_booking.payment_status || activePaymentStatus;
+
         currentStatus = data.active_booking.status || currentStatus;
         senderHandoverConfirmed = !!data.active_booking.sender_handover_confirmed;
 
@@ -1976,7 +2041,7 @@ function initAsyncRequestUpdates() {
     }
 
     refreshSnapshot();
-    state.snapshotInterval = setInterval(() => { if (!document.hidden) refreshSnapshot(); }, 12000);
+    state.snapshotInterval = setInterval(() => { if (!document.hidden) refreshSnapshot(); }, 4000);
 }
 
 function initChat() {
@@ -2204,6 +2269,8 @@ function initChat() {
     }
 
     let callPanelHideTimer = null;
+    let manualHangup = false;
+    let redialAttempted = false;
 
     function finishCallUI(statusMessage) {
         stopRingback();
@@ -2219,9 +2286,30 @@ function initChat() {
         }, 1500);
     }
 
-    function bindActiveCall(call) {
+    // Diagnostic only - logs which candidate pair WebRTC actually picked (host/srflx/relay)
+    // so a dropped call can be told apart from a call that never used the TURN relay at all.
+    async function logActiveCandidatePair(call, label) {
+        try {
+            const stats = await call.peerConnection.getStats();
+            stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    const local = stats.get(report.localCandidateId);
+                    const remote = stats.get(report.remoteCandidateId);
+                    console.log(`Call candidate pair (${label}):`, {
+                        local: local && local.candidateType,
+                        remote: remote && remote.candidateType,
+                        bytesSent: report.bytesSent,
+                        bytesReceived: report.bytesReceived
+                    });
+                }
+            });
+        } catch (e) { /* getStats unsupported or call already closed */ }
+    }
+
+    function bindActiveCall(call, isOutgoing) {
         if (!call) return;
         state.currentCall = call;
+        manualHangup = false;
         if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
         if (endCallBtn) endCallBtn.style.display = '';
         let connected = false;
@@ -2233,6 +2321,8 @@ function initChat() {
         }, 30000);
         call.on('stream', function (remoteStream) {
             connected = true;
+            // Deliberately not resetting redialAttempted here - caps auto-redial at one
+            // attempt per manually-placed call, even if the retry itself later drops too.
             stopRingback();
             clearTimeout(noAnswerTimer);
             if (remoteAudio) remoteAudio.srcObject = remoteStream;
@@ -2240,11 +2330,20 @@ function initChat() {
             if (callStatusText) callStatusText.textContent = I18N.callConnected;
             if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
             startCallTimer();
+            setTimeout(() => logActiveCandidatePair(call, 'connected'), 1000);
         });
         if (call.peerConnection) {
             call.peerConnection.addEventListener('iceconnectionstatechange', function () {
                 const iceState = call.peerConnection.iceConnectionState;
                 console.log('Call ICE connection state:', iceState);
+                if (iceState === 'disconnected' || iceState === 'failed') {
+                    logActiveCandidatePair(call, iceState);
+                    // Chrome briefly reports "disconnected" during normal renegotiation/NAT
+                    // rebinding too - try an ICE restart before assuming the path is dead.
+                    if (typeof call.peerConnection.restartIce === 'function') {
+                        try { call.peerConnection.restartIce(); } catch (e) { /* not supported mid-call by this browser */ }
+                    }
+                }
                 if (iceState === 'failed' && callStatusText) {
                     callStatusText.textContent = I18N.callConnectionFailed;
                 }
@@ -2254,6 +2353,17 @@ function initChat() {
             clearTimeout(noAnswerTimer);
             pendingIncomingCall = null;
             state.currentCall = null;
+
+            // PeerJS closes the MediaConnection itself once ICE gives up. If audio was
+            // already flowing and this side placed the call, silently redial once instead
+            // of just hanging up on the user - masks a transient NAT/TURN hiccup.
+            if (connected && isOutgoing && !manualHangup && !redialAttempted) {
+                redialAttempted = true;
+                if (callStatusText) callStatusText.textContent = I18N.callConnecting;
+                setTimeout(() => { startInternetCall(true); }, 1200);
+                return;
+            }
+
             finishCallUI(callStatusText && callStatusText.textContent === I18N.callNoAnswer ? I18N.callNoAnswer : I18N.callEnded);
         });
         call.on('error', function () {
@@ -2262,8 +2372,9 @@ function initChat() {
         });
     }
 
-    async function startInternetCall() {
+    async function startInternetCall(isRedial) {
         if (!chatBookingId || !chatReceiverId) return;
+        if (isRedial !== true) redialAttempted = false;
         if (!counterpartOnline) {
             if (phoneCallLink) {
                 if (callStatusText) callStatusText.textContent = I18N.callSenderOfflinePhone;
@@ -2289,7 +2400,7 @@ function initChat() {
             if (callStatusText) callStatusText.textContent = I18N.callRinging;
             startRingback();
             const call = peer.call(peerIdFor(chatReceiverId), localStream);
-            bindActiveCall(call);
+            bindActiveCall(call, true);
         } catch (err) {
             console.error(err);
             stopRingback();
@@ -2303,7 +2414,7 @@ function initChat() {
             stopRingback();
             const localStream = await ensureLocalAudioStream();
             pendingIncomingCall.answer(localStream);
-            bindActiveCall(pendingIncomingCall);
+            bindActiveCall(pendingIncomingCall, false);
             await fetch(`${realtimeBaseUrl}?action=call_accept`, {
                 method: 'POST',
                 body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
@@ -2316,6 +2427,7 @@ function initChat() {
     }
 
     async function endInternetCall() {
+        manualHangup = true;
         try {
             if (state.currentCall) {
                 state.currentCall.close();
@@ -2406,22 +2518,26 @@ function initChat() {
         }
     }
 
+    // Presence (and the ability to receive an incoming call) shouldn't depend on the chat
+    // panel being open - the counterpart should show online as soon as this page is loaded
+    // and logged in, and an incoming call should still ring even with the panel closed.
+    ensurePeerReady();
+    pollCallState();
+    pingPresence();
+    checkPresence();
+    if (!state.callPollInterval) {
+        state.callPollInterval = setInterval(() => pollCallState(), 4000);
+    }
+    if (!state.presenceInterval) {
+        state.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 8000);
+    }
+
     openChatBtn?.addEventListener('click', function () {
         if (!chatPanel) return;
         chatPanel.style.display = 'flex';
         fetchChatMessages(true);
-        ensurePeerReady();
-        pollCallState();
-        pingPresence();
-        checkPresence();
         if (!state.chatInterval) {
             state.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
-        }
-        if (!state.callPollInterval) {
-            state.callPollInterval = setInterval(() => pollCallState(), 4000);
-        }
-        if (!state.presenceInterval) {
-            state.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 12000);
         }
     });
 
@@ -2432,13 +2548,9 @@ function initChat() {
             clearInterval(state.chatInterval);
             state.chatInterval = null;
         }
-        if (state.presenceInterval) {
-            clearInterval(state.presenceInterval);
-            state.presenceInterval = null;
-        }
     });
 
-    callBtn?.addEventListener('click', startInternetCall);
+    callBtn?.addEventListener('click', function () { startInternetCall(false); });
     acceptCallBtn?.addEventListener('click', acceptInternetCall);
     endCallBtn?.addEventListener('click', endInternetCall);
     voiceBtn?.addEventListener('click', toggleVoiceRecording);
@@ -2543,6 +2655,10 @@ function initPage() {
 
 if (btnWorkflow) {
     btnWorkflow.addEventListener('click', runWorkflowAction);
+}
+
+if (btnConfirmPayment) {
+    btnConfirmPayment.addEventListener('click', runConfirmPaymentAction);
 }
 
 initPage();

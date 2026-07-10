@@ -269,3 +269,18 @@ function haversine_sql(string $latField, string $lngField, float $lat, float $ln
         SIN(RADIANS($lat)) * SIN(RADIANS($latField))
     ))";
 }
+
+function booking_status_label(string $status): string {
+    $labels = [
+        'draft' => 'Draft',
+        'submitted' => 'Finding Rider',
+        'matched' => 'Rider Assigned',
+        'accepted' => 'Rider Heading to Pickup',
+        'arrived_at_pickup' => 'Rider at Pickup',
+        'package_received' => 'In Transit',
+        'in_transit' => 'In Transit',
+        'delivered' => 'Delivered',
+        'cancelled' => 'Cancelled',
+    ];
+    return $labels[$status] ?? ucwords(str_replace('_', ' ', $status));
+}

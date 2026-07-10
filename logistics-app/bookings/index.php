@@ -512,7 +512,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .vehicle-option-price{font-weight:700;color:#0369a1;white-space:nowrap}
         body.has-rider-float-bar{padding-bottom:220px}
         @media (max-width:576px){
-            .sticky-chat-btn{right:14px;bottom:230px}
+            .sticky-chat-btn{right:14px;bottom:20px}
             .chat-panel{right:0;left:0;bottom:0;width:auto;max-width:100%;height:88vh;max-height:88vh;border-radius:1.25rem 1.25rem 0 0}
             .call-panel{right:16px;left:16px;width:auto;bottom:16px}
             #detail_map{height:260px}
@@ -724,107 +724,120 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 </div>
             <?php else: ?>
             <div class="cardx p-4 mb-4">
-                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
                     <div>
                         <h2 class="h4 fw-bold mb-1"><?= e($selectedBooking['booking_code']) ?></h2>
                         <p class="text-soft mb-0"><?= e($selectedBooking['item_name']) ?> &middot; <?= e($selectedBooking['item_category']) ?></p>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e($selectedBooking['booking_status']) ?></span></span>
+                        <span class="info-pill"><i class="fa-solid fa-circle-info text-info"></i> <span id="booking_status_text"><?= e(booking_status_label((string) $selectedBooking['booking_status'])) ?></span></span>
                         <span class="info-pill"><i class="fa-solid fa-naira-sign text-warning"></i> &#8358;<?= number_format((float) ($selectedBooking['agreed_cost'] ?? 0), 2) ?></span>
                         <span class="info-pill"><i class="fa-solid fa-wallet text-success"></i> <span id="payment_status_text"><?= e($selectedBooking['payment_status'] ?? 'unpaid') ?></span></span>
                         <span class="info-pill"><i class="fa-regular fa-clock text-info"></i> <span id="eta_text">--</span></span>
                     </div>
                 </div>
-            </div>
 
-            <div class="row g-4 mb-4">
-                <div class="col-lg-8">
-                    <div class="cardx p-4">
-                        <div class="d-flex justify-content-end mb-2">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" id="detail-map-toggle-btn">
-                                <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label">Show Map</span>
-                            </button>
-                        </div>
-                        <div id="detail_map_wrap" class="collapsed">
-                            <div id="detail_map"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-lg-4">
-                    <div class="cardx p-4 h-100">
-                        <h3 class="h5 mb-3">Booking Info</h3>
+                <hr class="my-3">
+
+                <div class="row g-3">
+                    <div class="col-md-6">
                         <div class="small text-soft mb-2"><strong>Recipient:</strong> <?= e($selectedBooking['recipient_name']) ?> &middot; <?= e($selectedBooking['recipient_phone']) ?></div>
                         <div class="small text-soft mb-2"><strong>Pickup:</strong> <?= e($selectedBooking['pickup_address']) ?></div>
                         <div class="small text-soft mb-2"><strong>Delivery:</strong> <?= e($selectedBooking['delivery_address']) ?></div>
+                        <?php if (trim((string) ($selectedBooking['item_description'] ?? '')) !== ''): ?>
+                            <div class="small text-soft mb-2"><strong>Package:</strong> <?= e($selectedBooking['item_description']) ?></div>
+                        <?php endif; ?>
+                        <?php if (!empty($selectedBooking['estimated_value'])): ?>
+                            <div class="small text-soft mb-2"><strong>Est. Value:</strong> &#8358;<?= number_format((float) $selectedBooking['estimated_value'], 2) ?></div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-6">
                         <div class="small text-soft mb-2"><strong>Distance:</strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
                         <div class="small text-soft mb-2"><strong>Rider:</strong> <?= e((string) ($selectedBooking['rider_name'] ?? 'Not assigned yet')) ?></div>
                         <div class="small text-soft mb-2"><strong>Rider Phone:</strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
-
-                        <?php if ($selectedPickupLat !== '' && $selectedDeliveryLat !== ''): ?>
-                            <a class="btn btn-sm btn-outline-info w-100 mb-2" target="_blank" rel="noopener"
-                               href="https://www.google.com/maps/dir/?api=1&origin=<?= e((string) $selectedPickupLat) ?>,<?= e((string) $selectedPickupLng) ?>&destination=<?= e((string) $selectedDeliveryLat) ?>,<?= e((string) $selectedDeliveryLng) ?>&travelmode=driving">
-                                <i class="fa-solid fa-diamond-turn-right me-2"></i>View Route in Google Maps
-                            </a>
-                        <?php endif; ?>
-
-                        <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
-                            <div class="mt-3">
-                                <div class="small fw-bold mb-2">Proof of Delivery</div>
-                                <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
-                            </div>
-                        <?php endif; ?>
-
-                        <div class="mt-4 action-stack">
-                            <?php if ($canPay): ?>
-                                <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
-                                    Pay &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
-                                </button>
-                            <?php endif; ?>
-
-                            <?php if ($canEditDetails): ?>
-                                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
-                                    <i class="fa-solid fa-pen me-2"></i>Edit Details
-                                </button>
-                            <?php endif; ?>
-
-                            <?php if ($canChangeDelivery): ?>
-                                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
-                                    <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
-                                </button>
-                            <?php endif; ?>
-
-                            <?php if ($canIssueItem): ?>
-                                <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
-                                    <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
-                                </button>
-                            <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
-                                <div class="alert alert-info mb-0">
-                                    <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
-                                </div>
-                            <?php endif; ?>
-
-                            <?php if ($canCancel): ?>
-                                <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
-                                    <i class="fa-solid fa-ban me-2"></i>Cancel Order
-                                </button>
-                            <?php endif; ?>
-
-                            <?php if ($canRebook): ?>
-                                <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
-                                    <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
-                                </button>
-                            <?php endif; ?>
-                        </div>
-
-                        <?php if ($cancellationReason !== ''): ?>
-                            <div class="cancel-reason-box">
-                                <div class="fw-bold mb-1">Cancellation Reason</div>
-                                <div class="small"><?= e($cancellationReason) ?></div>
-                            </div>
+                        <?php if (trim((string) ($selectedBooking['special_instructions'] ?? '')) !== ''): ?>
+                            <div class="small text-soft mb-2"><strong>Instructions:</strong> <?= e($selectedBooking['special_instructions']) ?></div>
                         <?php endif; ?>
                     </div>
                 </div>
+
+                <?php if (!empty($selectedBooking['item_image_path'])): ?>
+                    <div class="mt-2">
+                        <img src="<?= e(url_path($selectedBooking['item_image_path'])) ?>" class="img-fluid rounded" style="max-height:160px" alt="Package photo">
+                    </div>
+                <?php endif; ?>
+
+                <div class="mt-3 d-flex justify-content-between flex-wrap gap-2">
+                    <?php if ($canTrack && !empty($selectedBooking['sender_tracking_token'])): ?>
+                        <button type="button" class="btn btn-sm btn-outline-info" id="share-tracking-btn" data-tracking-url="<?= e(url_path('bookings/track.php?token=' . urlencode($selectedBooking['sender_tracking_token']))) ?>">
+                            <i class="fa-solid fa-share-nodes me-1"></i>Share Tracking Link
+                        </button>
+                    <?php else: ?>
+                        <span></span>
+                    <?php endif; ?>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="detail-map-toggle-btn">
+                        <i class="fa-solid fa-chevron-down me-1"></i><span id="detail-map-toggle-label">Show Map</span>
+                    </button>
+                </div>
+                <div id="detail_map_wrap" class="collapsed mb-3">
+                    <div id="detail_map"></div>
+                </div>
+
+                <?php if (!empty($selectedBooking['delivery_proof_image'])): ?>
+                    <div class="mb-3">
+                        <div class="small fw-bold mb-2">Proof of Delivery</div>
+                        <img src="<?= e(url_path($selectedBooking['delivery_proof_image'])) ?>" class="img-fluid rounded" alt="Proof">
+                    </div>
+                <?php endif; ?>
+
+                <div class="action-stack">
+                    <?php if ($canPay): ?>
+                        <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
+                            Pay &#8358;<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?>
+                        </button>
+                    <?php endif; ?>
+
+                    <?php if ($canEditDetails): ?>
+                        <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#editDetailsModal">
+                            <i class="fa-solid fa-pen me-2"></i>Edit Details
+                        </button>
+                    <?php endif; ?>
+
+                    <?php if ($canChangeDelivery): ?>
+                        <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="modal" data-bs-target="#changeDeliveryModal">
+                            <i class="fa-solid fa-location-dot me-2"></i>Change Delivery Address
+                        </button>
+                    <?php endif; ?>
+
+                    <?php if ($canIssueItem): ?>
+                        <button class="btn btn-info w-100 fw-bold" type="button" data-bs-toggle="modal" data-bs-target="#issueItemModal">
+                            <i class="fa-solid fa-box-open me-2"></i>Issue Item To Rider
+                        </button>
+                    <?php elseif ($selectedBooking && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 1): ?>
+                        <div class="alert alert-info mb-0">
+                            <i class="fa-solid fa-circle-check me-2"></i>Item already issued to rider.
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if ($canCancel): ?>
+                        <button class="btn btn-outline-danger w-100" type="button" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
+                            <i class="fa-solid fa-ban me-2"></i>Cancel Order
+                        </button>
+                    <?php endif; ?>
+
+                    <?php if ($canRebook): ?>
+                        <button class="btn btn-primary w-100" type="button" id="rebook-rider-btn" data-booking-id="<?= (int)$selectedBooking['id'] ?>">
+                            <i class="fa-solid fa-rotate-right me-2"></i>Book Another Rider
+                        </button>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($cancellationReason !== ''): ?>
+                    <div class="cancel-reason-box">
+                        <div class="fw-bold mb-1">Cancellation Reason</div>
+                        <div class="small"><?= e($cancellationReason) ?></div>
+                    </div>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
 
@@ -1174,8 +1187,8 @@ function cleanupWorkspace() {
         try { workspaceState.peer.destroy(); } catch (e) {}
         workspaceState.peer = null;
     }
-    if (workspaceState.routingControl && workspaceState.detailMap) {
-        try { workspaceState.detailMap.removeControl(workspaceState.routingControl); } catch (e) {}
+    if (workspaceState.routingControl) {
+        try { workspaceState.routingControl.remove(); } catch (e) {}
         workspaceState.routingControl = null;
     }
     if (workspaceState.bookingMap) {
@@ -1584,6 +1597,32 @@ function initSenderWorkspace() {
         }
     });
 
+    const shareTrackingBtn = root.querySelector('#share-tracking-btn');
+    shareTrackingBtn?.addEventListener('click', async function () {
+        const url = this.dataset.trackingUrl;
+        const shareData = {
+            title: 'Track my delivery',
+            text: 'Track your delivery in real time on SwiftDrop:',
+            url
+        };
+        if (navigator.share) {
+            try {
+                await navigator.share(shareData);
+                return;
+            } catch (err) {
+                if (err && err.name === 'AbortError') return;
+            }
+        }
+        try {
+            await navigator.clipboard.writeText(url);
+            const original = this.innerHTML;
+            this.innerHTML = '<i class="fa-solid fa-check me-1"></i>Link Copied';
+            setTimeout(() => { this.innerHTML = original; }, 2000);
+        } catch (err) {
+            window.prompt('Copy this tracking link:', url);
+        }
+    });
+
     const detailMapEl = root.querySelector('#detail_map');
     const pickupLatVal = parseFloat(root.dataset.pickupLat || '');
     const pickupLngVal = parseFloat(root.dataset.pickupLng || '');
@@ -1606,14 +1645,53 @@ function initSenderWorkspace() {
             attribution: '© OpenStreetMap'
         }).addTo(workspaceState.detailMap);
 
-        L.marker(pickupCoords).addTo(workspaceState.detailMap).bindPopup("Pickup");
-        L.marker(deliveryCoords).addTo(workspaceState.detailMap).bindPopup("Delivery");
+        const pickupIcon = L.divIcon({
+            html: '<div style="color:#f59e0b;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box"></i></div>',
+            className: '', iconSize: [26, 26], iconAnchor: [13, 13]
+        });
+        const deliveryIcon = L.divIcon({
+            html: '<div style="color:#22c55e;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box-open"></i></div>',
+            className: '', iconSize: [26, 26], iconAnchor: [13, 13]
+        });
+        L.marker(pickupCoords, { icon: pickupIcon }).addTo(workspaceState.detailMap).bindPopup("Pickup");
+        L.marker(deliveryCoords, { icon: deliveryIcon }).addTo(workspaceState.detailMap).bindPopup("Delivery");
 
         setTimeout(() => workspaceState.detailMap && workspaceState.detailMap.invalidateSize(), 400);
 
+        // Draw the full pickup-to-delivery trip once as a fixed reference line - the rider
+        // marker then just moves along/near it as their live position updates, instead of
+        // redrawing a fresh line to a shifting target on every poll.
+        (async () => {
+            const tripRoute = await fetchMapboxRoute([pickupCoords, deliveryCoords]);
+            if (tripRoute) {
+                workspaceState.routingControl = L.polyline(tripRoute.latlngs, {
+                    color: '#38bdf8', weight: 5, opacity: 0.85
+                }).addTo(workspaceState.detailMap);
+            }
+        })();
+
+        function vehicleIconClass(type) {
+            return type === 'car' ? 'fa-car-side' : 'fa-motorcycle';
+        }
 
         if (canTrack) {
             let currentTrackTarget = null;
+
+            const bookingStatusLabels = {
+                draft: 'Draft',
+                submitted: 'Finding Rider',
+                matched: 'Rider Assigned',
+                accepted: 'Rider Heading to Pickup',
+                arrived_at_pickup: 'Rider at Pickup',
+                package_received: 'In Transit',
+                in_transit: 'In Transit',
+                delivered: 'Delivered',
+                cancelled: 'Cancelled'
+            };
+
+            function formatBookingStatus(status) {
+                return bookingStatusLabels[status] || String(status || '').replace(/_/g, ' ');
+            }
 
             async function pollTracking() {
                 try {
@@ -1625,17 +1703,22 @@ function initSenderWorkspace() {
                     const bookingStatusText = root.querySelector('#booking_status_text');
                     const paymentStatusText = root.querySelector('#payment_status_text');
 
-                    if (bookingStatusText) bookingStatusText.innerText = d.booking_status;
+                    if (bookingStatusText) bookingStatusText.innerText = formatBookingStatus(d.booking_status);
                     if (paymentStatusText) paymentStatusText.innerText = d.payment_status;
 
                     if (!d.rider_lat || !d.rider_lng) return;
 
                     const riderLatLng = [parseFloat(d.rider_lat), parseFloat(d.rider_lng)];
+                    const riderIcon = L.divIcon({
+                        html: `<div style="color:#0ea5e9;font-size:24px;text-shadow:0 0 5px #fff;"><i class="fa-solid ${vehicleIconClass(d.vehicle_type)}"></i></div>`,
+                        className: '', iconSize: [30, 30], iconAnchor: [15, 15]
+                    });
 
                     if (!workspaceState.trackingMarker) {
-                        workspaceState.trackingMarker = L.marker(riderLatLng).addTo(workspaceState.detailMap).bindPopup('Rider');
+                        workspaceState.trackingMarker = L.marker(riderLatLng, { icon: riderIcon }).addTo(workspaceState.detailMap).bindPopup('Rider');
                     } else {
                         workspaceState.trackingMarker.setLatLng(riderLatLng);
+                        workspaceState.trackingMarker.setIcon(riderIcon);
                     }
 
                     // Match the rider-side target logic: pickup while matched/accepted (not yet
@@ -1647,29 +1730,22 @@ function initSenderWorkspace() {
                         target = [parseFloat(d.delivery_lat), parseFloat(d.delivery_lng)];
                     }
 
-                    // Only re-fetch the route when the target actually changes (pickup vs delivery)
-                    // or the rider has moved meaningfully - matching the pattern already used in
-                    // bookings/track.php. Re-fetching on every poll regardless of movement causes
-                    // unnecessary API calls every 10s.
+                    // Only re-fetch the ETA/distance figure when the target actually changes
+                    // (pickup vs delivery) or the rider has moved meaningfully. The fixed
+                    // pickup-to-delivery line stays as-is; this just recomputes the numbers.
                     const targetKey = JSON.stringify([target, riderLatLng]);
-                    if (workspaceState.routingControl && targetKey === currentTrackTarget) {
+                    if (targetKey === currentTrackTarget) {
                         return;
                     }
                     currentTrackTarget = targetKey;
 
-                    clearRouteInternal();
-
                     const etaText = root.querySelector('#eta_text');
                     if (etaText) etaText.innerText = 'Calculating...';
 
-                    const route = await fetchMapboxRoute([riderLatLng, target]);
-                    if (route) {
-                        workspaceState.routingControl = L.polyline(route.latlngs, {
-                            color: '#38bdf8', weight: 6
-                        }).addTo(workspaceState.detailMap);
-
-                        const distKm = (route.distanceMeters / 1000).toFixed(2);
-                        const etaMin = Math.round(route.durationSec / 60);
+                    const leg = await fetchMapboxRoute([riderLatLng, target]);
+                    if (leg) {
+                        const distKm = (leg.distanceMeters / 1000).toFixed(2);
+                        const etaMin = Math.round(leg.durationSec / 60);
                         if (etaText) etaText.innerText = `${etaMin} min · ${distKm} km`;
                     } else if (etaText) {
                         etaText.innerText = '--';

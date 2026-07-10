@@ -616,6 +616,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             'status' => (string)($activeBooking['booking_status'] ?? ''),
             'sender_handover_confirmed' => (bool)$senderConfirmedHandover,
             'payment_status' => (string)($activeBooking['payment_status'] ?? ''),
+            'pickup_address' => (string)($activeBooking['pickup_address'] ?? ''),
+            'pickup_latitude' => $activeBooking['pickup_latitude'] !== null ? (float)$activeBooking['pickup_latitude'] : null,
+            'pickup_longitude' => $activeBooking['pickup_longitude'] !== null ? (float)$activeBooking['pickup_longitude'] : null,
+            'delivery_address' => (string)($activeBooking['delivery_address'] ?? ''),
+            'delivery_latitude' => $activeBooking['delivery_latitude'] !== null ? (float)$activeBooking['delivery_latitude'] : null,
+            'delivery_longitude' => $activeBooking['delivery_longitude'] !== null ? (float)$activeBooking['delivery_longitude'] : null,
         ] : null,
     ]);
 }
@@ -917,7 +923,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="modal-content bg-white text-dark border-0 shadow-lg">
             <div class="modal-header border-bottom">
                 <h5 class="modal-title">New Delivery Request</h5>
-                <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="new-request-modal-body">
                 Waiting for request details...
@@ -1026,6 +1032,9 @@ const dest = {
     lat: <?= $destLat !== null ? json_encode($destLat) : 'null' ?>,
     lng: <?= $destLng !== null ? json_encode($destLng) : 'null' ?>
 };
+
+let pickupAddress = <?= json_encode((string)($activeBooking['pickup_address'] ?? '')) ?>;
+let deliveryAddress = <?= json_encode((string)($activeBooking['delivery_address'] ?? '')) ?>;
 
 const initialRider = {
     lat: <?= json_encode($initialLat) ?>,
@@ -1175,7 +1184,7 @@ function showToast(message, type = 'success') {
     toastEl.innerHTML = `
         <div class="d-flex">
             <div class="toast-body" id="${toastBodyId}"></div>
-            <button type="button" class="btn-close btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
         </div>
     `;
 
@@ -1202,7 +1211,7 @@ function getCurrentTarget() {
             lat: pickup.lat,
             lng: pickup.lng,
             label: 'Pickup',
-            address: <?= json_encode((string)($activeBooking['pickup_address'] ?? '')) ?>
+            address: pickupAddress
         };
     }
 
@@ -1212,7 +1221,7 @@ function getCurrentTarget() {
             lat: dest.lat,
             lng: dest.lng,
             label: 'Destination',
-            address: <?= json_encode((string)($activeBooking['delivery_address'] ?? '')) ?>
+            address: deliveryAddress
         };
     }
 
@@ -1637,8 +1646,48 @@ function bindOfferForms() {
     });
 }
 
+function applyActiveBookingUpdate(activeBookingData) {
+    const incomingId = activeBookingData ? Number(activeBookingData.id) : null;
+    const currentId = bookingId === null ? null : Number(bookingId);
+
+    // A booking becoming active/inactive, or switching to a different booking, changes the
+    // whole page layout (New Offers vs active-job card, swipe toggle position, etc.) which is
+    // rendered server-side - simplest and safest to just reload for those structural changes.
+    if (incomingId !== currentId) {
+        window.location.reload();
+        return;
+    }
+
+    if (!activeBookingData) return;
+
+    const pickupChanged = pickup.lat !== activeBookingData.pickup_latitude || pickup.lng !== activeBookingData.pickup_longitude;
+    const destChanged = dest.lat !== activeBookingData.delivery_latitude || dest.lng !== activeBookingData.delivery_longitude;
+    const statusChanged = currentStatus !== activeBookingData.status;
+    const pickupAddressChanged = pickupAddress !== activeBookingData.pickup_address;
+    const deliveryAddressChanged = deliveryAddress !== activeBookingData.delivery_address;
+
+    if (!pickupChanged && !destChanged && !statusChanged && !pickupAddressChanged && !deliveryAddressChanged) {
+        return;
+    }
+
+    pickup.lat = activeBookingData.pickup_latitude;
+    pickup.lng = activeBookingData.pickup_longitude;
+    dest.lat = activeBookingData.delivery_latitude;
+    dest.lng = activeBookingData.delivery_longitude;
+    pickupAddress = activeBookingData.pickup_address;
+    deliveryAddress = activeBookingData.delivery_address;
+    currentStatus = activeBookingData.status;
+    senderHandoverConfirmed = !!activeBookingData.sender_handover_confirmed;
+
+    const lat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
+    const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
+    updateMapAndTargetUI(lat, lng);
+}
+
 function updateSummaryUI(data) {
     if (!data) return;
+
+    applyActiveBookingUpdate(data.active_booking || null);
 
     const summaries = data.summaries || {};
 

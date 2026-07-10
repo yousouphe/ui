@@ -822,7 +822,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
                         <h5 class="modal-title">Cancel Order</h5>
-                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-soft">Are you sure you want to cancel this order? Please provide a reason.</p>
@@ -844,7 +844,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
                         <h5 class="modal-title">Issue Item To Rider</h5>
-                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="mb-0 text-soft">Confirm that you have physically handed over the item to the rider.</p>
@@ -864,7 +864,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
                         <h5 class="modal-title">Edit Booking Details</h5>
-                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <form id="edit-details-form">
                         <div class="modal-body">
@@ -925,7 +925,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="modal-content bg-white text-dark border-0 shadow-lg">
                     <div class="modal-header border-bottom">
                         <h5 class="modal-title">Change Delivery Address</h5>
-                        <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <form id="change-delivery-form">
                         <div class="modal-body">
@@ -933,7 +933,10 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                             <p class="text-soft small">If a rider has already agreed a price, it will be recalculated based on the new distance.</p>
                             <label class="form-label">New delivery address</label>
                             <div class="address-search">
-                                <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="Search address, estate, market, landmark...">
+                                <div class="input-group">
+                                    <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="Search address, estate, market, landmark...">
+                                    <button class="btn btn-outline-secondary" type="button" id="use_current_edit_delivery" title="Use current location"><i class="fa-solid fa-location-crosshairs"></i></button>
+                                </div>
                                 <div class="address-suggestions" id="edit_delivery_suggestions"></div>
                             </div>
                             <input type="hidden" id="edit_delivery_latitude" name="delivery_latitude" value="<?= e((string) $selectedDeliveryLat) ?>">
@@ -1034,6 +1037,45 @@ async function fetchMapboxRoute(points) {
         console.error('Mapbox directions request failed:', err);
         return null;
     }
+}
+
+const NIGERIA_BBOX = '2.6,4.2,14.7,14.0';
+const ADDRESS_SEARCH_RADIUS_KM = 30;
+let cachedSearchOrigin;
+
+function getSearchOrigin() {
+    if (cachedSearchOrigin !== undefined) return Promise.resolve(cachedSearchOrigin);
+    if (!navigator.geolocation) {
+        cachedSearchOrigin = null;
+        return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                cachedSearchOrigin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                resolve(cachedSearchOrigin);
+            },
+            () => {
+                cachedSearchOrigin = null;
+                resolve(null);
+            },
+            { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
+        );
+    });
+}
+
+function bboxFromCenter(lat, lng, radiusKm) {
+    const latDelta = radiusKm / 111;
+    const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+    return `${(lng - lngDelta).toFixed(5)},${(lat - latDelta).toFixed(5)},${(lng + lngDelta).toFixed(5)},${(lat + latDelta).toFixed(5)}`;
+}
+
+async function buildGeocodeSearchUrl(query) {
+    const origin = await getSearchOrigin();
+    const bbox = origin ? bboxFromCenter(origin.lat, origin.lng, ADDRESS_SEARCH_RADIUS_KM) : NIGERIA_BBOX;
+    const proximityParam = origin ? `&proximity=${origin.lng},${origin.lat}` : '';
+    const types = 'address,place,poi,neighborhood,locality,district,region';
+    return `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=10&language=en&types=${types}&bbox=${bbox}${proximityParam}`;
 }
 const workspaceState = {
     bookingMap: null,
@@ -1141,6 +1183,13 @@ function initSenderWorkspace() {
     const root = document.getElementById('sender-workspace-content');
     if (!root) return;
 
+    // Kick off (and cache) the geolocation lookup used to scope address search results as soon
+    // as the workspace loads, rather than waiting for the user's first keystroke - avoids the
+    // search feeling laggy while the browser's permission prompt is pending.
+    if (root.querySelector('#pickup_address') || root.querySelector('#edit_delivery_address')) {
+        getSearchOrigin();
+    }
+
     const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
     const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
     const selectedHasRider = root.dataset.selectedHasRider === '1';
@@ -1218,8 +1267,6 @@ function initSenderWorkspace() {
     });
 
     if (bookingMapEl) {
-        const NIGERIA_BBOX = '2.6,4.2,14.7,14.0';
-
         function ensureBookingMap() {
             if (workspaceState.bookingMap) return workspaceState.bookingMap;
             workspaceState.bookingMap = L.map(bookingMapEl, { tap: false }).setView([
@@ -1377,7 +1424,7 @@ function initSenderWorkspace() {
                     if (abortController) abortController.abort();
                     abortController = new AbortController();
                     try {
-                        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=6&language=en&bbox=${NIGERIA_BBOX}`;
+                        const url = await buildGeocodeSearchUrl(query);
                         const res = await fetch(url, { signal: abortController.signal });
                         const data = await res.json();
                         const items = (data.features || []).map(f => ({
@@ -2074,6 +2121,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         const editDeliveryLat = root.querySelector('#edit_delivery_latitude');
         const editDeliveryLng = root.querySelector('#edit_delivery_longitude');
         const editDeliverySuggestions = root.querySelector('#edit_delivery_suggestions');
+        const useCurrentEditDeliveryBtn = root.querySelector('#use_current_edit_delivery');
 
         function renderEditDeliverySuggestions(items, onPick) {
             if (!items.length) {
@@ -2101,7 +2149,6 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         }
 
         if (editDeliveryAddress && editDeliverySuggestions) {
-            const NIGERIA_BBOX_EDIT = '2.6,4.2,14.7,14.0';
             let editDebounce = null;
 
             editDeliveryAddress.addEventListener('input', function () {
@@ -2115,7 +2162,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 }
                 editDebounce = setTimeout(async () => {
                     try {
-                        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=6&language=en&bbox=${NIGERIA_BBOX_EDIT}`;
+                        const url = await buildGeocodeSearchUrl(query);
                         const res = await fetch(url);
                         const data = await res.json();
                         const items = (data.features || []).map(f => ({ text: f.text, place_name: f.place_name, lat: f.center[1], lng: f.center[0] }));
@@ -2133,6 +2180,46 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
 
             editDeliveryAddress.addEventListener('blur', function () {
                 setTimeout(() => editDeliverySuggestions.classList.remove('show'), 150);
+            });
+        }
+
+        if (useCurrentEditDeliveryBtn) {
+            useCurrentEditDeliveryBtn.addEventListener('click', function () {
+                if (!navigator.geolocation) {
+                    alert('Geolocation not supported');
+                    return;
+                }
+                const originalHtml = useCurrentEditDeliveryBtn.innerHTML;
+                useCurrentEditDeliveryBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                useCurrentEditDeliveryBtn.disabled = true;
+
+                navigator.geolocation.getCurrentPosition(
+                    async (pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        if (editDeliveryAddress) editDeliveryAddress.value = 'Locating address...';
+                        try {
+                            const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
+                            const data = await res.json();
+                            const place = data.features && data.features[0];
+                            if (editDeliveryAddress) {
+                                editDeliveryAddress.value = place ? place.place_name : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                                editDeliveryAddress.classList.add('location-confirmed');
+                            }
+                        } catch (err) {
+                            if (editDeliveryAddress) editDeliveryAddress.value = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                        }
+                        if (editDeliveryLat) editDeliveryLat.value = latitude;
+                        if (editDeliveryLng) editDeliveryLng.value = longitude;
+                        useCurrentEditDeliveryBtn.innerHTML = originalHtml;
+                        useCurrentEditDeliveryBtn.disabled = false;
+                    },
+                    (err) => {
+                        alert(`Error (${err.code}): ${err.message}. Ensure HTTPS is enabled.`);
+                        useCurrentEditDeliveryBtn.innerHTML = originalHtml;
+                        useCurrentEditDeliveryBtn.disabled = false;
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
             });
         }
 

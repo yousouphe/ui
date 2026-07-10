@@ -423,21 +423,22 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .badge-soft{background:rgba(56,189,248,.12);color:#0369a1;border:1px solid rgba(56,189,248,.3)}
         .info-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,42,68,.06);border:1px solid rgba(15,42,68,.10);font-size:.9rem}
         .sticky-chat-btn{position:fixed;right:20px;bottom:20px;z-index:99999;width:60px;height:60px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;box-shadow:0 12px 24px rgba(0,0,0,.35);font-size:1.25rem;display:flex;align-items:center;justify-content:center}
-        .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(255,255,255,.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;overflow:hidden}
-        .chat-header{padding:14px 16px;border-bottom:1px solid rgba(15,42,68,.10);display:flex;justify-content:space-between;align-items:center}
+        .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(255,255,255,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;flex-direction:column;overflow:hidden}
+        .chat-header{padding:14px 16px;border-bottom:1px solid rgba(15,42,68,.10);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
         .chat-header-info{display:flex;align-items:center;gap:10px}
         .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
         .chat-header-actions{display:flex;align-items:center;gap:4px}
-        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s ease;text-decoration:none}
-        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44}
+        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .12s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;text-decoration:none;cursor:pointer}
+        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44;transform:translateY(-1px)}
+        .chat-icon-btn:active{transform:scale(.92)}
         .chat-icon-btn.recording-live{background:#ef4444;border-color:#ef4444;color:#fff}
-        .chat-messages{height:360px;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:2px;background:rgba(0,0,0,.12)}
+        .chat-messages{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:2px;background:rgba(0,0,0,.12)}
         .chat-bubble{max-width:78%;padding:8px 12px;border-radius:16px;font-size:.9rem;line-height:1.35;word-wrap:break-word;margin:3px 0;box-shadow:0 1px 2px rgba(0,0,0,.15)}
         .chat-bubble.me{align-self:flex-end;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#062334;border-bottom-right-radius:4px}
         .chat-bubble.them{align-self:flex-start;background:rgba(15,42,68,.10);color:#0f2c44;border-bottom-left-radius:4px}
         .chat-time{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:4px}
         .chat-status{display:block;font-size:.68rem;color:inherit;opacity:.65;margin-top:2px;text-align:right}
-        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10)}
+        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10);flex-shrink:0}
         .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
         .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
         .chat-send-btn{width:38px;height:38px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -445,8 +446,16 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
-        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.85);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
-        .call-panel .call-actions{display:flex;gap:8px;margin-top:12px}
+        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:20px;text-align:center}
+        .call-panel-avatar{width:64px;height:64px;border-radius:50%;background:rgba(56,189,248,.16);border:2px solid rgba(56,189,248,.35);display:flex;align-items:center;justify-content:center;color:#0ea5e9;font-size:1.6rem;margin:0 auto 10px}
+        .call-panel .call-actions{display:flex;gap:20px;margin-top:16px;justify-content:center}
+        .call-action-btn{width:56px;height:56px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#fff;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+        .call-action-btn:hover{transform:translateY(-2px) scale(1.06)}
+        .call-action-btn:active{transform:scale(.94)}
+        .call-accept-btn{background:linear-gradient(135deg,#22c55e,#16a34a)}
+        .call-accept-btn.ringing{animation:ringPulse 1.4s infinite}
+        .call-end-btn{background:linear-gradient(135deg,#ef4444,#dc2626)}
+        @keyframes ringPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 14px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
         .cancel-reason-box{margin-top:12px;padding:12px;border-radius:12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#991b1b}
         .action-stack{display:flex;flex-direction:column;gap:10px}
@@ -481,7 +490,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         body.has-rider-float-bar{padding-bottom:220px}
         @media (max-width:576px){
             .sticky-chat-btn{right:14px;bottom:230px}
-            .chat-panel{right:12px;left:12px;width:auto;bottom:300px}.call-panel{right:12px;left:12px;width:auto;bottom:620px}
+            .chat-panel{right:0;left:0;bottom:0;width:auto;max-width:100%;height:88vh;max-height:88vh;border-radius:1.25rem 1.25rem 0 0}
+            .call-panel{right:16px;left:16px;width:auto;bottom:16px}
             #detail_map{height:260px}
             #booking_map{height:260px !important}
             .map-wrap{height:260px}
@@ -999,12 +1009,13 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             </form>
         </div>
         <div class="call-panel" id="call-panel">
+            <div class="call-panel-avatar"><i class="fa-solid fa-motorcycle"></i></div>
             <div class="fw-bold mb-1">Internet Call</div>
             <div class="small text-soft" id="call-status-text">Ready to connect.</div>
             <audio id="remote-audio" autoplay playsinline></audio>
             <div class="call-actions">
-                <button type="button" class="btn btn-success flex-fill" id="accept-call-btn" style="display:none"><i class="fa-solid fa-phone me-2"></i>Accept</button>
-                <button type="button" class="btn btn-danger flex-fill" id="end-call-btn"><i class="fa-solid fa-phone-slash me-2"></i>End</button>
+                <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
+                <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="End call" aria-label="End call"><i class="fa-solid fa-phone-slash"></i></button>
             </div>
         </div>
         <?php endif; ?>
@@ -2382,22 +2393,34 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             return `booking-${chatBookingId}-user-${userId}`;
         }
 
-        async function ensurePeerReady() {
-            if (workspaceState.peer || !chatBookingId) return workspaceState.peer;
-            workspaceState.peer = new Peer(peerIdFor(currentUserId));
-            workspaceState.peer.on('call', function (incomingCall) {
-                pendingIncomingCall = incomingCall;
-                if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
-                if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
-                if (acceptCallBtn) acceptCallBtn.style.display = 'block';
-                if (endCallBtn) endCallBtn.style.display = '';
+        function ensurePeerReady() {
+            if (workspaceState.peerReadyPromise) return workspaceState.peerReadyPromise;
+            if (!chatBookingId) return Promise.resolve(null);
+            workspaceState.peerReadyPromise = new Promise((resolve) => {
+                const peer = new Peer(peerIdFor(currentUserId));
+                workspaceState.peer = peer;
+                peer.on('open', function () {
+                    resolve(peer);
+                });
+                peer.on('call', function (incomingCall) {
+                    pendingIncomingCall = incomingCall;
+                    if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
+                    if (callPanel) callPanel.style.display = 'block';
+                    if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
+                    if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
+                    if (endCallBtn) endCallBtn.style.display = '';
+                });
+                peer.on('disconnected', function () {
+                    peer.reconnect();
+                });
+                peer.on('error', function (err) {
+                    console.error('Peer error:', err);
+                    if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
+                    workspaceState.peerReadyPromise = null;
+                    resolve(null);
+                });
             });
-            workspaceState.peer.on('error', function (err) {
-                console.error('Peer error:', err);
-                if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
-            });
-            return workspaceState.peer;
+            return workspaceState.peerReadyPromise;
         }
 
         async function ensureLocalAudioStream() {
@@ -2411,7 +2434,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         function finishCallUI(statusMessage) {
             if (remoteAudio) remoteAudio.srcObject = null;
             if (callStatusText) callStatusText.textContent = statusMessage;
-            if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+            if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
             if (endCallBtn) endCallBtn.style.display = 'none';
             if (callPanelHideTimer) clearTimeout(callPanelHideTimer);
             callPanelHideTimer = setTimeout(() => {
@@ -2425,19 +2448,29 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
             workspaceState.currentCall = call;
             if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
             if (endCallBtn) endCallBtn.style.display = '';
+            let connected = false;
+            const noAnswerTimer = setTimeout(() => {
+                if (!connected && workspaceState.currentCall === call) {
+                    call.close();
+                    if (callStatusText) callStatusText.textContent = 'No answer.';
+                }
+            }, 30000);
             call.on('stream', function (remoteStream) {
+                connected = true;
+                clearTimeout(noAnswerTimer);
                 if (remoteAudio) remoteAudio.srcObject = remoteStream;
                 if (callPanel) callPanel.style.display = 'block';
                 if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
-                if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+                if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
             });
             call.on('close', function () {
+                clearTimeout(noAnswerTimer);
                 pendingIncomingCall = null;
                 workspaceState.currentCall = null;
-                finishCallUI('Call ended.');
+                finishCallUI(callStatusText && callStatusText.textContent === 'No answer.' ? 'No answer.' : 'Call ended.');
             });
             call.on('error', function () {
-                if (callStatusText) callStatusText.textContent = 'Call failed.';
+                clearTimeout(noAnswerTimer);
                 finishCallUI('Call failed.');
             });
         }
@@ -2445,19 +2478,24 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
         async function startInternetCall() {
             if (!chatBookingId || !chatReceiverId) return;
             try {
-                await ensurePeerReady();
+                if (callPanel) callPanel.style.display = 'block';
+                if (callStatusText) callStatusText.textContent = 'Connecting…';
+                const peer = await ensurePeerReady();
+                if (!peer) {
+                    if (callStatusText) callStatusText.textContent = 'Call service unavailable. Please try again.';
+                    return;
+                }
                 await fetch(`${realtimeBaseUrl}?action=call_create`, {
                     method: 'POST',
                     body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
                 });
                 const localStream = await ensureLocalAudioStream();
-                if (callPanel) callPanel.style.display = 'block';
                 if (callStatusText) callStatusText.textContent = 'Calling rider over the internet…';
-                const call = workspaceState.peer.call(peerIdFor(chatReceiverId), localStream);
+                const call = peer.call(peerIdFor(chatReceiverId), localStream);
                 bindActiveCall(call);
             } catch (err) {
                 console.error(err);
-                alert(err.message || 'Unable to start internet call.');
+                if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
             }
         }
 
@@ -2474,7 +2512,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 pendingIncomingCall = null;
             } catch (err) {
                 console.error(err);
-                alert(err.message || 'Unable to accept call.');
+                if (callStatusText) callStatusText.textContent = err.message || 'Unable to accept call.';
             }
         }
 
@@ -2516,7 +2554,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
                 if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                     if (callPanel) callPanel.style.display = 'block';
                     if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
-                    if (acceptCallBtn) acceptCallBtn.style.display = 'block';
+                    if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
                 }
             } catch (err) {
                 console.error('Call polling failed:', err);
@@ -2570,7 +2608,7 @@ listContainer.querySelectorAll('.rider-request-form').forEach(form => {
 
         openChatBtn?.addEventListener('click', function () {
             if (!chatPanel) return;
-            chatPanel.style.display = 'block';
+            chatPanel.style.display = 'flex';
             fetchChatMessages(true);
             ensurePeerReady();
             pollCallState();

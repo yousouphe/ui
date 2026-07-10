@@ -1050,6 +1050,21 @@ const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
 const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
+// STUN alone only works when both sides can find a direct path (same network, lenient
+// NAT). Most real phones on mobile data sit behind carrier-grade/symmetric NAT, so a TURN
+// relay is required or calls silently fail to carry audio and time out after ICE gives up
+// (~15-30s). Free/shared TURN via the Open Relay Project - fine for testing/moderate use;
+// swap in dedicated TURN credentials (Twilio, Xirsys, Metered paid tier, self-hosted coturn)
+// for production traffic.
+const PEER_ICE_CONFIG = {
+    iceServers: [
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        { urls: 'turn:global.relay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:global.relay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:global.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+    ]
+};
+
 let watchId = null;
 let lastKnownPosition = null;
 let currentStatus = <?= json_encode($currentStatus) ?>;
@@ -2059,7 +2074,7 @@ function initChat() {
         if (state.peerReadyPromise) return state.peerReadyPromise;
         if (!chatBookingId) return Promise.resolve(null);
         state.peerReadyPromise = new Promise((resolve) => {
-            const peer = new Peer(peerIdFor(currentUserId));
+            const peer = new Peer(peerIdFor(currentUserId), { config: PEER_ICE_CONFIG });
             state.peer = peer;
             peer.on('open', function () {
                 resolve(peer);
@@ -2130,6 +2145,15 @@ function initChat() {
             if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
             startCallTimer();
         });
+        if (call.peerConnection) {
+            call.peerConnection.addEventListener('iceconnectionstatechange', function () {
+                const iceState = call.peerConnection.iceConnectionState;
+                console.log('Call ICE connection state:', iceState);
+                if (iceState === 'failed' && callStatusText) {
+                    callStatusText.textContent = 'Connection failed - poor network path between callers.';
+                }
+            });
+        }
         call.on('close', function () {
             clearTimeout(noAnswerTimer);
             pendingIncomingCall = null;

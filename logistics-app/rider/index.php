@@ -108,7 +108,7 @@ function realtime_insert_voice_message(PDO $pdo, int $bookingId, int $senderUser
 }
 
 $realtimeAction = trim((string)($_GET['action'] ?? $_POST['action'] ?? ''));
-if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload'], true)) {
+if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_end', 'voice_upload', 'presence_ping', 'presence_check'], true)) {
     header('Content-Type: application/json');
 
     try {
@@ -125,15 +125,32 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
         $assetsRoot = realtime_base_dir();
         $callsDir = $assetsRoot . '/realtime_calls';
         $voiceDir = $assetsRoot . '/voice_notes';
+        $presenceDir = $assetsRoot . '/realtime_presence';
         realtime_ensure_dir($callsDir);
         realtime_ensure_dir($voiceDir);
+        realtime_ensure_dir($presenceDir);
 
         $callFile = $callsDir . '/booking_' . $bookingIdForRealtime . '.json';
         $currentUserId = (int)($user['id'] ?? 0);
         $counterpartId = (int)($ctx['counterpart_user_id'] ?? 0);
 
-        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload'], true)) {
+        if (in_array($realtimeAction, ['call_create', 'call_accept', 'call_end', 'voice_upload', 'presence_ping'], true)) {
             require_csrf();
+        }
+
+        if ($realtimeAction === 'presence_ping') {
+            file_put_contents($presenceDir . '/user_' . $currentUserId . '.json', json_encode(['ts' => time()]));
+            respond_json(['success' => true]);
+        }
+
+        if ($realtimeAction === 'presence_check') {
+            $presenceFile = $presenceDir . '/user_' . $counterpartId . '.json';
+            $online = false;
+            if (is_file($presenceFile)) {
+                $presenceData = json_decode((string)file_get_contents($presenceFile), true) ?: [];
+                $online = (time() - (int)($presenceData['ts'] ?? 0)) <= 20;
+            }
+            respond_json(['success' => true, 'online' => $online]);
         }
 
         if ($realtimeAction === 'call_create') {
@@ -616,6 +633,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             'status' => (string)($activeBooking['booking_status'] ?? ''),
             'sender_handover_confirmed' => (bool)$senderConfirmedHandover,
             'payment_status' => (string)($activeBooking['payment_status'] ?? ''),
+            'pickup_address' => (string)($activeBooking['pickup_address'] ?? ''),
+            'pickup_latitude' => $activeBooking['pickup_latitude'] !== null ? (float)$activeBooking['pickup_latitude'] : null,
+            'pickup_longitude' => $activeBooking['pickup_longitude'] !== null ? (float)$activeBooking['pickup_longitude'] : null,
+            'delivery_address' => (string)($activeBooking['delivery_address'] ?? ''),
+            'delivery_latitude' => $activeBooking['delivery_latitude'] !== null ? (float)$activeBooking['delivery_latitude'] : null,
+            'delivery_longitude' => $activeBooking['delivery_longitude'] !== null ? (float)$activeBooking['delivery_longitude'] : null,
         ] : null,
     ]);
 }
@@ -676,21 +699,27 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#5c7a91; }
         .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); font-size:.85rem; }
         .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
-        .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(255,255,255,.75); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(15,42,68,.12); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; overflow:hidden; }
-        .chat-header { padding:14px 16px; border-bottom:1px solid rgba(15,42,68,.10); display:flex; justify-content:space-between; align-items:center; }
+        .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(255,255,255,.97); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(15,42,68,.12); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; flex-direction:column; overflow:hidden; }
+        .chat-header { padding:14px 16px; border-bottom:1px solid rgba(15,42,68,.10); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
         .chat-header-info{display:flex;align-items:center;gap:10px}
         .chat-avatar{width:38px;height:38px;border-radius:50%;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.3);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:1rem;flex-shrink:0}
+        .presence-dot{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:#9ca3af;border:2px solid #ffffff}
+        .presence-dot.online{background:#22c55e}
         .chat-header-actions{display:flex;align-items:center;gap:4px}
-        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s ease;text-decoration:none}
-        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44}
+        .chat-icon-btn{width:36px;height:36px;border-radius:50%;border:1px solid rgba(15,42,68,.14);background:rgba(15,42,68,.06);color:#0f2c44;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .12s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;text-decoration:none;cursor:pointer}
+        .chat-icon-btn:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.4);color:#0f2c44;transform:translateY(-1px)}
+        .chat-icon-btn:active{transform:scale(.92)}
         .chat-icon-btn.recording-live{background:#ef4444;border-color:#ef4444;color:#fff}
-        .chat-messages { height:360px; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:2px; background:rgba(0,0,0,.12); }
+        .chat-messages { flex:1; min-height:0; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:2px; background:rgba(0,0,0,.12); }
         .chat-bubble { max-width:78%; padding:8px 12px; border-radius:16px; font-size:.9rem; line-height:1.35; word-wrap:break-word; margin:3px 0; box-shadow:0 1px 2px rgba(0,0,0,.15); }
         .chat-bubble.me { align-self:flex-end; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#062334; border-bottom-right-radius:4px; }
         .chat-bubble.them { align-self:flex-start; background:rgba(15,42,68,.10); color:#0f2c44; border-bottom-left-radius:4px; }
         .chat-time { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:4px; }
         .chat-status { display:block; font-size:.68rem; color:inherit; opacity:.65; margin-top:2px; text-align:right; }
-        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10)}
+        .chat-tick{font-size:.72rem}
+        .chat-tick-sent,.chat-tick-delivered{color:rgba(6,35,52,.5)}
+        .chat-tick-read{color:#0369a1}
+        .chat-input-row{display:flex;align-items:flex-end;gap:8px;padding:10px 12px;border-top:1px solid rgba(15,42,68,.10);flex-shrink:0}
         .chat-text-input{flex:1;resize:none;min-height:38px;max-height:100px;border-radius:20px;padding:9px 14px;background:#ffffff;color:#0f2c44;border:1px solid rgba(15,42,68,.12);font-size:.9rem}
         .chat-text-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 .15rem rgba(56,189,248,.18)}
         .chat-send-btn{width:38px;height:38px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -698,12 +727,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .voice-note-wrap{display:flex;align-items:center;gap:8px;min-width:220px;max-width:100%}
         .voice-note-wrap audio{width:220px;max-width:100%}
         .recording-live{box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:recordPulse 1.2s infinite}
-        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.85);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:16px}
-        .call-panel .call-actions{display:flex;gap:8px;margin-top:12px}
+        .call-panel{position:fixed;right:20px;bottom:620px;width:380px;max-width:calc(100vw - 24px);z-index:100001;border-radius:1.25rem;background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.14);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;padding:20px;text-align:center}
+        .call-panel-avatar{width:64px;height:64px;border-radius:50%;background:rgba(56,189,248,.16);border:2px solid rgba(56,189,248,.35);display:flex;align-items:center;justify-content:center;color:#0ea5e9;font-size:1.6rem;margin:0 auto 10px}
+        .call-panel .call-actions{display:flex;gap:20px;margin-top:16px;justify-content:center}
+        .call-action-btn{width:56px;height:56px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#fff;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+        .call-action-btn:hover{transform:translateY(-2px) scale(1.06)}
+        .call-action-btn:active{transform:scale(.94)}
+        .call-accept-btn{background:linear-gradient(135deg,#22c55e,#16a34a)}
+        .call-accept-btn.ringing{animation:ringPulse 1.4s infinite}
+        .call-end-btn{background:linear-gradient(135deg,#ef4444,#dc2626)}
+        @keyframes ringPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 14px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
         .request-indicator { min-width:22px; height:22px; border-radius:999px; background:#ef4444; color:#fff; font-size:.72rem; font-weight:700; display:none; align-items:center; justify-content:center; padding:0 6px; }
         .toast-container-custom { position:fixed; top:16px; right:16px; z-index:110000; width:min(360px, calc(100vw - 24px)); }
-        @media (max-width:576px){ .sticky-chat-btn{right:14px;bottom:14px} .chat-panel{right:12px;left:12px;width:auto;bottom:84px} .call-panel{right:12px;left:12px;width:auto;bottom:620px} }
+        @media (max-width:576px){ .sticky-chat-btn{right:14px;bottom:14px} .chat-panel{right:0;left:0;bottom:0;width:auto;max-width:100%;height:88vh;max-height:88vh;border-radius:1.25rem 1.25rem 0 0} .call-panel{right:16px;left:16px;width:auto;bottom:16px} }
     </style>
 </head>
 <body>
@@ -917,7 +954,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="modal-content bg-white text-dark border-0 shadow-lg">
             <div class="modal-header border-bottom">
                 <h5 class="modal-title">New Delivery Request</h5>
-                <button type="button" class="btn-close btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="new-request-modal-body">
                 Waiting for request details...
@@ -944,10 +981,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <div class="chat-panel" id="chat-panel">
     <div class="chat-header">
         <div class="chat-header-info">
-            <div class="chat-avatar"><i class="fa-solid fa-user"></i></div>
+            <div class="chat-avatar position-relative"><i class="fa-solid fa-user"></i><span class="presence-dot" id="chat-presence-dot"></span></div>
             <div>
                 <div class="fw-bold"><?= e((string)($activeBooking['sender_name'] ?? 'Sender')) ?></div>
-                <div class="small text-soft">Your sender</div>
+                <div class="small text-soft" id="chat-presence-label">Your sender</div>
             </div>
         </div>
         <div class="chat-header-actions">
@@ -981,12 +1018,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </form>
 </div>
 <div class="call-panel" id="call-panel">
+    <div class="call-panel-avatar"><i class="fa-solid fa-user"></i></div>
     <div class="fw-bold mb-1">Internet Call</div>
     <div class="small text-soft" id="call-status-text">Ready to connect.</div>
+    <div class="small fw-bold" id="call-timer"></div>
     <audio id="remote-audio" autoplay playsinline></audio>
     <div class="call-actions">
-        <button type="button" class="btn btn-success flex-fill" id="accept-call-btn" style="display:none"><i class="fa-solid fa-phone me-2"></i>Accept</button>
-        <button type="button" class="btn btn-danger flex-fill" id="end-call-btn"><i class="fa-solid fa-phone-slash me-2"></i>End</button>
+        <button type="button" class="call-action-btn call-accept-btn" id="accept-call-btn" style="display:none" title="Accept call" aria-label="Accept call"><i class="fa-solid fa-phone"></i></button>
+        <button type="button" class="call-action-btn call-end-btn" id="end-call-btn" title="End call" aria-label="End call"><i class="fa-solid fa-phone-slash"></i></button>
     </div>
 </div>
 <?php endif; ?>
@@ -1027,6 +1066,9 @@ const dest = {
     lng: <?= $destLng !== null ? json_encode($destLng) : 'null' ?>
 };
 
+let pickupAddress = <?= json_encode((string)($activeBooking['pickup_address'] ?? '')) ?>;
+let deliveryAddress = <?= json_encode((string)($activeBooking['delivery_address'] ?? '')) ?>;
+
 const initialRider = {
     lat: <?= json_encode($initialLat) ?>,
     lng: <?= json_encode($initialLng) ?>
@@ -1043,6 +1085,7 @@ const state = {
     snapshotInterval: null,
     chatInterval: null,
     callPollInterval: null,
+    presenceInterval: null,
     peer: null,
     currentCall: null,
     localCallStream: null,
@@ -1175,7 +1218,7 @@ function showToast(message, type = 'success') {
     toastEl.innerHTML = `
         <div class="d-flex">
             <div class="toast-body" id="${toastBodyId}"></div>
-            <button type="button" class="btn-close btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
         </div>
     `;
 
@@ -1202,7 +1245,7 @@ function getCurrentTarget() {
             lat: pickup.lat,
             lng: pickup.lng,
             label: 'Pickup',
-            address: <?= json_encode((string)($activeBooking['pickup_address'] ?? '')) ?>
+            address: pickupAddress
         };
     }
 
@@ -1212,7 +1255,7 @@ function getCurrentTarget() {
             lat: dest.lat,
             lng: dest.lng,
             label: 'Destination',
-            address: <?= json_encode((string)($activeBooking['delivery_address'] ?? '')) ?>
+            address: deliveryAddress
         };
     }
 
@@ -1637,8 +1680,48 @@ function bindOfferForms() {
     });
 }
 
+function applyActiveBookingUpdate(activeBookingData) {
+    const incomingId = activeBookingData ? Number(activeBookingData.id) : null;
+    const currentId = bookingId === null ? null : Number(bookingId);
+
+    // A booking becoming active/inactive, or switching to a different booking, changes the
+    // whole page layout (New Offers vs active-job card, swipe toggle position, etc.) which is
+    // rendered server-side - simplest and safest to just reload for those structural changes.
+    if (incomingId !== currentId) {
+        window.location.reload();
+        return;
+    }
+
+    if (!activeBookingData) return;
+
+    const pickupChanged = pickup.lat !== activeBookingData.pickup_latitude || pickup.lng !== activeBookingData.pickup_longitude;
+    const destChanged = dest.lat !== activeBookingData.delivery_latitude || dest.lng !== activeBookingData.delivery_longitude;
+    const statusChanged = currentStatus !== activeBookingData.status;
+    const pickupAddressChanged = pickupAddress !== activeBookingData.pickup_address;
+    const deliveryAddressChanged = deliveryAddress !== activeBookingData.delivery_address;
+
+    if (!pickupChanged && !destChanged && !statusChanged && !pickupAddressChanged && !deliveryAddressChanged) {
+        return;
+    }
+
+    pickup.lat = activeBookingData.pickup_latitude;
+    pickup.lng = activeBookingData.pickup_longitude;
+    dest.lat = activeBookingData.delivery_latitude;
+    dest.lng = activeBookingData.delivery_longitude;
+    pickupAddress = activeBookingData.pickup_address;
+    deliveryAddress = activeBookingData.delivery_address;
+    currentStatus = activeBookingData.status;
+    senderHandoverConfirmed = !!activeBookingData.sender_handover_confirmed;
+
+    const lat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
+    const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
+    updateMapAndTargetUI(lat, lng);
+}
+
 function updateSummaryUI(data) {
     if (!data) return;
+
+    applyActiveBookingUpdate(data.active_booking || null);
 
     const summaries = data.summaries || {};
 
@@ -1801,17 +1884,26 @@ function initChat() {
     const voiceBtnLabel = document.querySelector('.voice-btn-label');
     const callPanel = document.getElementById('call-panel');
     const callStatusText = document.getElementById('call-status-text');
+    const callTimerEl = document.getElementById('call-timer');
     const acceptCallBtn = document.getElementById('accept-call-btn');
     const endCallBtn = document.getElementById('end-call-btn');
     const remoteAudio = document.getElementById('remote-audio');
+    const presenceDot = document.getElementById('chat-presence-dot');
+    const presenceLabel = document.getElementById('chat-presence-label');
+    const phoneCallLink = document.querySelector('.chat-header-actions a[href^="tel:"]');
     const realtimeBaseUrl = <?= json_encode(url_path('rider/index.php')) ?>;
     const currentUserId = <?= (int)$user['id'] ?>;
+    let counterpartOnline = false;
 
-    function buildStatusText(msg) {
+    function buildStatusTicks(msg) {
         if (!msg.is_me) return '';
-        if (msg.read_at_formatted) return `Read ${escapeHtml(msg.read_at_formatted)}`;
-        if (msg.delivered_at_formatted) return `Delivered ${escapeHtml(msg.delivered_at_formatted)}`;
-        return 'Sent';
+        if (msg.read_at_formatted) {
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-read" title="Read ${escapeHtml(msg.read_at_formatted)}"></i>`;
+        }
+        if (msg.delivered_at_formatted) {
+            return `<i class="fa-solid fa-check-double chat-tick chat-tick-delivered" title="Delivered ${escapeHtml(msg.delivered_at_formatted)}"></i>`;
+        }
+        return `<i class="fa-solid fa-check chat-tick chat-tick-sent" title="Sent"></i>`;
     }
 
     function renderChatContent(rawMessage) {
@@ -1846,7 +1938,7 @@ function initChat() {
             <div class="chat-bubble ${msg.is_me ? 'me' : 'them'}" data-message-id="${Number(msg.id || 0)}">
                 ${renderChatContent(msg.message)}
                 <span class="chat-time">${escapeHtml(msg.created_at_formatted || msg.created_at || '')}</span>
-                ${msg.is_me ? `<span class="chat-status">${buildStatusText(msg)}</span>` : ''}
+                ${msg.is_me ? `<span class="chat-status">${buildStatusTicks(msg)}</span>` : ''}
             </div>
         `).join('');
 
@@ -1892,26 +1984,106 @@ function initChat() {
         }
     }
 
+    async function pingPresence() {
+        if (!chatBookingId) return;
+        try {
+            await fetch(`${realtimeBaseUrl}?action=presence_ping`, {
+                method: 'POST',
+                body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
+            });
+        } catch (err) { /* ignore */ }
+    }
+
+    async function checkPresence() {
+        if (!chatBookingId) return;
+        try {
+            const res = await fetch(`${realtimeBaseUrl}?action=presence_check&booking_id=${encodeURIComponent(chatBookingId)}`, { cache: 'no-store' });
+            const result = await res.json();
+            counterpartOnline = !!(result.success && result.online);
+            if (presenceDot) presenceDot.classList.toggle('online', counterpartOnline);
+            if (presenceLabel) presenceLabel.textContent = counterpartOnline ? 'Online' : 'Offline';
+        } catch (err) { /* ignore */ }
+    }
+
+    let ringAudioCtx = null;
+    let ringInterval = null;
+
+    function startRingback() {
+        stopRingback();
+        try {
+            ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const playTone = () => {
+                if (!ringAudioCtx) return;
+                const osc = ringAudioCtx.createOscillator();
+                const gain = ringAudioCtx.createGain();
+                osc.frequency.value = 425;
+                gain.gain.value = 0.08;
+                osc.connect(gain).connect(ringAudioCtx.destination);
+                osc.start();
+                setTimeout(() => { try { osc.stop(); } catch (e) {} }, 1000);
+            };
+            playTone();
+            ringInterval = setInterval(playTone, 3000);
+        } catch (err) { /* Web Audio unavailable */ }
+    }
+
+    function stopRingback() {
+        if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+        if (ringAudioCtx) { ringAudioCtx.close().catch(() => {}); ringAudioCtx = null; }
+    }
+
+    let callTimerInterval = null;
+
+    function startCallTimer() {
+        stopCallTimer();
+        const startedAt = Date.now();
+        if (callTimerEl) callTimerEl.textContent = '00:00';
+        callTimerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+            const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const ss = String(elapsed % 60).padStart(2, '0');
+            if (callTimerEl) callTimerEl.textContent = `${mm}:${ss}`;
+        }, 1000);
+    }
+
+    function stopCallTimer() {
+        if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
+        if (callTimerEl) callTimerEl.textContent = '';
+    }
+
     function peerIdFor(userId) {
         return `booking-${chatBookingId}-user-${userId}`;
     }
 
-    async function ensurePeerReady() {
-        if (state.peer || !chatBookingId) return state.peer;
-        state.peer = new Peer(peerIdFor(currentUserId));
-        state.peer.on('call', function (incomingCall) {
-            pendingIncomingCall = incomingCall;
-            if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
-            if (callPanel) callPanel.style.display = 'block';
-            if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
-            if (acceptCallBtn) acceptCallBtn.style.display = 'block';
-            if (endCallBtn) endCallBtn.style.display = '';
+    function ensurePeerReady() {
+        if (state.peerReadyPromise) return state.peerReadyPromise;
+        if (!chatBookingId) return Promise.resolve(null);
+        state.peerReadyPromise = new Promise((resolve) => {
+            const peer = new Peer(peerIdFor(currentUserId));
+            state.peer = peer;
+            peer.on('open', function () {
+                resolve(peer);
+            });
+            peer.on('call', function (incomingCall) {
+                pendingIncomingCall = incomingCall;
+                if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
+                if (callPanel) callPanel.style.display = 'block';
+                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
+                if (endCallBtn) endCallBtn.style.display = '';
+                startRingback();
+            });
+            peer.on('disconnected', function () {
+                peer.reconnect();
+            });
+            peer.on('error', function (err) {
+                console.error('Peer error:', err);
+                if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
+                state.peerReadyPromise = null;
+                resolve(null);
+            });
         });
-        state.peer.on('error', function (err) {
-            console.error('Peer error:', err);
-            if (callStatusText) callStatusText.textContent = 'Call service unavailable.';
-        });
-        return state.peer;
+        return state.peerReadyPromise;
     }
 
     async function ensureLocalAudioStream() {
@@ -1923,9 +2095,11 @@ function initChat() {
     let callPanelHideTimer = null;
 
     function finishCallUI(statusMessage) {
+        stopRingback();
+        stopCallTimer();
         if (remoteAudio) remoteAudio.srcObject = null;
         if (callStatusText) callStatusText.textContent = statusMessage;
-        if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+        if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
         if (endCallBtn) endCallBtn.style.display = 'none';
         if (callPanelHideTimer) clearTimeout(callPanelHideTimer);
         callPanelHideTimer = setTimeout(() => {
@@ -1939,44 +2113,74 @@ function initChat() {
         state.currentCall = call;
         if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
         if (endCallBtn) endCallBtn.style.display = '';
+        let connected = false;
+        const noAnswerTimer = setTimeout(() => {
+            if (!connected && state.currentCall === call) {
+                call.close();
+                if (callStatusText) callStatusText.textContent = 'No answer.';
+            }
+        }, 30000);
         call.on('stream', function (remoteStream) {
+            connected = true;
+            stopRingback();
+            clearTimeout(noAnswerTimer);
             if (remoteAudio) remoteAudio.srcObject = remoteStream;
             if (callPanel) callPanel.style.display = 'block';
             if (callStatusText) callStatusText.textContent = 'Connected over the internet.';
-            if (acceptCallBtn) acceptCallBtn.style.display = 'none';
+            if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
+            startCallTimer();
         });
         call.on('close', function () {
+            clearTimeout(noAnswerTimer);
             pendingIncomingCall = null;
             state.currentCall = null;
-            finishCallUI('Call ended.');
+            finishCallUI(callStatusText && callStatusText.textContent === 'No answer.' ? 'No answer.' : 'Call ended.');
         });
         call.on('error', function () {
+            clearTimeout(noAnswerTimer);
             finishCallUI('Call failed.');
         });
     }
 
     async function startInternetCall() {
         if (!chatBookingId || !chatReceiverId) return;
+        if (!counterpartOnline) {
+            if (phoneCallLink) {
+                if (callStatusText) callStatusText.textContent = 'Sender appears offline — calling their phone instead.';
+                phoneCallLink.click();
+            } else if (callStatusText) {
+                callStatusText.textContent = 'Sender appears offline and has no phone number on file.';
+            }
+            return;
+        }
         try {
-            await ensurePeerReady();
+            if (callPanel) callPanel.style.display = 'block';
+            if (callStatusText) callStatusText.textContent = 'Connecting…';
+            const peer = await ensurePeerReady();
+            if (!peer) {
+                if (callStatusText) callStatusText.textContent = 'Call service unavailable. Please try again.';
+                return;
+            }
             await fetch(`${realtimeBaseUrl}?action=call_create`, {
                 method: 'POST',
                 body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
             });
             const localStream = await ensureLocalAudioStream();
-            if (callPanel) callPanel.style.display = 'block';
-            if (callStatusText) callStatusText.textContent = 'Calling sender over the internet…';
-            const call = state.peer.call(peerIdFor(chatReceiverId), localStream);
+            if (callStatusText) callStatusText.textContent = 'Ringing…';
+            startRingback();
+            const call = peer.call(peerIdFor(chatReceiverId), localStream);
             bindActiveCall(call);
         } catch (err) {
             console.error(err);
-            showToast(err.message || 'Unable to start internet call.', 'danger');
+            stopRingback();
+            if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
         }
     }
 
     async function acceptInternetCall() {
         try {
             if (!pendingIncomingCall) return;
+            stopRingback();
             const localStream = await ensureLocalAudioStream();
             pendingIncomingCall.answer(localStream);
             bindActiveCall(pendingIncomingCall);
@@ -1987,7 +2191,7 @@ function initChat() {
             pendingIncomingCall = null;
         } catch (err) {
             console.error(err);
-            showToast(err.message || 'Unable to accept call.', 'danger');
+            if (callStatusText) callStatusText.textContent = err.message || 'Unable to accept call.';
         }
     }
 
@@ -2028,8 +2232,9 @@ function initChat() {
             const call = result.call || {};
             if (Number(call.to_user_id || 0) === currentUserId && call.status === 'ringing') {
                 if (callPanel) callPanel.style.display = 'block';
-                if (callStatusText) callStatusText.textContent = 'Incoming internet call…';
-                if (acceptCallBtn) acceptCallBtn.style.display = 'block';
+                if (callStatusText) callStatusText.textContent = 'Incoming call — Ringing…';
+                if (acceptCallBtn) { acceptCallBtn.style.display = 'block'; acceptCallBtn.classList.add('ringing'); }
+                startRingback();
             }
         } catch (err) {
             console.error('Call polling failed:', err);
@@ -2083,15 +2288,20 @@ function initChat() {
 
     openChatBtn?.addEventListener('click', function () {
         if (!chatPanel) return;
-        chatPanel.style.display = 'block';
+        chatPanel.style.display = 'flex';
         fetchChatMessages(true);
         ensurePeerReady();
         pollCallState();
+        pingPresence();
+        checkPresence();
         if (!state.chatInterval) {
             state.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
         }
         if (!state.callPollInterval) {
             state.callPollInterval = setInterval(() => pollCallState(), 4000);
+        }
+        if (!state.presenceInterval) {
+            state.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 12000);
         }
     });
 
@@ -2101,6 +2311,10 @@ function initChat() {
         if (state.chatInterval) {
             clearInterval(state.chatInterval);
             state.chatInterval = null;
+        }
+        if (state.presenceInterval) {
+            clearInterval(state.presenceInterval);
+            state.presenceInterval = null;
         }
     });
 

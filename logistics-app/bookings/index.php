@@ -398,6 +398,14 @@ $canChat = $selectedBooking && (int)($selectedBooking['selected_rider_user_id'] 
 $chatReceiverId = $canChat ? (int)$selectedBooking['selected_rider_user_id'] : 0;
 $cancellationReason = trim((string)($selectedBooking['cancellation_reason'] ?? ''));
 
+$isDelivered = $selectedBooking && ($selectedBooking['booking_status'] ?? '') === 'delivered';
+$existingRating = null;
+if ($isDelivered) {
+    $stmt = $pdo->prepare('SELECT rating, review_text FROM booking_ratings WHERE booking_id = ? LIMIT 1');
+    $stmt->execute([(int) $selectedBooking['id']]);
+    $existingRating = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
 $selectedBookingIsActive = $selectedBooking ? booking_exists_in_list($activeBookings, (int) $selectedBooking['id']) : false;
 $selectedBookingIsUnpaid = $selectedBooking ? booking_exists_in_list($unpaidBookings, (int) $selectedBooking['id']) : false;
 $selectedBookingIsHistory = $selectedBooking
@@ -480,6 +488,10 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         @keyframes ringPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 14px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
         @keyframes recordPulse{0%{box-shadow:0 0 0 0 rgba(248,113,113,.55)}70%{box-shadow:0 0 0 12px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
         .cancel-reason-box{margin-top:12px;padding:12px;border-radius:12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#991b1b}
+        .delivery-feedback-card{padding:14px;border-radius:1rem;background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.18)}
+        .star-rating-input i,.star-rating-display i{font-size:1.4rem;color:#f59e0b;margin-right:4px;cursor:pointer}
+        .star-rating-display i{cursor:default}
+        .star-rating-input i.star-empty,.star-rating-display i.star-empty{color:rgba(15,42,68,.2)}
         .action-stack{display:flex;flex-direction:column;gap:10px}
         .address-search{position:relative}
         .address-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:1500;background:#ffffff;border:1px solid rgba(15,42,68,.16);border-radius:.75rem;box-shadow:0 12px 30px rgba(0,0,0,.35);max-height:260px;overflow-y:auto;display:none}
@@ -790,6 +802,39 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 <?php endif; ?>
 
+                <?php if ($isDelivered): ?>
+                    <div class="delivery-feedback-card mb-3">
+                        <?php if ($existingRating): ?>
+                            <div class="small fw-bold mb-1">Your rating</div>
+                            <div class="star-rating-display mb-1">
+                                <?php for ($i = 1; $i <= 5; $i++): ?>
+                                    <i class="fa-solid fa-star<?= $i <= (int) $existingRating['rating'] ? '' : ' star-empty' ?>"></i>
+                                <?php endfor; ?>
+                            </div>
+                            <?php if (!empty($existingRating['review_text'])): ?>
+                                <div class="text-soft small">"<?= e($existingRating['review_text']) ?>"</div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="small fw-bold mb-2">Rate your rider</div>
+                            <form id="rate-rider-form">
+                                <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
+                                <div class="star-rating-input mb-2" id="star-rating-input">
+                                    <?php for ($i = 1; $i <= 5; $i++): ?>
+                                        <i class="fa-solid fa-star star-empty" data-star="<?= $i ?>"></i>
+                                    <?php endfor; ?>
+                                </div>
+                                <input type="hidden" name="rating" id="rate-rider-value" value="0">
+                                <textarea class="form-control form-control-sm mb-2" name="review_text" rows="2" placeholder="Optional review..."></textarea>
+                                <button class="btn btn-sm btn-primary" type="submit">Submit Rating</button>
+                                <div class="small text-danger mt-2 d-none" id="rate-rider-error"></div>
+                            </form>
+                        <?php endif; ?>
+                        <button class="btn btn-sm btn-outline-danger mt-2" type="button" data-bs-toggle="modal" data-bs-target="#reportProblemModal">
+                            <i class="fa-solid fa-triangle-exclamation me-1"></i>Report a Problem
+                        </button>
+                    </div>
+                <?php endif; ?>
+
                 <div class="action-stack">
                     <?php if ($canPay): ?>
                         <button class="btn btn-success w-100" type="button" id="pay-now-btn" data-booking-id="<?= (int) $selectedBooking['id'] ?>">
@@ -881,6 +926,40 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 </div>
             </div>
         </div>
+
+        <?php if ($isDelivered): ?>
+        <div class="modal fade" id="reportProblemModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <form id="report-problem-form">
+                        <div class="modal-header border-bottom">
+                            <h5 class="modal-title">Report a Problem</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
+                            <label class="form-label">What went wrong?</label>
+                            <select class="form-select mb-3" name="category" required>
+                                <option value="">Choose a category...</option>
+                                <option value="damaged_item">Item arrived damaged</option>
+                                <option value="late_delivery">Delivery was late</option>
+                                <option value="wrong_item">Wrong item delivered</option>
+                                <option value="rider_behavior">Issue with rider's conduct</option>
+                                <option value="other">Other</option>
+                            </select>
+                            <label class="form-label">Details</label>
+                            <textarea class="form-control" name="message" rows="4" placeholder="Describe what happened" required></textarea>
+                            <div class="small text-danger mt-2 d-none" id="report-problem-error"></div>
+                        </div>
+                        <div class="modal-footer border-top">
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-danger">Submit Report</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="modal fade" id="issueItemModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
@@ -1064,6 +1143,21 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <script>
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
+
+// STUN alone only works when both sides can find a direct path (same network, lenient
+// NAT). Most real phones on mobile data sit behind carrier-grade/symmetric NAT, so a TURN
+// relay is required or calls silently fail to carry audio and time out after ICE gives up
+// (~15-30s). Free/shared TURN via the Open Relay Project - fine for testing/moderate use;
+// swap in dedicated TURN credentials (Twilio, Xirsys, Metered paid tier, self-hosted coturn)
+// for production traffic.
+const PEER_ICE_CONFIG = {
+    iceServers: [
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        { urls: 'turn:global.relay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:global.relay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:global.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+    ]
+};
 
 async function fetchMapboxRoute(points) {
     try {
@@ -2248,6 +2342,108 @@ function initSenderWorkspace() {
         }
     });
 
+    const starRatingInput = root.querySelector('#star-rating-input');
+    const rateRiderValue = root.querySelector('#rate-rider-value');
+    starRatingInput?.querySelectorAll('i').forEach((star) => {
+        star.addEventListener('click', function () {
+            const value = parseInt(this.dataset.star, 10);
+            if (rateRiderValue) rateRiderValue.value = String(value);
+            starRatingInput.querySelectorAll('i').forEach((s) => {
+                s.classList.toggle('star-empty', parseInt(s.dataset.star, 10) > value);
+            });
+        });
+    });
+
+    const rateRiderForm = root.querySelector('#rate-rider-form');
+    rateRiderForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const errorBox = root.querySelector('#rate-rider-error');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalHtml = submitBtn.innerHTML;
+
+        if (errorBox) errorBox.classList.add('d-none');
+
+        if (!rateRiderValue || Number(rateRiderValue.value) < 1) {
+            if (errorBox) {
+                errorBox.textContent = 'Please select a star rating.';
+                errorBox.classList.remove('d-none');
+            }
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        try {
+            const formData = new FormData(this);
+            formData.append('csrf_token', CSRF_TOKEN);
+
+            const response = await fetch('<?= e(url_path('bookings/ajax_submit_rating.php')) ?>', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to submit rating.');
+            }
+
+            ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
+        } catch (err) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHtml;
+            if (errorBox) {
+                errorBox.textContent = err.message || 'Unable to submit rating.';
+                errorBox.classList.remove('d-none');
+            }
+        }
+    });
+
+    const reportProblemForm = root.querySelector('#report-problem-form');
+    reportProblemForm?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const errorBox = root.querySelector('#report-problem-error');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalHtml = submitBtn.innerHTML;
+
+        if (errorBox) errorBox.classList.add('d-none');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        try {
+            const formData = new FormData(this);
+            formData.append('csrf_token', CSRF_TOKEN);
+
+            const response = await fetch('<?= e(url_path('bookings/ajax_submit_complaint.php')) ?>', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || 'Unable to submit report.');
+            }
+
+            const modalEl = root.querySelector('#reportProblemModal');
+            const modalInstance = window.bootstrap ? window.bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+            if (modalInstance) modalInstance.hide();
+            alert(result.message || 'Your report has been submitted.');
+            this.reset();
+        } catch (err) {
+            if (errorBox) {
+                errorBox.textContent = err.message || 'Unable to submit report.';
+                errorBox.classList.remove('d-none');
+            }
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHtml;
+        }
+    });
+
     const editDetailsForm = root.querySelector('#edit-details-form');
     editDetailsForm?.addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -2628,7 +2824,7 @@ function initSenderWorkspace() {
             if (workspaceState.peerReadyPromise) return workspaceState.peerReadyPromise;
             if (!chatBookingId) return Promise.resolve(null);
             workspaceState.peerReadyPromise = new Promise((resolve) => {
-                const peer = new Peer(peerIdFor(currentUserId));
+                const peer = new Peer(peerIdFor(currentUserId), { config: PEER_ICE_CONFIG });
                 workspaceState.peer = peer;
                 peer.on('open', function () {
                     resolve(peer);
@@ -2699,6 +2895,15 @@ function initSenderWorkspace() {
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
                 startCallTimer();
             });
+            if (call.peerConnection) {
+                call.peerConnection.addEventListener('iceconnectionstatechange', function () {
+                    const state = call.peerConnection.iceConnectionState;
+                    console.log('Call ICE connection state:', state);
+                    if (state === 'failed' && callStatusText) {
+                        callStatusText.textContent = 'Connection failed - poor network path between callers.';
+                    }
+                });
+            }
             call.on('close', function () {
                 clearTimeout(noAnswerTimer);
                 pendingIncomingCall = null;

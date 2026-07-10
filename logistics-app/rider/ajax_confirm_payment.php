@@ -18,7 +18,7 @@ if ($bookingId <= 0) {
 $user = current_user();
 
 $stmt = $pdo->prepare('
-    SELECT id, booking_status, payment_status, rider_payment_confirmed
+    SELECT id, booking_code, booking_status, payment_status, rider_payment_confirmed, agreed_cost
     FROM bookings
     WHERE id = ? AND selected_rider_user_id = ?
     LIMIT 1
@@ -50,7 +50,33 @@ if (($booking['payment_status'] ?? 'unpaid') !== 'paid') {
     exit;
 }
 
-$stmt = $pdo->prepare('UPDATE bookings SET rider_payment_confirmed = 1, rider_payment_confirmed_at = NOW() WHERE id = ?');
-$stmt->execute([$bookingId]);
+$payoutAmount = rider_payout_amount((float) $booking['agreed_cost']);
+
+try {
+    $pdo->beginTransaction();
+
+    $stmt = $pdo->prepare('UPDATE bookings SET rider_payment_confirmed = 1, rider_payment_confirmed_at = NOW() WHERE id = ?');
+    $stmt->execute([$bookingId]);
+
+    $stmt = $pdo->prepare('
+        INSERT INTO wallet_transactions (rider_user_id, booking_id, type, amount, description)
+        VALUES (?, ?, "earning", ?, ?)
+    ');
+    $stmt->execute([
+        $user['id'],
+        $bookingId,
+        $payoutAmount,
+        sprintf('Delivery %s (85%% of %s)', $booking['booking_code'], number_format((float) $booking['agreed_cost'], 2)),
+    ]);
+
+    $pdo->commit();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Unable to confirm payment: ' . $e->getMessage()]);
+    exit;
+}
 
 echo json_encode(['success' => true, 'message' => 'Payment confirmed. Job closed out.']);

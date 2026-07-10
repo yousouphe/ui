@@ -210,9 +210,11 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
             $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp) ?: 'audio/webm';
             $extMap = [
                 'audio/webm' => 'webm',
+                'video/webm' => 'webm', // libmagic sometimes tags an audio-only WebM container this way
                 'audio/ogg' => 'ogg',
                 'audio/mpeg' => 'mp3',
                 'audio/mp4' => 'm4a',
+                'video/mp4' => 'm4a', // Safari/iOS MediaRecorder output - MP4 ftyp doesn't imply video
                 'audio/x-m4a' => 'm4a',
                 'audio/wav' => 'wav',
                 'audio/x-wav' => 'wav',
@@ -478,6 +480,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .badge-soft{background:rgba(56,189,248,.12);color:#0369a1;border:1px solid rgba(56,189,248,.3)}
         .info-pill{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:rgba(15,42,68,.06);border:1px solid rgba(15,42,68,.10);font-size:.9rem}
         .sticky-chat-btn{position:fixed;right:20px;bottom:20px;z-index:99999;width:60px;height:60px;border-radius:50%;border:none;background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:#09101d;box-shadow:0 12px 24px rgba(0,0,0,.35);font-size:1.25rem;display:flex;align-items:center;justify-content:center}
+        .chat-unread-badge{position:absolute;top:-4px;right:-4px;min-width:22px;height:22px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 0 0 2px #fff}
         .chat-panel{position:fixed;right:20px;bottom:90px;width:380px;max-width:calc(100vw - 24px);height:520px;max-height:72vh;z-index:100000;border-radius:1.25rem;background:rgba(255,255,255,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(15,42,68,.12);box-shadow:0 20px 40px rgba(0,0,0,.35);display:none;flex-direction:column;overflow:hidden}
         .chat-header{padding:14px 16px;border-bottom:1px solid rgba(15,42,68,.10);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
         .chat-header-info{display:flex;align-items:center;gap:10px}
@@ -1118,6 +1121,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php if ($canChat): ?>
         <button type="button" class="sticky-chat-btn" id="open-chat-btn" title="<?= e(t('chat.open_chat_title')) ?>">
             <i class="fa-solid fa-comments"></i>
+            <span class="chat-unread-badge" id="chat-unread-badge" style="display:none">0</span>
         </button>
 
         <div class="chat-panel" id="chat-panel">
@@ -1213,6 +1217,9 @@ function paymentBadgeText(status) {
 }
 
 const I18N = <?= json_encode([
+    'voiceUploadFailed' => t('rider.voice_note_upload_failed'),
+    'recordVoiceFailed' => t('rider.record_voice_failed'),
+    'messageSendFailed' => t('rider.message_send_failed'),
     'tapMapToSet' => t('map.tap_to_set'),
     'calculatingRoute' => t('map.calculating_route'),
     'showMap' => t('booking.show_map'),
@@ -2740,6 +2747,7 @@ function initSenderWorkspace() {
 
     if (canChat) {
         const openChatBtn = root.querySelector('#open-chat-btn');
+        const chatUnreadBadge = root.querySelector('#chat-unread-badge');
         const closeChatBtn = root.querySelector('#close-chat-btn');
         const chatPanel = root.querySelector('#chat-panel');
         const chatMessages = root.querySelector('#chat-messages');
@@ -2794,10 +2802,45 @@ function initSenderWorkspace() {
 
         let chatLastMessageId = 0;
         let chatHasRenderedOnce = false;
+        let chatUnreadCount = 0;
         let mediaRecorder = null;
         let mediaChunks = [];
         let pendingIncomingCall = null;
         let lastCallSignalHash = '';
+
+        function isChatPanelOpen() {
+            return !!chatPanel && chatPanel.style.display !== 'none' && chatPanel.style.display !== '';
+        }
+
+        function updateChatUnreadBadge() {
+            if (!chatUnreadBadge) return;
+            if (chatUnreadCount > 0) {
+                chatUnreadBadge.textContent = chatUnreadCount > 99 ? '99+' : String(chatUnreadCount);
+                chatUnreadBadge.style.display = 'flex';
+            } else {
+                chatUnreadBadge.style.display = 'none';
+            }
+        }
+
+        function playChatNotificationSound() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const oscillator = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(660, ctx.currentTime);
+                oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+                oscillator.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                oscillator.start();
+                oscillator.stop(ctx.currentTime + 0.4);
+            } catch (e) { /* Web Audio unavailable */ }
+        }
 
         function appendChatMessages(messages, replaceAll) {
             if (!chatMessages) return;
@@ -2831,12 +2874,12 @@ function initSenderWorkspace() {
             chatHasRenderedOnce = true;
         }
 
-        async function fetchChatMessages(forceFull = false) {
+        async function fetchChatMessages(forceFull = false, markRead = true) {
             if (!chatBookingId || !chatMessages || document.hidden) return;
 
             try {
                 const sinceId = forceFull ? 0 : chatLastMessageId;
-                const response = await fetch(`<?= e(url_path('chat/ajax_fetch_messages.php')) ?>?booking_id=${encodeURIComponent(chatBookingId)}&since_id=${encodeURIComponent(sinceId)}&limit=50`, {
+                const response = await fetch(`<?= e(url_path('chat/ajax_fetch_messages.php')) ?>?booking_id=${encodeURIComponent(chatBookingId)}&since_id=${encodeURIComponent(sinceId)}&limit=50&mark_read=${markRead ? 1 : 0}`, {
                     headers: { 'Accept': 'application/json' },
                     cache: 'no-store'
                 });
@@ -2845,6 +2888,19 @@ function initSenderWorkspace() {
                 const result = await response.json();
                 if (response.ok && result.success) {
                     const messages = result.messages || [];
+
+                    if (!markRead) {
+                        const incoming = messages.filter(msg => !msg.is_me);
+                        if (incoming.length) {
+                            chatUnreadCount += incoming.length;
+                            updateChatUnreadBadge();
+                            playChatNotificationSound();
+                        }
+                    } else if (isChatPanelOpen()) {
+                        chatUnreadCount = 0;
+                        updateChatUnreadBadge();
+                    }
+
                     if (forceFull || !chatHasRenderedOnce) {
                         appendChatMessages(messages, true);
                     } else if (messages.length) {
@@ -3186,9 +3242,18 @@ function initSenderWorkspace() {
             });
             const result = await response.json();
             if (!response.ok || !result.success) {
-                throw new Error(result.message || 'Unable to upload voice note.');
+                throw new Error(result.message || I18N.voiceUploadFailed);
             }
             await fetchChatMessages(true);
+        }
+
+        function pickRecorderMimeType() {
+            // new MediaRecorder(stream) with no explicit mimeType is unreliable across
+            // browsers (notably Safari/iOS, which doesn't support audio/webm at all) - probe
+            // for the first type the browser actually supports instead of hoping for a default.
+            const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/wav'];
+            if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+            return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
         }
 
         async function toggleVoiceRecording() {
@@ -3199,13 +3264,14 @@ function initSenderWorkspace() {
                 }
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 mediaChunks = [];
-                mediaRecorder = new MediaRecorder(stream);
+                const mimeType = pickRecorderMimeType();
+                mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
                 mediaRecorder.ondataavailable = event => {
                     if (event.data && event.data.size > 0) mediaChunks.push(event.data);
                 };
                 mediaRecorder.onstop = async () => {
                     stream.getTracks().forEach(track => track.stop());
-                    const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                    const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || mimeType || 'audio/webm' });
                     if (voiceBtn) voiceBtn.classList.remove('recording-live');
                     if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.recordVoice;
                     await uploadVoiceNote(blob);
@@ -3215,40 +3281,42 @@ function initSenderWorkspace() {
                 if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.stopRecording;
             } catch (err) {
                 console.error(err);
-                alert(err.message || 'Unable to record voice note.');
+                alert(err.message || I18N.recordVoiceFailed);
             }
         }
 
         // Presence (and the ability to receive an incoming call) shouldn't depend on the chat
         // panel being open - the counterpart should show online as soon as this page is loaded
         // and logged in, and an incoming call should still ring even with the panel closed.
+        // The same goes for new-message notifications: poll for messages continuously so an
+        // unread badge + sound can fire even while the panel is closed (without marking those
+        // messages read until the recipient actually opens the panel and sees them).
         ensurePeerReady();
         pollCallState();
         pingPresence();
         checkPresence();
+        fetchChatMessages(true, isChatPanelOpen());
         if (!workspaceState.callPollInterval) {
             workspaceState.callPollInterval = setInterval(() => pollCallState(), 4000);
         }
         if (!workspaceState.presenceInterval) {
             workspaceState.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 8000);
         }
+        if (!workspaceState.chatInterval) {
+            workspaceState.chatInterval = setInterval(() => fetchChatMessages(false, isChatPanelOpen()), 8000);
+        }
 
         openChatBtn?.addEventListener('click', function () {
             if (!chatPanel) return;
             chatPanel.style.display = 'flex';
-            fetchChatMessages(true);
-            if (!workspaceState.chatInterval) {
-                workspaceState.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
-            }
+            chatUnreadCount = 0;
+            updateChatUnreadBadge();
+            fetchChatMessages(true, true);
         });
 
         closeChatBtn?.addEventListener('click', function () {
             if (!chatPanel) return;
             chatPanel.style.display = 'none';
-            if (workspaceState.chatInterval) {
-                clearInterval(workspaceState.chatInterval);
-                workspaceState.chatInterval = null;
-            }
         });
 
         callBtn?.addEventListener('click', function () { startInternetCall(false); });
@@ -3279,12 +3347,12 @@ function initSenderWorkspace() {
                 });
                 const result = await response.json();
                 if (!response.ok || !result.success) {
-                    throw new Error(result.message || 'Unable to send message.');
+                    throw new Error(result.message || I18N.messageSendFailed);
                 }
                 chatMessageInput.value = '';
                 await fetchChatMessages(true);
             } catch (err) {
-                alert(err.message || 'Unable to send message.');
+                alert(err.message || I18N.messageSendFailed);
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = originalHtml;
@@ -3299,6 +3367,17 @@ document.addEventListener('DOMContentLoaded', function () {
     window.addEventListener('popstate', function () {
         ajaxLoadWorkspace(window.location.href, false);
     });
+});
+
+// Each page load registers a PeerJS connection under a deterministic id
+// (booking-<id>-user-<id>). Leaving it dangling on the signaling server when the page
+// unloads/reloads means the next load's registration can collide with it (rejected as
+// "unavailable-id") until the stale one times out - starving calls right when they're needed.
+// Destroying it here frees the id immediately instead of waiting on the server's timeout.
+window.addEventListener('pagehide', function () {
+    if (workspaceState.peer && !workspaceState.peer.destroyed) {
+        workspaceState.peer.destroy();
+    }
 });
 </script>
 </body>

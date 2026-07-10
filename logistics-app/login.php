@@ -32,6 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
         flash('success', t('login.welcome_back', ['name' => $user['full_name']]));
         if ($user['role'] === 'rider') redirect_to('rider/');
+        if ($user['role'] === 'admin') redirect_to('admin/');
         redirect_to('/bookings');
     }
 }

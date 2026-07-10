@@ -30,7 +30,7 @@ function base_url(): string {
 
     $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $dir = rtrim(dirname($scriptName), '/');
-    foreach (['/bookings', '/rider'] as $suffix) {
+    foreach (['/bookings', '/rider', '/admin'] as $suffix) {
         if (str_ends_with($dir, $suffix)) {
             $dir = substr($dir, 0, -strlen($suffix));
             break;
@@ -154,7 +154,9 @@ function require_role(array $roles): void {
 function require_guest(): void {
     if (is_logged_in()) {
         $user = current_user();
-        if (($user['role'] ?? '') === 'rider') redirect_to('rider/');
+        $role = $user['role'] ?? '';
+        if ($role === 'rider') redirect_to('rider/');
+        if ($role === 'admin') redirect_to('admin/');
         redirect_to('bookings/');
     }
 }
@@ -307,4 +309,32 @@ function booking_status_label(string $status): string {
     $key = 'status.' . $status;
     $label = t($key);
     return $label !== $key ? $label : ucwords(str_replace('_', ' ', $status));
+}
+
+const RIDER_PAYOUT_SHARE = 0.85;
+
+function rider_payout_amount(float $agreedCost): float {
+    return round($agreedCost * RIDER_PAYOUT_SHARE, 2);
+}
+
+// Sum of every wallet ledger entry for a rider - earnings (positive) minus withdrawals
+// (negative) - is that rider's all-time settled balance.
+function rider_wallet_balance(PDO $pdo, int $riderUserId): float {
+    $stmt = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE rider_user_id = ?');
+    $stmt->execute([$riderUserId]);
+    return (float) $stmt->fetchColumn();
+}
+
+// Balance minus withdrawal requests still pending/processing - what the rider can actually
+// request right now, so they can't submit more than one overlapping withdrawal.
+function rider_available_balance(PDO $pdo, int $riderUserId): float {
+    $balance = rider_wallet_balance($pdo, $riderUserId);
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(amount), 0)
+        FROM withdrawal_requests
+        WHERE rider_user_id = ? AND status IN ('pending', 'processing')
+    ");
+    $stmt->execute([$riderUserId]);
+    $held = (float) $stmt->fetchColumn();
+    return $balance - $held;
 }

@@ -33,6 +33,50 @@ function badge_class(string $status): string
     };
 }
 
+// Renders every delivered-but-unconfirmed booking as its own card, independent of whatever
+// job currently occupies the "active booking" slot - a rider working a new job shouldn't lose
+// sight of an older delivery that's still waiting on a payment confirmation from them.
+function render_awaiting_confirmation_html(array $bookings): string
+{
+    if (empty($bookings)) {
+        return '';
+    }
+
+    ob_start();
+    ?>
+    <div class="mb-4">
+        <?php foreach ($bookings as $b): ?>
+            <?php $isPaid = ($b['payment_status'] ?? 'unpaid') === 'paid'; ?>
+            <div class="req-card p-3 border-warning mb-3" data-awaiting-booking-id="<?= (int) $b['id'] ?>">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                    <div>
+                        <div class="fw-bold"><?= e($b['booking_code'] ?? '') ?></div>
+                        <div class="small text-soft"><?= e($b['sender_name'] ?? '') ?></div>
+                    </div>
+                    <span class="price-tag">₦<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></span>
+                </div>
+                <div class="system-msg mb-2">
+                    <?php if (!$isPaid): ?>
+                        <i class="fa-solid fa-hourglass-half text-warning me-2"></i><?= e(t('rider.waiting_for_sender_payment', ['amount' => '₦' . number_format((float) ($b['agreed_cost'] ?? 0), 2)])) ?>
+                    <?php else: ?>
+                        <i class="fa-solid fa-circle-check text-success me-2"></i><?= e(t('rider.payment_received_notice')) ?>
+                    <?php endif; ?>
+                </div>
+                <button
+                    type="button"
+                    class="btn <?= $isPaid ? 'btn-success' : 'btn-secondary' ?> w-100 py-2 fw-bold confirm-payment-btn"
+                    <?= $isPaid ? '' : 'disabled' ?>
+                    data-booking-id="<?= (int) $b['id'] ?>"
+                >
+                    <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= e(t('rider.confirm_payment_received')) ?>
+                </button>
+            </div>
+        <?php endforeach; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
 
 
 function realtime_base_dir(): string
@@ -220,9 +264,11 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
             $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp) ?: 'audio/webm';
             $extMap = [
                 'audio/webm' => 'webm',
+                'video/webm' => 'webm', // libmagic sometimes tags an audio-only WebM container this way
                 'audio/ogg' => 'ogg',
                 'audio/mpeg' => 'mp3',
                 'audio/mp4' => 'm4a',
+                'video/mp4' => 'm4a', // Safari/iOS MediaRecorder output - MP4 ftyp doesn't imply video
                 'audio/x-m4a' => 'm4a',
                 'audio/wav' => 'wav',
                 'audio/x-wav' => 'wav',
@@ -383,16 +429,28 @@ $stmt = $pdo->prepare('
     FROM bookings b
     INNER JOIN users s ON s.id = b.sender_user_id
     WHERE b.selected_rider_user_id = ?
-      AND (
-        b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
-        OR (b.booking_status = "delivered" AND b.rider_payment_confirmed = 0)
-      )
+      AND b.booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
     ORDER BY b.id DESC
     LIMIT 1
 ');
 $stmt->execute([$user['id']]);
 $activeBooking = $stmt->fetch(PDO::FETCH_ASSOC);
-$awaitingPaymentConfirmation = $activeBooking && ($activeBooking['booking_status'] ?? '') === 'delivered';
+
+// Delivered bookings still waiting on this rider's payment-received confirmation - kept
+// separate from $activeBooking so one never hides the other from view.
+$stmt = $pdo->prepare('
+    SELECT
+        b.*,
+        s.full_name AS sender_name,
+        s.phone AS sender_phone
+    FROM bookings b
+    INNER JOIN users s ON s.id = b.sender_user_id
+    WHERE b.selected_rider_user_id = ?
+      AND b.booking_status = "delivered" AND b.rider_payment_confirmed = 0
+    ORDER BY b.id ASC
+');
+$stmt->execute([$user['id']]);
+$awaitingConfirmationBookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $pickupLat = ($activeBooking && $activeBooking['pickup_latitude'] !== null) ? (float)$activeBooking['pickup_latitude'] : null;
 $pickupLng = ($activeBooking && $activeBooking['pickup_longitude'] !== null) ? (float)$activeBooking['pickup_longitude'] : null;
@@ -609,6 +667,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <?php endif; ?>
     <?php
     $offersHtml = ob_get_clean();
+    $awaitingConfirmationHtml = render_awaiting_confirmation_html($awaitingConfirmationBookings);
+    $awaitingConfirmationSignature = sha1(json_encode(array_map(
+        fn($b) => [$b['id'], $b['payment_status']],
+        $awaitingConfirmationBookings
+    )));
 
     respond_json([
         'success' => true,
@@ -616,6 +679,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         'pending_offer_ids' => $pendingIds,
         'popup_request' => $popupRequest,
         'offers_html' => $offersHtml,
+        'awaiting_confirmation_html' => $awaitingConfirmationHtml,
+        'awaiting_confirmation_signature' => $awaitingConfirmationSignature,
         'summaries' => [
             'ongoing' => count($ongoingBookings),
             'delivered' => count($deliveredBookings),
@@ -703,6 +768,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         .order-search-wrap i { position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:#5c7a91; }
         .pill { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; background:rgba(15,42,68,.06); border:1px solid rgba(15,42,68,.10); font-size:.85rem; }
         .sticky-chat-btn { position:fixed; right:20px; bottom:20px; z-index:99999; width:60px; height:60px; border-radius:50%; border:none; background:linear-gradient(135deg,#38bdf8,#0ea5e9); color:#09101d; box-shadow:0 12px 24px rgba(0,0,0,.35); font-size:1.25rem; display:flex; align-items:center; justify-content:center; }
+        .chat-unread-badge{position:absolute;top:-4px;right:-4px;min-width:22px;height:22px;border-radius:999px;background:#ef4444;color:#fff;font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 0 0 2px #fff}
         .chat-panel { position:fixed; right:20px; bottom:90px; width:380px; max-width:calc(100vw - 24px); height:520px; max-height:72vh; z-index:100000; border-radius:1.25rem; background:rgba(255,255,255,.97); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border:1px solid rgba(15,42,68,.12); box-shadow:0 20px 40px rgba(0,0,0,.35); display:none; flex-direction:column; overflow:hidden; }
         .chat-header { padding:14px 16px; border-bottom:1px solid rgba(15,42,68,.10); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
         .chat-header-info{display:flex;align-items:center;gap:10px}
@@ -754,6 +820,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>"><?= e(t('common.brand')) ?></a>
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
             <div class="small">
                 <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
@@ -788,6 +855,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <p class="text-soft mb-0"><?= e(t('rider.dashboard_subheading')) ?></p>
         </div>
     </div>
+
+    <div id="awaiting-confirmation-wrap"><?= render_awaiting_confirmation_html($awaitingConfirmationBookings) ?></div>
 
     <?php if (!$activeBooking): ?>
     <div class="cardx p-4 mb-4" id="offers">
@@ -933,39 +1002,17 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <?= t('rider.handover_waiting_notice', ['action' => '<strong>' . e(t('rider.received_package_label')) . '</strong>']) ?>
                                 <?php endif; ?>
                             </div>
-                        <?php elseif ($awaitingPaymentConfirmation): ?>
-                            <div class="system-msg mb-3" id="payment_confirmation_notice">
-                                <?php if (($activeBooking['payment_status'] ?? 'unpaid') !== 'paid'): ?>
-                                    <i class="fa-solid fa-hourglass-half text-warning me-2"></i>
-                                    <?= e(t('rider.waiting_for_sender_payment', ['amount' => '₦' . number_format($bookingAmount, 2)])) ?>
-                                <?php else: ?>
-                                    <i class="fa-solid fa-circle-check text-success me-2"></i>
-                                    <?= e(t('rider.payment_received_notice')) ?>
-                                <?php endif; ?>
-                            </div>
                         <?php endif; ?>
 
-                        <?php if ($awaitingPaymentConfirmation): ?>
-                            <button
-                                type="button"
-                                id="btn_confirm_payment"
-                                class="btn <?= (($activeBooking['payment_status'] ?? 'unpaid') === 'paid') ? 'btn-success' : 'btn-secondary' ?> w-100 py-3 fw-bold"
-                                <?= (($activeBooking['payment_status'] ?? 'unpaid') === 'paid') ? '' : 'disabled' ?>
-                                data-booking-id="<?= (int) $activeBooking['id'] ?>"
-                            >
-                                <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= e(t('rider.confirm_payment_received')) ?>
-                            </button>
-                        <?php else: ?>
-                            <button
-                                type="button"
-                                id="btn_workflow"
-                                class="btn btn-secondary w-100 py-3 fw-bold pulse-btn"
-                                disabled
-                                data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
-                            >
-                                <?= e(t('rider.checking_location')) ?>
-                            </button>
-                        <?php endif; ?>
+                        <button
+                            type="button"
+                            id="btn_workflow"
+                            class="btn btn-secondary w-100 py-3 fw-bold pulse-btn"
+                            disabled
+                            data-sender-handover-confirmed="<?= $senderConfirmedHandover ? '1' : '0' ?>"
+                        >
+                            <?= e(t('rider.checking_location')) ?>
+                        </button>
                     </div>
                 <?php else: ?>
                     <div class="system-msg mb-0">
@@ -1007,6 +1054,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <?php if ($canChat): ?>
 <button type="button" class="sticky-chat-btn" id="open-chat-btn" title="<?= e(t('chat.open_chat_title')) ?>">
     <i class="fa-solid fa-comments"></i>
+    <span class="chat-unread-badge" id="chat-unread-badge" style="display:none">0</span>
 </button>
 
 <div class="chat-panel" id="chat-panel">
@@ -1070,7 +1118,6 @@ const dashboardRoot = document.getElementById('rider-dashboard-root');
 const onlineToggleInput = document.getElementById('online-toggle-input');
 const onlineToggleLabel = document.getElementById('online-toggle-label');
 const btnWorkflow = document.getElementById('btn_workflow');
-const btnConfirmPayment = document.getElementById('btn_confirm_payment');
 const distDisplay = document.getElementById('distance_display');
 const etaDisplay = document.getElementById('eta_display');
 const syncStatus = document.getElementById('sync_status');
@@ -1193,7 +1240,10 @@ let lastKnownPosition = null;
 let currentStatus = <?= json_encode($currentStatus) ?>;
 const bookingId = <?= $activeBooking ? (int)$activeBooking['id'] : 'null' ?>;
 let senderHandoverConfirmed = <?= json_encode($senderConfirmedHandover) ?>;
-let activePaymentStatus = <?= json_encode((string) ($activeBooking['payment_status'] ?? '')) ?>;
+let awaitingConfirmationSignature = <?= json_encode(sha1(json_encode(array_map(
+    fn($b) => [$b['id'], $b['payment_status']],
+    $awaitingConfirmationBookings
+)))) ?>;
 
 const pickup = {
     lat: <?= $pickupLat !== null ? json_encode($pickupLat) : 'null' ?>,
@@ -1657,18 +1707,19 @@ async function runWorkflowAction() {
     }
 }
 
-async function runConfirmPaymentAction() {
-    if (!bookingId || !btnConfirmPayment || btnConfirmPayment.disabled) return;
+async function runConfirmPaymentAction(btn) {
+    const targetBookingId = btn.dataset.bookingId;
+    if (!targetBookingId || btn.disabled) return;
 
-    btnConfirmPayment.disabled = true;
-    const originalHtml = btnConfirmPayment.innerHTML;
-    btnConfirmPayment.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
         const response = await fetch(safeAbsoluteUrl('rider/ajax_confirm_payment.php'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ booking_id: bookingId, csrf_token: CSRF_TOKEN })
+            body: JSON.stringify({ booking_id: targetBookingId, csrf_token: CSRF_TOKEN })
         });
 
         const data = await response.json();
@@ -1680,8 +1731,8 @@ async function runConfirmPaymentAction() {
         window.location.reload();
     } catch (err) {
         if (geoMessage) geoMessage.textContent = err.message || I18N.actionFailed;
-        btnConfirmPayment.disabled = false;
-        btnConfirmPayment.innerHTML = originalHtml;
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
     }
 }
 
@@ -1931,16 +1982,14 @@ function updateSummaryUI(data) {
         bindOfferForms();
     }
 
-    if (data.active_booking && bookingId && data.active_booking.id === Number(bookingId)) {
-        // A payment_status flip (sender just paid) changes which button/notice the
-        // delivered-but-unconfirmed card should show - that's server-rendered, so reload
-        // rather than trying to patch the payment-confirmation section in place.
-        if (currentStatus === 'delivered' && data.active_booking.payment_status !== activePaymentStatus) {
-            window.location.reload();
-            return;
-        }
-        activePaymentStatus = data.active_booking.payment_status || activePaymentStatus;
+    const awaitingWrap = document.getElementById('awaiting-confirmation-wrap');
+    if (awaitingWrap && typeof data.awaiting_confirmation_html === 'string'
+        && data.awaiting_confirmation_signature !== awaitingConfirmationSignature) {
+        awaitingConfirmationSignature = data.awaiting_confirmation_signature;
+        awaitingWrap.innerHTML = data.awaiting_confirmation_html;
+    }
 
+    if (data.active_booking && bookingId && data.active_booking.id === Number(bookingId)) {
         currentStatus = data.active_booking.status || currentStatus;
         senderHandoverConfirmed = !!data.active_booking.sender_handover_confirmed;
 
@@ -2048,6 +2097,7 @@ function initChat() {
     if (!chatEnabled) return;
 
     const openChatBtn = document.getElementById('open-chat-btn');
+    const chatUnreadBadge = document.getElementById('chat-unread-badge');
     const closeChatBtn = document.getElementById('close-chat-btn');
     const chatPanel = document.getElementById('chat-panel');
     const chatMessages = document.getElementById('chat-messages');
@@ -2093,10 +2143,45 @@ function initChat() {
 
     let chatLastMessageId = 0;
     let chatHasRenderedOnce = false;
+    let chatUnreadCount = 0;
     let mediaRecorder = null;
     let mediaChunks = [];
     let pendingIncomingCall = null;
     let lastCallSignalHash = '';
+
+    function isChatPanelOpen() {
+        return !!chatPanel && chatPanel.style.display !== 'none' && chatPanel.style.display !== '';
+    }
+
+    function updateChatUnreadBadge() {
+        if (!chatUnreadBadge) return;
+        if (chatUnreadCount > 0) {
+            chatUnreadBadge.textContent = chatUnreadCount > 99 ? '99+' : String(chatUnreadCount);
+            chatUnreadBadge.style.display = 'flex';
+        } else {
+            chatUnreadBadge.style.display = 'none';
+        }
+    }
+
+    function playChatNotificationSound() {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(660, ctx.currentTime);
+            oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            oscillator.start();
+            oscillator.stop(ctx.currentTime + 0.4);
+        } catch (e) { /* Web Audio unavailable */ }
+    }
 
     function appendChatMessages(messages, replaceAll) {
         if (!chatMessages) return;
@@ -2130,13 +2215,13 @@ function initChat() {
         chatHasRenderedOnce = true;
     }
 
-    async function fetchChatMessages(forceFull = false) {
+    async function fetchChatMessages(forceFull = false, markRead = true) {
         if (!chatBookingId || !chatFetchUrl || document.hidden) return;
 
         try {
             const sinceId = forceFull ? 0 : chatLastMessageId;
             const response = await fetch(
-                `${safeAbsoluteUrl(chatFetchUrl)}?booking_id=${encodeURIComponent(chatBookingId)}&since_id=${encodeURIComponent(sinceId)}&limit=50`,
+                `${safeAbsoluteUrl(chatFetchUrl)}?booking_id=${encodeURIComponent(chatBookingId)}&since_id=${encodeURIComponent(sinceId)}&limit=50&mark_read=${markRead ? 1 : 0}`,
                 { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
             );
 
@@ -2144,6 +2229,19 @@ function initChat() {
             const result = await response.json();
             if (response.ok && result.success) {
                 const messages = result.messages || [];
+
+                if (!markRead) {
+                    const incoming = messages.filter(msg => !msg.is_me);
+                    if (incoming.length) {
+                        chatUnreadCount += incoming.length;
+                        updateChatUnreadBadge();
+                        playChatNotificationSound();
+                    }
+                } else if (isChatPanelOpen()) {
+                    chatUnreadCount = 0;
+                    updateChatUnreadBadge();
+                }
+
                 if (forceFull || !chatHasRenderedOnce) {
                     appendChatMessages(messages, true);
                 } else if (messages.length) {
@@ -2490,6 +2588,15 @@ function initChat() {
         await fetchChatMessages(true);
     }
 
+    function pickRecorderMimeType() {
+        // new MediaRecorder(stream) with no explicit mimeType is unreliable across
+        // browsers (notably Safari/iOS, which doesn't support audio/webm at all) - probe
+        // for the first type the browser actually supports instead of hoping for a default.
+        const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/wav'];
+        if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+        return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+    }
+
     async function toggleVoiceRecording() {
         try {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -2498,13 +2605,14 @@ function initChat() {
             }
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             mediaChunks = [];
-            mediaRecorder = new MediaRecorder(stream);
+            const mimeType = pickRecorderMimeType();
+            mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
             mediaRecorder.ondataavailable = event => {
                 if (event.data && event.data.size > 0) mediaChunks.push(event.data);
             };
             mediaRecorder.onstop = async () => {
                 stream.getTracks().forEach(track => track.stop());
-                const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || mimeType || 'audio/webm' });
                 if (voiceBtn) voiceBtn.classList.remove('recording-live');
                 if (voiceBtnLabel) voiceBtnLabel.textContent = I18N.recordVoice;
                 await uploadVoiceNote(blob);
@@ -2521,33 +2629,35 @@ function initChat() {
     // Presence (and the ability to receive an incoming call) shouldn't depend on the chat
     // panel being open - the counterpart should show online as soon as this page is loaded
     // and logged in, and an incoming call should still ring even with the panel closed.
+    // The same goes for new-message notifications: poll for messages continuously so an
+    // unread badge + sound can fire even while the panel is closed (without marking those
+    // messages read until the recipient actually opens the panel and sees them).
     ensurePeerReady();
     pollCallState();
     pingPresence();
     checkPresence();
+    fetchChatMessages(true, isChatPanelOpen());
     if (!state.callPollInterval) {
         state.callPollInterval = setInterval(() => pollCallState(), 4000);
     }
     if (!state.presenceInterval) {
         state.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 8000);
     }
+    if (!state.chatInterval) {
+        state.chatInterval = setInterval(() => fetchChatMessages(false, isChatPanelOpen()), 8000);
+    }
 
     openChatBtn?.addEventListener('click', function () {
         if (!chatPanel) return;
         chatPanel.style.display = 'flex';
-        fetchChatMessages(true);
-        if (!state.chatInterval) {
-            state.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
-        }
+        chatUnreadCount = 0;
+        updateChatUnreadBadge();
+        fetchChatMessages(true, true);
     });
 
     closeChatBtn?.addEventListener('click', function () {
         if (!chatPanel) return;
         chatPanel.style.display = 'none';
-        if (state.chatInterval) {
-            clearInterval(state.chatInterval);
-            state.chatInterval = null;
-        }
     });
 
     callBtn?.addEventListener('click', function () { startInternetCall(false); });
@@ -2657,11 +2767,23 @@ if (btnWorkflow) {
     btnWorkflow.addEventListener('click', runWorkflowAction);
 }
 
-if (btnConfirmPayment) {
-    btnConfirmPayment.addEventListener('click', runConfirmPaymentAction);
-}
+document.body.addEventListener('click', function (e) {
+    const btn = e.target.closest('.confirm-payment-btn');
+    if (btn) runConfirmPaymentAction(btn);
+});
 
 initPage();
+
+// Each page load registers a PeerJS connection under a deterministic id
+// (booking-<id>-user-<id>). Leaving it dangling on the signaling server when the page
+// unloads/reloads means the next load's registration can collide with it (rejected as
+// "unavailable-id") until the stale one times out - starving calls right when they're needed.
+// Destroying it here frees the id immediately instead of waiting on the server's timeout.
+window.addEventListener('pagehide', function () {
+    if (state.peer && !state.peer.destroyed) {
+        state.peer.destroy();
+    }
+});
 
 window.addEventListener('resize', function () {
     if (state.map) {

@@ -156,6 +156,7 @@ return [
     'booking.item_already_issued' => 'Item already issued to rider.',
     'booking.book_another_rider' => 'Book Another Rider',
     'booking.cancellation_reason' => 'Cancellation Reason',
+    'booking.payment_confirmation_pending_block' => 'You can book another rider once your rider confirms they have received payment for this delivery.',
 
     // Ratings
     'rating.your_rating' => 'Your Rating',
@@ -342,6 +343,9 @@ return [
     'rider.record_voice_failed' => 'Unable to record voice note.',
     'rider.message_send_failed' => 'Unable to send message.',
     'rider.sending_ellipsis' => 'Sending...',
+    'rider.waiting_for_sender_payment' => 'Waiting for sender to pay :amount before you can close out this job.',
+    'rider.payment_received_notice' => 'Payment received. Confirm below to close out this job.',
+    'rider.confirm_payment_received' => 'Confirm Payment Received',
 
     // Rider "My Deliveries" page
     'rider.deliveries.heading' => 'My Deliveries',

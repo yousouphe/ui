@@ -12,6 +12,17 @@ $requestedBookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
 $selectedBookingId = $requestedBookingId;
 $forceWizard = isset($_GET['new']) && $_GET['new'] === '1';
 
+// A delivered booking whose rider hasn't yet confirmed receiving payment blocks the sender
+// from starting a new order - keeps the sender pointed at the one job that still needs closing.
+$stmt = $pdo->prepare("
+    SELECT id FROM bookings
+    WHERE sender_user_id = ? AND booking_status = 'delivered' AND rider_payment_confirmed = 0
+    ORDER BY id DESC LIMIT 1
+");
+$stmt->execute([$user['id']]);
+$blockingBookingRow = $stmt->fetch(PDO::FETCH_ASSOC);
+$blockingBookingId = $blockingBookingRow ? (int) $blockingBookingRow['id'] : 0;
+
 
 
 function realtime_base_dir(): string
@@ -227,6 +238,12 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
 // ---------------- CREATE BOOKING ----------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
+
+    if ($blockingBookingId > 0) {
+        flash('error', t('booking.payment_confirmation_pending_block'));
+        redirect_to('bookings/index.php?booking_id=' . $blockingBookingId);
+    }
+
     $errors = validate_required([
         'recipient_name'   => 'Recipient name',
         'recipient_phone'  => 'Recipient phone',
@@ -327,7 +344,20 @@ if (!$forceWizard) {
     }
 }
 
-$showWizard = $forceWizard || !$selectedBooking;
+// If they explicitly tried to start a new order (or landed with nothing selected) while a
+// delivered booking still needs the rider's payment confirmation, point them at that booking
+// with an explanation instead of the wizard. Viewing some other specific past booking is fine.
+if ($blockingBookingId > 0 && ($forceWizard || !$selectedBooking)) {
+    foreach ($allBookings as $b) {
+        if ((int) $b['id'] === $blockingBookingId) {
+            $selectedBooking = $b;
+            $selectedBookingId = $blockingBookingId;
+            break;
+        }
+    }
+}
+
+$showWizard = ($forceWizard || !$selectedBooking) && $blockingBookingId === 0;
 
 function haversine_distance($lat1, $lon1, $lat2, $lon2)
 {
@@ -557,6 +587,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         id="sender-workspace-content"
         data-selected-booking-id="<?= (int) $selectedBookingId ?>"
         data-selected-booking-status="<?= e((string) ($selectedBooking['booking_status'] ?? '')) ?>"
+        data-selected-payment-status="<?= e((string) ($selectedBooking['payment_status'] ?? 'unpaid')) ?>"
         data-selected-has-rider="<?= !empty($selectedBooking['selected_rider_user_id']) ? '1' : '0' ?>"
         data-needs-rider="<?= $needsRider ? '1' : '0' ?>"
         data-can-track="<?= $canTrack ? '1' : '0' ?>"
@@ -571,6 +602,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
         <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
         <?php if (!empty($errors['general'])): ?><div class="alert alert-danger"><?= e($errors['general']) ?></div><?php endif; ?>
+        <?php if ($blockingBookingId > 0): ?>
+            <div class="alert alert-warning"><i class="fa-solid fa-circle-info me-2"></i><?= e(t('booking.payment_confirmation_pending_block')) ?></div>
+        <?php endif; ?>
         <div id="alert-container"></div>
 
         <?php if ($showWizard): ?>
@@ -1149,6 +1183,35 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
 
+const STATUS_LABELS = <?= json_encode([
+    'draft' => t('status.draft'),
+    'submitted' => t('status.submitted'),
+    'matched' => t('status.matched'),
+    'accepted' => t('status.accepted'),
+    'arrived_at_pickup' => t('status.arrived_at_pickup'),
+    'package_received' => t('status.package_received'),
+    'in_transit' => t('status.in_transit'),
+    'delivered' => t('status.delivered'),
+    'cancelled' => t('status.cancelled'),
+], JSON_UNESCAPED_UNICODE) ?>;
+
+const PAYMENT_STATUS_LABELS = <?= json_encode([
+    'unpaid' => t('status.unpaid'),
+    'paid' => t('status.paid'),
+    'pending' => t('status.pending'),
+    'failed' => t('status.failed'),
+], JSON_UNESCAPED_UNICODE) ?>;
+
+function statusBadgeText(status) {
+    const key = String(status || '');
+    return STATUS_LABELS[key] || key.replaceAll('_', ' ');
+}
+
+function paymentBadgeText(status) {
+    const key = String(status || '');
+    return PAYMENT_STATUS_LABELS[key] || key.replaceAll('_', ' ');
+}
+
 const I18N = <?= json_encode([
     'tapMapToSet' => t('map.tap_to_set'),
     'calculatingRoute' => t('map.calculating_route'),
@@ -1400,6 +1463,7 @@ function initSenderWorkspace() {
 
     const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
     const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
+    const selectedPaymentStatus = root.dataset.selectedPaymentStatus || 'unpaid';
     const selectedHasRider = root.dataset.selectedHasRider === '1';
     const shouldSearchRiders = root.dataset.needsRider === '1';
     const canTrack = root.dataset.canTrack === '1';
@@ -1821,22 +1885,8 @@ function initSenderWorkspace() {
 
         if (canTrack) {
             let currentTrackTarget = null;
-
-            const bookingStatusLabels = {
-                draft: 'Draft',
-                submitted: 'Finding Rider',
-                matched: 'Rider Assigned',
-                accepted: 'Rider Heading to Pickup',
-                arrived_at_pickup: 'Rider at Pickup',
-                package_received: 'In Transit',
-                in_transit: 'In Transit',
-                delivered: 'Delivered',
-                cancelled: 'Cancelled'
-            };
-
-            function formatBookingStatus(status) {
-                return bookingStatusLabels[status] || String(status || '').replace(/_/g, ' ');
-            }
+            let trackedBookingStatus = selectedBookingStatus;
+            let trackedPaymentStatus = selectedPaymentStatus;
 
             async function pollTracking() {
                 try {
@@ -1845,11 +1895,22 @@ function initSenderWorkspace() {
                     if (!json.status) return;
 
                     const d = json.data;
+
+                    // A status/payment change can flip which action buttons, rating widget, or
+                    // payment prompt should be visible - those are server-rendered, so refresh
+                    // the whole workspace fragment rather than just patching the status text.
+                    if (d.booking_status !== trackedBookingStatus || d.payment_status !== trackedPaymentStatus) {
+                        trackedBookingStatus = d.booking_status;
+                        trackedPaymentStatus = d.payment_status;
+                        ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
+                        return;
+                    }
+
                     const bookingStatusText = root.querySelector('#booking_status_text');
                     const paymentStatusText = root.querySelector('#payment_status_text');
 
-                    if (bookingStatusText) bookingStatusText.innerText = formatBookingStatus(d.booking_status);
-                    if (paymentStatusText) paymentStatusText.innerText = d.payment_status;
+                    if (bookingStatusText) bookingStatusText.innerText = statusBadgeText(d.booking_status);
+                    if (paymentStatusText) paymentStatusText.innerText = paymentBadgeText(d.payment_status);
 
                     if (!d.rider_lat || !d.rider_lng) return;
 
@@ -1902,7 +1963,7 @@ function initSenderWorkspace() {
             }
 
             pollTracking();
-            workspaceState.trackingInterval = setInterval(() => { if (!document.hidden) pollTracking(); }, 10000);
+            workspaceState.trackingInterval = setInterval(() => { if (!document.hidden) pollTracking(); }, 4000);
         }
     }
 
@@ -2909,6 +2970,8 @@ function initSenderWorkspace() {
         }
 
         let callPanelHideTimer = null;
+        let manualHangup = false;
+        let redialAttempted = false;
 
         function finishCallUI(statusMessage) {
             stopRingback();
@@ -2924,9 +2987,30 @@ function initSenderWorkspace() {
             }, 1500);
         }
 
-        function bindActiveCall(call) {
+        // Diagnostic only - logs which candidate pair WebRTC actually picked (host/srflx/relay)
+        // so a dropped call can be told apart from a call that never used the TURN relay at all.
+        async function logActiveCandidatePair(call, label) {
+            try {
+                const stats = await call.peerConnection.getStats();
+                stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        const local = stats.get(report.localCandidateId);
+                        const remote = stats.get(report.remoteCandidateId);
+                        console.log(`Call candidate pair (${label}):`, {
+                            local: local && local.candidateType,
+                            remote: remote && remote.candidateType,
+                            bytesSent: report.bytesSent,
+                            bytesReceived: report.bytesReceived
+                        });
+                    }
+                });
+            } catch (e) { /* getStats unsupported or call already closed */ }
+        }
+
+        function bindActiveCall(call, isOutgoing) {
             if (!call) return;
             workspaceState.currentCall = call;
+            manualHangup = false;
             if (callPanelHideTimer) { clearTimeout(callPanelHideTimer); callPanelHideTimer = null; }
             if (endCallBtn) endCallBtn.style.display = '';
             let connected = false;
@@ -2938,6 +3022,8 @@ function initSenderWorkspace() {
             }, 30000);
             call.on('stream', function (remoteStream) {
                 connected = true;
+                // Deliberately not resetting redialAttempted here - caps auto-redial at one
+                // attempt per manually-placed call, even if the retry itself later drops too.
                 stopRingback();
                 clearTimeout(noAnswerTimer);
                 if (remoteAudio) remoteAudio.srcObject = remoteStream;
@@ -2945,11 +3031,20 @@ function initSenderWorkspace() {
                 if (callStatusText) callStatusText.textContent = I18N.callConnected;
                 if (acceptCallBtn) { acceptCallBtn.style.display = 'none'; acceptCallBtn.classList.remove('ringing'); }
                 startCallTimer();
+                setTimeout(() => logActiveCandidatePair(call, 'connected'), 1000);
             });
             if (call.peerConnection) {
                 call.peerConnection.addEventListener('iceconnectionstatechange', function () {
                     const state = call.peerConnection.iceConnectionState;
                     console.log('Call ICE connection state:', state);
+                    if (state === 'disconnected' || state === 'failed') {
+                        logActiveCandidatePair(call, state);
+                        // Chrome briefly reports "disconnected" during normal renegotiation/NAT
+                        // rebinding too - try an ICE restart before assuming the path is dead.
+                        if (typeof call.peerConnection.restartIce === 'function') {
+                            try { call.peerConnection.restartIce(); } catch (e) { /* not supported mid-call by this browser */ }
+                        }
+                    }
                     if (state === 'failed' && callStatusText) {
                         callStatusText.textContent = I18N.callConnectionFailed;
                     }
@@ -2959,6 +3054,17 @@ function initSenderWorkspace() {
                 clearTimeout(noAnswerTimer);
                 pendingIncomingCall = null;
                 workspaceState.currentCall = null;
+
+                // PeerJS closes the MediaConnection itself once ICE gives up. If audio was
+                // already flowing and this side placed the call, silently redial once instead
+                // of just hanging up on the user - masks a transient NAT/TURN hiccup.
+                if (connected && isOutgoing && !manualHangup && !redialAttempted) {
+                    redialAttempted = true;
+                    if (callStatusText) callStatusText.textContent = I18N.callConnecting;
+                    setTimeout(() => { startInternetCall(true); }, 1200);
+                    return;
+                }
+
                 finishCallUI(callStatusText && callStatusText.textContent === I18N.callNoAnswer ? I18N.callNoAnswer : I18N.callEnded);
             });
             call.on('error', function () {
@@ -2967,8 +3073,9 @@ function initSenderWorkspace() {
             });
         }
 
-        async function startInternetCall() {
+        async function startInternetCall(isRedial) {
             if (!chatBookingId || !chatReceiverId) return;
+            if (isRedial !== true) redialAttempted = false;
             if (!counterpartOnline) {
                 if (phoneCallLink) {
                     if (callStatusText) callStatusText.textContent = I18N.callRiderOfflinePhone;
@@ -2994,11 +3101,11 @@ function initSenderWorkspace() {
                 if (callStatusText) callStatusText.textContent = I18N.callRinging;
                 startRingback();
                 const call = peer.call(peerIdFor(chatReceiverId), localStream);
-                bindActiveCall(call);
+                bindActiveCall(call, true);
             } catch (err) {
                 console.error(err);
                 stopRingback();
-                if (callStatusText) callStatusText.textContent = err.message || 'Unable to start internet call.';
+                if (callStatusText) callStatusText.textContent = err.message || I18N.callFailed;
             }
         }
 
@@ -3008,7 +3115,7 @@ function initSenderWorkspace() {
                 stopRingback();
                 const localStream = await ensureLocalAudioStream();
                 pendingIncomingCall.answer(localStream);
-                bindActiveCall(pendingIncomingCall);
+                bindActiveCall(pendingIncomingCall, false);
                 await fetch(`${realtimeBaseUrl}?action=call_accept`, {
                     method: 'POST',
                     body: new URLSearchParams({ booking_id: chatBookingId, csrf_token: CSRF_TOKEN })
@@ -3016,11 +3123,12 @@ function initSenderWorkspace() {
                 pendingIncomingCall = null;
             } catch (err) {
                 console.error(err);
-                if (callStatusText) callStatusText.textContent = err.message || 'Unable to accept call.';
+                if (callStatusText) callStatusText.textContent = err.message || I18N.callFailed;
             }
         }
 
         async function endInternetCall() {
+            manualHangup = true;
             try {
                 if (workspaceState.currentCall) {
                     workspaceState.currentCall.close();
@@ -3037,7 +3145,7 @@ function initSenderWorkspace() {
             } catch (err) {
                 console.error(err);
             } finally {
-                finishCallUI('Call ended.');
+                finishCallUI(I18N.callEnded);
             }
         }
 
@@ -3111,22 +3219,26 @@ function initSenderWorkspace() {
             }
         }
 
+        // Presence (and the ability to receive an incoming call) shouldn't depend on the chat
+        // panel being open - the counterpart should show online as soon as this page is loaded
+        // and logged in, and an incoming call should still ring even with the panel closed.
+        ensurePeerReady();
+        pollCallState();
+        pingPresence();
+        checkPresence();
+        if (!workspaceState.callPollInterval) {
+            workspaceState.callPollInterval = setInterval(() => pollCallState(), 4000);
+        }
+        if (!workspaceState.presenceInterval) {
+            workspaceState.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 8000);
+        }
+
         openChatBtn?.addEventListener('click', function () {
             if (!chatPanel) return;
             chatPanel.style.display = 'flex';
             fetchChatMessages(true);
-            ensurePeerReady();
-            pollCallState();
-            pingPresence();
-            checkPresence();
             if (!workspaceState.chatInterval) {
                 workspaceState.chatInterval = setInterval(() => fetchChatMessages(false), 8000);
-            }
-            if (!workspaceState.callPollInterval) {
-                workspaceState.callPollInterval = setInterval(() => pollCallState(), 4000);
-            }
-            if (!workspaceState.presenceInterval) {
-                workspaceState.presenceInterval = setInterval(() => { pingPresence(); checkPresence(); }, 12000);
             }
         });
 
@@ -3137,13 +3249,9 @@ function initSenderWorkspace() {
                 clearInterval(workspaceState.chatInterval);
                 workspaceState.chatInterval = null;
             }
-            if (workspaceState.presenceInterval) {
-                clearInterval(workspaceState.presenceInterval);
-                workspaceState.presenceInterval = null;
-            }
         });
 
-        callBtn?.addEventListener('click', startInternetCall);
+        callBtn?.addEventListener('click', function () { startInternetCall(false); });
         acceptCallBtn?.addEventListener('click', acceptInternetCall);
         endCallBtn?.addEventListener('click', endInternetCall);
         voiceBtn?.addEventListener('click', toggleVoiceRecording);

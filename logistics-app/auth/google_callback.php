@@ -114,6 +114,9 @@ try {
         redirect_to('login');
     }
 
+    // Same reasoning as login.php/register.php - rotate the session ID before this
+    // session becomes authenticated.
+    session_regenerate_id(true);
     $_SESSION['user'] = [
         'id' => (int)$dbUser['id'],
         'full_name' => $dbUser['full_name'],

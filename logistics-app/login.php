@@ -23,6 +23,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($user['status'] !== 'active') {
         $error = t('login.error.inactive');
     } else {
+        // Rotate the session ID on every login so a session ID that existed before
+        // authentication (e.g. fixed by an attacker, or left over from a previous
+        // role on a shared device) can never be reused to inherit this login.
+        session_regenerate_id(true);
         $_SESSION['user'] = [
             'id' => (int)$user['id'],
             'full_name' => $user['full_name'],

@@ -353,3 +353,12 @@ function rider_available_balance(PDO $pdo, int $riderUserId): float {
     $held = (float) $stmt->fetchColumn();
     return $balance - $held;
 }
+
+// Active admin accounts to notify for events that need their attention (new KYC, new
+// withdrawal request, new complaint) - "accountability" means every admin sees every event,
+// not just whoever happens to be online when it happens.
+function admin_emails(PDO $pdo): array {
+    $stmt = $pdo->prepare("SELECT full_name, email FROM users WHERE role = 'admin' AND status = 'active'");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}

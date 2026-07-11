@@ -12,6 +12,7 @@ return [
     'common.loading' => 'Ana lodawa...',
     'common.logout' => 'Fita',
     'common.brand' => 'SwiftDrop',
+    'common.or' => 'ko',
 
     // Nav
     'nav.my_orders' => 'Odina',
@@ -34,6 +35,9 @@ return [
     'status.failed' => 'Ya Kasa',
     'status.rejected' => 'An Ƙi',
     'status.processing' => 'Ana Aiwatarwa',
+    'status.open' => 'A Buɗe',
+    'status.reviewing' => 'Ana Bitarwa',
+    'status.resolved' => 'An Warware',
 
     // Dashboard (My Orders)
     'dashboard.title' => 'Odina | SwiftDrop',
@@ -71,6 +75,8 @@ return [
     'login.submit' => 'Shiga',
     'login.no_account' => 'Ba ku da asusu?',
     'login.register_link' => 'Yi Rijista',
+    'login.forgot_password' => 'Kun manta kalmar sirri?',
+    'login.google_signin' => 'Shiga da Google',
 
     // Register
     'register.title' => 'Yi Rijista',
@@ -81,7 +87,10 @@ return [
     'register.error.password_length' => 'Kalmar sirri dole ta kai akalla haruffa 6.',
     'register.error.password_mismatch' => 'Kalmomin sirri ba su dace ba.',
     'register.error.email_exists' => 'Wannan imel yana nan a rijista.',
+    'register.error.vehicle_plate_required' => 'Shigar da lambar farantin abin hawanku.',
+    'register.error.kyc_document_required' => 'Loda hoton takardar shaidarku.',
     'register.success' => 'An yi rijista cikin nasara.',
+    'register.success_rider' => 'An yi rijista cikin nasara. Ana bitar takardunku.',
     'register.full_name_label' => 'Cikakken suna',
     'register.phone_label' => 'Lambar waya',
     'register.email_label' => 'Imel',
@@ -95,6 +104,42 @@ return [
     'register.feature.3' => 'Ajiye tarihin odar mai turawa',
     'register.feature.4' => 'Shirya bayanai don daidaita direba a Module 2',
     'register.back_home' => 'Koma gida',
+    'register.google_signup' => 'Yi rijista da Google',
+    'register.account_type_sender' => 'Mai Turawa',
+    'register.account_type_rider' => 'Direba',
+    'register.vehicle_type_label' => 'Nau\'in abin hawa',
+    'register.vehicle_plate_label' => 'Lambar farantin abin hawa',
+    'register.kyc_document_label' => 'Takardar shaida',
+    'register.kyc_document_hint' => 'Loda hoto mai kyau na takardar shaida mai inganci (JPG, PNG ko WEBP, matsakaicin 5MB). Ƙungiyarmu za ta bita kafin ku iya shiga kan layi.',
+
+    // Vehicle types
+    'vehicle.bike' => 'Babur',
+    'vehicle.car' => 'Mota',
+    'vehicle.van' => 'Bas',
+
+    // Forgot / reset password
+    'forgot_password.title' => 'Manta Kalmar Sirri',
+    'forgot_password.heading' => 'Sake Saita Kalmar Sirrinku',
+    'forgot_password.subheading' => 'Shigar da imel na asusunku kuma za mu turo muku hanyar sake saitawa.',
+    'forgot_password.submit' => 'Aika Hanyar Sake Saitawa',
+    'forgot_password.success' => 'Idan asusu ya wanzu da wannan imel, an tura hanyar sake saitawa.',
+    'reset_password.title' => 'Sake Saita Kalmar Sirri',
+    'reset_password.heading' => 'Zaɓi sabuwar kalmar sirri',
+    'reset_password.subheading' => 'Sannu :name, shigar da sabuwar kalmar sirrinku a ƙasa.',
+    'reset_password.submit' => 'Sabunta Kalmar Sirri',
+    'reset_password.success' => 'An sabunta kalmar sirrinku. Yanzu za ku iya shiga.',
+    'reset_password.error.invalid_token' => 'Wannan hanyar sake saitawa ba ta inganci ba ce ko ta ƙare.',
+
+    // Complete profile (Google sign-up)
+    'complete_profile.title' => 'Kammala Bayananku',
+    'complete_profile.heading' => 'Wani mataki',
+    'complete_profile.subheading' => 'Ƙara lambar wayarku don kammala saita asusunku.',
+    'complete_profile.submit' => 'Ajiye kuma Ci gaba',
+    'complete_profile.success' => 'An kammala bayanan martaba.',
+
+    // Google OAuth
+    'auth.google_not_configured' => 'Shiga da Google ba ya samuwa a yanzu.',
+    'auth.google_failed' => 'Ba a iya shiga da Google ba. Da fatan za a sake gwadawa ko amfani da imel da kalmar sirri.',
 
     // Booking wizard
     'wizard.step1.label' => 'Adireshi',
@@ -283,6 +328,10 @@ return [
     'rider.you_are_online' => 'Kuna Kan Layi',
     'rider.you_are_offline' => 'Ba Ku Kan Layi Ba',
     'rider.go_online_hint' => 'Kunna kasancewa a kan layi don fara samun tayin isar da kaya',
+    'rider.kyc_pending_banner' => 'Ƙungiyarmu tana bitar takardunku. Za ku iya shiga kan layi bayan an amince da su.',
+    'rider.kyc_rejected_banner' => 'Ba a amince da rijistar direban ku ba.',
+    'rider.kyc_required_hint' => 'Ana buƙatar amincewa kafin ku iya shiga kan layi.',
+    'rider.kyc_not_approved' => 'Ba a amince da rijistar direban ku ba tukuna.',
     'rider.navigate' => 'YI TUƘI',
     'rider.booking_label' => 'Oda',
     'rider.sender_label' => 'Mai Turawa',
@@ -435,4 +484,39 @@ return [
     'admin.marked_paid' => 'An yi alama an biya kuma an cire kuɗi daga asusun direba.',
     'admin.marked_rejected' => 'An ƙi buƙatar cirewa.',
     'admin.withdrawal_process_failed' => 'An kasa aiwatar da wannan cirewa.',
+    'admin.nav_withdrawals' => 'Cirewa',
+    'admin.nav_riders' => 'Direbobi',
+    'admin.nav_complaints' => 'Ƙorafi',
+
+    // Admin - riders & KYC
+    'admin.riders_heading' => 'Direbobi',
+    'admin.pending_kyc_heading' => 'Bitar KYC da Ake Jira',
+    'admin.no_pending_kyc' => 'Babu direbobin da ke jiran bitar KYC.',
+    'admin.all_riders_heading' => 'Duk Direbobi',
+    'admin.no_riders' => 'Babu direbobin da aka yi wa rijista tukuna.',
+    'admin.approve_kyc' => 'Amince',
+    'admin.reject_kyc' => 'Ƙi',
+    'admin.kyc_approved' => 'An amince da direba. Yanzu zai iya shiga kan layi.',
+    'admin.kyc_rejected' => 'An ƙi rijistar direba.',
+    'admin.kyc_document_alt' => 'Takardar shaida',
+    'admin.rider_not_found' => 'Ba a sami direba ba.',
+    'admin.suspend_rider' => 'Dakatar',
+    'admin.activate_rider' => 'Kunna',
+    'admin.rider_suspended' => 'An dakatar da asusun direba.',
+    'admin.rider_activated' => 'An kunna asusun direba.',
+    'admin.suspended_badge' => 'An Dakatar',
+    'admin.rating_label' => 'Kimantawa',
+    'admin.completed_deliveries_label' => 'An Kammala',
+    'admin.complaints_label' => 'Ƙorafi',
+
+    // Admin - complaints
+    'admin.complaints_heading' => 'Ƙorafi',
+    'admin.no_complaints' => 'Babu ƙorafin da aka bayar.',
+    'admin.complaint_from_label' => 'Daga',
+    'admin.complaint_rider_label' => 'Direba',
+    'admin.complaint_not_found' => 'Ba a sami ƙorafi ba.',
+    'admin.complaint_updated' => 'An sabunta ƙorafi.',
+    'admin.invalid_status' => 'Da fatan za a zaɓi matsayi mai inganci.',
+    'admin.admin_note_label' => 'Bayani',
+    'admin.admin_note_placeholder' => 'Ƙara bayani (zaɓi)',
 ];

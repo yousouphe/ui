@@ -30,7 +30,7 @@ function base_url(): string {
 
     $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $dir = rtrim(dirname($scriptName), '/');
-    foreach (['/bookings', '/rider', '/admin'] as $suffix) {
+    foreach (['/bookings', '/rider', '/admin', '/auth', '/payments', '/chat'] as $suffix) {
         if (str_ends_with($dir, $suffix)) {
             $dir = substr($dir, 0, -strlen($suffix));
             break;
@@ -140,6 +140,13 @@ function current_user(): ?array {
 
 function require_auth(): void {
     if (!is_logged_in()) redirect_to('login');
+    $user = current_user();
+    $requestPath = (string)(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '');
+    $currentPage = basename(rtrim($requestPath, '/'));
+    $isCompleteProfilePage = in_array($currentPage, ['complete-profile', 'complete-profile.php'], true);
+    if ((int)($user['profile_completed'] ?? 1) === 0 && !$isCompleteProfilePage) {
+        redirect_to('complete-profile');
+    }
 }
 
 function require_role(array $roles): void {
@@ -188,25 +195,33 @@ function validate_required(array $fields, array $source): array {
     return $errors;
 }
 
-function save_item_image(array $file): ?string {
+function save_uploaded_image(array $file, string $subdir, string $prefix, string $errorLabel): ?string {
     if (empty($file['name']) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
         return null;
     }
     if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Item image upload failed.');
+        throw new RuntimeException($errorLabel . ' upload failed.');
     }
     $allowed = ['image/jpeg'=>'jpg', 'image/png'=>'png', 'image/webp'=>'webp'];
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($file['tmp_name']) ?: '';
     if (!isset($allowed[$mime])) throw new RuntimeException('Only JPG, PNG and WEBP are allowed.');
-    if (($file['size'] ?? 0) > 5 * 1024 * 1024) throw new RuntimeException('Image must not exceed 5MB.');
+    if (($file['size'] ?? 0) > 5 * 1024 * 1024) throw new RuntimeException($errorLabel . ' must not exceed 5MB.');
 
-    $name = 'item_' . date('Ymd_His') . '_' . bin2hex(random_bytes(5)) . '.' . $allowed[$mime];
-    $dir = dirname(__DIR__) . '/uploads/items';
+    $name = $prefix . '_' . date('Ymd_His') . '_' . bin2hex(random_bytes(5)) . '.' . $allowed[$mime];
+    $dir = dirname(__DIR__) . '/uploads/' . $subdir;
     if (!is_dir($dir)) mkdir($dir, 0775, true);
     $dest = $dir . '/' . $name;
-    if (!move_uploaded_file($file['tmp_name'], $dest)) throw new RuntimeException('Failed to move uploaded image.');
-    return 'uploads/items/' . $name;
+    if (!move_uploaded_file($file['tmp_name'], $dest)) throw new RuntimeException('Failed to move uploaded ' . strtolower($errorLabel) . '.');
+    return 'uploads/' . $subdir . '/' . $name;
+}
+
+function save_item_image(array $file): ?string {
+    return save_uploaded_image($file, 'items', 'item', 'Item image');
+}
+
+function save_kyc_document(array $file): ?string {
+    return save_uploaded_image($file, 'kyc', 'kyc', 'ID document');
 }
 
 

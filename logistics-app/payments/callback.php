@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_auth();
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $config = require __DIR__ . '/../config/env.php';
 $user = current_user();
@@ -34,11 +35,12 @@ if ($secretKey === '') {
 
 try {
     $stmt = $pdo->prepare("
-        SELECT 
+        SELECT
             bp.*,
             b.id AS booking_id,
             b.sender_user_id,
             b.booking_code,
+            b.item_name,
             b.payment_status AS booking_payment_status,
             b.agreed_cost
         FROM booking_payments bp
@@ -141,6 +143,12 @@ try {
     if ($pdo->inTransaction()) {
         $pdo->commit();
     }
+
+    send_transaction_receipt_email($user['email'], $user['full_name'], [
+        'booking_code' => $payment['booking_code'],
+        'item_name' => $payment['item_name'],
+        'agreed_cost' => $payment['agreed_cost'],
+    ], $reference);
 
     flash('success', 'Payment verified successfully.');
     go_to('/bookings/index.php?booking_id=' . (int)$payment['booking_id']);

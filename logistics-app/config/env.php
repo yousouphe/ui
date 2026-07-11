@@ -18,4 +18,17 @@ return [
     // Not wired into any code path yet; reserved for future server-side Mapbox calls
     // (e.g. Directions/Optimization API during the routing-audit phase).
     'mapbox_secret_token' => 'REDACTED_MAPBOX_SECRET_TOKEN',
+    // SMTP credentials for transactional email (registration, receipts, password reset).
+    'smtp_host' => 'REDACTED_SMTP_HOST',
+    'smtp_port' => 587,
+    'smtp_secure' => 'tls',
+    'smtp_user' => 'REDACTED_SMTP_USER',
+    'smtp_pass' => 'REDACTED_SMTP_PASSWORD',
+    'smtp_from_email' => 'REDACTED_SMTP_FROM_EMAIL',
+    'smtp_from_name' => 'SwiftDrop Logistics',
+    // Google OAuth 2.0 (sign in / sign up with Google). Create credentials at
+    // https://console.cloud.google.com/apis/credentials with the redirect URI
+    // set to {app_url}/auth/google_callback.php
+    'google_client_id' => 'REDACTED_GOOGLE_CLIENT_ID',
+    'google_client_secret' => 'REDACTED_GOOGLE_CLIENT_SECRET',
 ];

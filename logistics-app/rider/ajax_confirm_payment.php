@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 header('Content-Type: application/json');
 
@@ -18,9 +19,11 @@ if ($bookingId <= 0) {
 $user = current_user();
 
 $stmt = $pdo->prepare('
-    SELECT id, booking_code, booking_status, payment_status, rider_payment_confirmed, agreed_cost
-    FROM bookings
-    WHERE id = ? AND selected_rider_user_id = ?
+    SELECT b.id, b.booking_code, b.booking_status, b.payment_status, b.rider_payment_confirmed, b.agreed_cost,
+           b.item_name, b.sender_user_id, s.full_name AS sender_full_name, s.email AS sender_email
+    FROM bookings b
+    INNER JOIN users s ON s.id = b.sender_user_id
+    WHERE b.id = ? AND b.selected_rider_user_id = ?
     LIMIT 1
 ');
 $stmt->execute([$bookingId, $user['id']]);
@@ -78,5 +81,11 @@ try {
     echo json_encode(['success' => false, 'message' => 'Unable to confirm payment: ' . $e->getMessage()]);
     exit;
 }
+
+send_order_completion_email($booking['sender_email'], $booking['sender_full_name'], [
+    'booking_code' => $booking['booking_code'],
+    'item_name' => $booking['item_name'],
+    'agreed_cost' => $booking['agreed_cost'],
+]);
 
 echo json_encode(['success' => true, 'message' => 'Payment confirmed. Job closed out.']);

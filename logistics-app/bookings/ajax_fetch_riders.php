@@ -42,8 +42,9 @@ $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
         FROM users u
         INNER JOIN rider_profiles rp ON rp.user_id = u.id
         WHERE u.role = 'rider' 
-          AND u.status = 'active' 
+          AND u.status = 'active'
           AND rp.availability_status = 'available'
+          AND rp.kyc_status = 'approved'
           AND rp.last_location_updated_at > NOW() - INTERVAL 90 MINUTE
           AND NOT EXISTS (
               SELECT 1 FROM bookings b 

@@ -9,6 +9,7 @@ return [
     'common.loading' => 'Loading...',
     'common.logout' => 'Logout',
     'common.brand' => 'SwiftDrop',
+    'common.or' => 'or',
 
     // Nav
     'nav.my_orders' => 'My Orders',
@@ -31,6 +32,9 @@ return [
     'status.failed' => 'Failed',
     'status.rejected' => 'Rejected',
     'status.processing' => 'Processing',
+    'status.open' => 'Open',
+    'status.reviewing' => 'Reviewing',
+    'status.resolved' => 'Resolved',
 
     // Dashboard (My Orders)
     'dashboard.title' => 'My Orders | SwiftDrop',
@@ -68,6 +72,8 @@ return [
     'login.submit' => 'Login',
     'login.no_account' => "Don't have an account?",
     'login.register_link' => 'Register',
+    'login.forgot_password' => 'Forgot password?',
+    'login.google_signin' => 'Sign in with Google',
 
     // Register
     'register.title' => 'Register',
@@ -78,7 +84,10 @@ return [
     'register.error.password_length' => 'Password must be at least 6 characters.',
     'register.error.password_mismatch' => 'Passwords do not match.',
     'register.error.email_exists' => 'That email already exists.',
+    'register.error.vehicle_plate_required' => 'Enter your vehicle plate number.',
+    'register.error.kyc_document_required' => 'Upload a photo of your ID document.',
     'register.success' => 'Registration successful.',
+    'register.success_rider' => 'Registration successful. Your documents are pending review.',
     'register.full_name_label' => 'Full name',
     'register.phone_label' => 'Phone',
     'register.email_label' => 'Email',
@@ -92,6 +101,42 @@ return [
     'register.feature.3' => 'Store sender booking history',
     'register.feature.4' => 'Prepare records for rider matching in Module 2',
     'register.back_home' => 'Back home',
+    'register.google_signup' => 'Sign up with Google',
+    'register.account_type_sender' => 'Sender',
+    'register.account_type_rider' => 'Rider',
+    'register.vehicle_type_label' => 'Vehicle type',
+    'register.vehicle_plate_label' => 'Vehicle plate number',
+    'register.kyc_document_label' => 'ID document',
+    'register.kyc_document_hint' => 'Upload a clear photo of a valid ID (JPG, PNG or WEBP, max 5MB). Our team will review it before you can go online.',
+
+    // Vehicle types
+    'vehicle.bike' => 'Bike',
+    'vehicle.car' => 'Car',
+    'vehicle.van' => 'Van',
+
+    // Forgot / reset password
+    'forgot_password.title' => 'Forgot Password',
+    'forgot_password.heading' => 'Reset your password',
+    'forgot_password.subheading' => "Enter your account email and we'll send you a reset link.",
+    'forgot_password.submit' => 'Send Reset Link',
+    'forgot_password.success' => 'If an account exists for that email, a reset link has been sent.',
+    'reset_password.title' => 'Reset Password',
+    'reset_password.heading' => 'Choose a new password',
+    'reset_password.subheading' => 'Hi :name, enter your new password below.',
+    'reset_password.submit' => 'Update Password',
+    'reset_password.success' => 'Your password has been updated. You can now log in.',
+    'reset_password.error.invalid_token' => 'This reset link is invalid or has expired.',
+
+    // Complete profile (Google sign-up)
+    'complete_profile.title' => 'Complete Your Profile',
+    'complete_profile.heading' => 'One more step',
+    'complete_profile.subheading' => 'Add your phone number to finish setting up your account.',
+    'complete_profile.submit' => 'Save and Continue',
+    'complete_profile.success' => 'Profile completed.',
+
+    // Google OAuth
+    'auth.google_not_configured' => 'Google sign-in is not available right now.',
+    'auth.google_failed' => 'Could not sign in with Google. Please try again or use your email and password.',
 
     // Booking wizard
     'wizard.step1.label' => 'Addresses',
@@ -280,6 +325,10 @@ return [
     'rider.you_are_online' => 'You are Online',
     'rider.you_are_offline' => 'You are Offline',
     'rider.go_online_hint' => 'Go online to start receiving delivery offers',
+    'rider.kyc_pending_banner' => 'Your documents are being reviewed by our team. You will be able to go online once approved.',
+    'rider.kyc_rejected_banner' => 'Your rider registration was not approved.',
+    'rider.kyc_required_hint' => 'Approval is required before you can go online.',
+    'rider.kyc_not_approved' => 'Your rider registration has not been approved yet.',
     'rider.navigate' => 'NAVIGATE',
     'rider.booking_label' => 'Booking',
     'rider.sender_label' => 'Sender',
@@ -432,4 +481,39 @@ return [
     'admin.marked_paid' => 'Marked as paid and the rider\'s wallet has been debited.',
     'admin.marked_rejected' => 'Withdrawal request rejected.',
     'admin.withdrawal_process_failed' => 'Unable to process this withdrawal.',
+    'admin.nav_withdrawals' => 'Withdrawals',
+    'admin.nav_riders' => 'Riders',
+    'admin.nav_complaints' => 'Complaints',
+
+    // Admin - riders & KYC
+    'admin.riders_heading' => 'Riders',
+    'admin.pending_kyc_heading' => 'Pending KYC Review',
+    'admin.no_pending_kyc' => 'No riders waiting on KYC review.',
+    'admin.all_riders_heading' => 'All Riders',
+    'admin.no_riders' => 'No riders registered yet.',
+    'admin.approve_kyc' => 'Approve',
+    'admin.reject_kyc' => 'Reject',
+    'admin.kyc_approved' => 'Rider approved. They can now go online.',
+    'admin.kyc_rejected' => 'Rider registration rejected.',
+    'admin.kyc_document_alt' => 'ID document',
+    'admin.rider_not_found' => 'Rider not found.',
+    'admin.suspend_rider' => 'Suspend',
+    'admin.activate_rider' => 'Activate',
+    'admin.rider_suspended' => 'Rider account suspended.',
+    'admin.rider_activated' => 'Rider account activated.',
+    'admin.suspended_badge' => 'Suspended',
+    'admin.rating_label' => 'Rating',
+    'admin.completed_deliveries_label' => 'Completed',
+    'admin.complaints_label' => 'Complaints',
+
+    // Admin - complaints
+    'admin.complaints_heading' => 'Complaints',
+    'admin.no_complaints' => 'No complaints have been reported.',
+    'admin.complaint_from_label' => 'From',
+    'admin.complaint_rider_label' => 'Rider',
+    'admin.complaint_not_found' => 'Complaint not found.',
+    'admin.complaint_updated' => 'Complaint updated.',
+    'admin.invalid_status' => 'Please choose a valid status.',
+    'admin.admin_note_label' => 'Note',
+    'admin.admin_note_placeholder' => 'Add a note (optional)',
 ];

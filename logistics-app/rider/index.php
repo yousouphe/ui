@@ -596,7 +596,7 @@ $totalExpectedOverall = sum_amount($deliveredEarningRows);
 
 // ---------------- PROFILE ----------------
 $stmt = $pdo->prepare('
-    SELECT availability_status, last_latitude, last_longitude
+    SELECT availability_status, last_latitude, last_longitude, kyc_status, kyc_note
     FROM rider_profiles
     WHERE user_id = ?
     LIMIT 1
@@ -605,6 +605,8 @@ $stmt->execute([$user['id']]);
 $profile = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $isOnline = ($profile['availability_status'] ?? 'offline') === 'available';
+$kycStatus = $profile['kyc_status'] ?? 'approved';
+$kycApproved = $kycStatus === 'approved';
 // Fall back to Nigeria's geographic centroid (not any specific city) when a rider has no saved fix yet.
 $initialLat = isset($profile['last_latitude']) ? (float)$profile['last_latitude'] : 9.0820;
 $initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitude'] : 8.6753;
@@ -948,14 +950,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                     <?php endif; ?>
                 </div>
 
+                <?php if ($kycStatus === 'pending'): ?>
+                    <div class="alert alert-warning border-0 mb-3"><?= e(t('rider.kyc_pending_banner')) ?></div>
+                <?php elseif ($kycStatus === 'rejected'): ?>
+                    <div class="alert alert-danger border-0 mb-3">
+                        <?= e(t('rider.kyc_rejected_banner')) ?>
+                        <?php if (!empty($profile['kyc_note'])): ?><div class="small mt-1"><?= e($profile['kyc_note']) ?></div><?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
                 <div class="online-toggle-row mb-4">
                     <label class="online-toggle">
-                        <input type="checkbox" id="online-toggle-input" <?= $isOnline ? 'checked' : '' ?> onchange="toggleStatus()">
+                        <input type="checkbox" id="online-toggle-input" <?= $isOnline ? 'checked' : '' ?> <?= $kycApproved ? '' : 'disabled' ?> onchange="toggleStatus()">
                         <span class="online-toggle-slider"></span>
                     </label>
                     <div>
                         <div class="fw-bold" id="online-toggle-label"><?= e($isOnline ? t('rider.you_are_online') : t('rider.you_are_offline')) ?></div>
-                        <div class="small text-soft"><?= e(t('rider.go_online_hint')) ?></div>
+                        <div class="small text-soft"><?= e($kycApproved ? t('rider.go_online_hint') : t('rider.kyc_required_hint')) ?></div>
                     </div>
                 </div>
 

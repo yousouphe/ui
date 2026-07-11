@@ -3,12 +3,13 @@ require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
+require_once __DIR__ . '/../config/paystack.php';
 
 $user = current_user();
 $success = flash('success');
 $error = flash('error');
 
-$stmt = $pdo->prepare('SELECT bank_name, account_number, account_name FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
+$stmt = $pdo->prepare('SELECT bank_name, bank_code, account_number, account_name, verified_at FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
 $stmt->execute([$user['id']]);
 $bankAccount = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -17,21 +18,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $formAction = (string) ($_POST['form_action'] ?? '');
 
     if ($formAction === 'save_bank_account') {
-        $bankName = trim((string) ($_POST['bank_name'] ?? ''));
+        $bankCode = trim((string) ($_POST['bank_code'] ?? ''));
         $accountNumber = trim((string) ($_POST['account_number'] ?? ''));
-        $accountName = trim((string) ($_POST['account_name'] ?? ''));
 
-        if ($bankName === '' || $accountNumber === '' || $accountName === '') {
+        if ($bankCode === '' || $accountNumber === '') {
             flash('error', t('wallet.bank_details_required'));
-        } else {
-            $stmt = $pdo->prepare('
-                INSERT INTO rider_bank_accounts (rider_user_id, bank_name, account_number, account_name)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE bank_name = VALUES(bank_name), account_number = VALUES(account_number), account_name = VALUES(account_name)
-            ');
-            $stmt->execute([$user['id'], $bankName, $accountNumber, $accountName]);
-            flash('success', t('wallet.bank_details_saved'));
+            redirect_to('rider/wallet');
         }
+
+        if (!ctype_digit($accountNumber)) {
+            flash('error', t('wallet.account_number_invalid'));
+            redirect_to('rider/wallet');
+        }
+
+        $bankStmt = $pdo->prepare('SELECT name FROM paystack_banks WHERE code = ? LIMIT 1');
+        $bankStmt->execute([$bankCode]);
+        $bankName = (string) ($bankStmt->fetchColumn() ?: '');
+        if ($bankName === '') {
+            flash('error', t('wallet.invalid_bank_selected'));
+            redirect_to('rider/wallet');
+        }
+
+        // Authoritative check happens here regardless of what the client-side "Verify"
+        // button showed - the resolved name from Paystack is what gets saved, never
+        // whatever the rider might have typed.
+        $verifyResult = paystack_resolve_account($accountNumber, $bankCode);
+        if (!$verifyResult['ok']) {
+            flash('error', t('wallet.account_verification_failed') . ' ' . ($verifyResult['message'] ?: ''));
+            redirect_to('rider/wallet');
+        }
+
+        $stmt = $pdo->prepare('
+            INSERT INTO rider_bank_accounts (rider_user_id, bank_name, bank_code, account_number, account_name, verified_at, paystack_recipient_code)
+            VALUES (?, ?, ?, ?, ?, NOW(), NULL)
+            ON DUPLICATE KEY UPDATE
+                bank_name = VALUES(bank_name), bank_code = VALUES(bank_code),
+                account_number = VALUES(account_number), account_name = VALUES(account_name),
+                verified_at = VALUES(verified_at), paystack_recipient_code = NULL
+        ');
+        $stmt->execute([$user['id'], $bankName, $bankCode, $accountNumber, $verifyResult['account_name']]);
+        flash('success', t('wallet.bank_details_saved'));
         redirect_to('rider/wallet');
     }
 
@@ -39,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $amount = (float) ($_POST['amount'] ?? 0);
         $available = rider_available_balance($pdo, (int) $user['id']);
 
-        if (!$bankAccount) {
+        if (!$bankAccount || empty($bankAccount['bank_code']) || empty($bankAccount['verified_at'])) {
             flash('error', t('wallet.add_bank_details_first'));
         } elseif ($amount <= 0) {
             flash('error', t('wallet.invalid_withdrawal_amount'));
@@ -47,13 +73,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', t('wallet.withdrawal_exceeds_balance'));
         } else {
             $stmt = $pdo->prepare('
-                INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, account_number, account_name, status)
-                VALUES (?, ?, ?, ?, ?, "pending")
+                INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status)
+                VALUES (?, ?, ?, ?, ?, ?, "pending")
             ');
             $stmt->execute([
                 $user['id'],
                 $amount,
                 $bankAccount['bank_name'],
+                $bankAccount['bank_code'],
                 $bankAccount['account_number'],
                 $bankAccount['account_name'],
             ]);
@@ -65,6 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to('rider/wallet');
     }
 }
+
+$banks = paystack_banks_list($pdo);
 
 $availableBalance = rider_available_balance($pdo, (int) $user['id']);
 
@@ -231,21 +260,31 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="col-lg-6">
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3"><?= e(t('wallet.bank_details_heading')) ?></h2>
-                <form method="post">
+                <form method="post" id="bank-details-form">
                     <?= csrf_field() ?>
                     <input type="hidden" name="form_action" value="save_bank_account">
                     <div class="mb-3">
                         <label class="form-label"><?= e(t('wallet.bank_name_label')) ?></label>
-                        <input class="form-control" name="bank_name" value="<?= e($bankAccount['bank_name'] ?? '') ?>" required>
+                        <select class="form-select" name="bank_code" id="bank-code-select" required>
+                            <option value=""><?= e(t('wallet.bank_select_placeholder')) ?></option>
+                            <?php foreach ($banks as $b): ?>
+                                <option value="<?= e((string) $b['code']) ?>" <?= (string) ($bankAccount['bank_code'] ?? '') === (string) $b['code'] ? 'selected' : '' ?>><?= e((string) $b['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php if (empty($banks)): ?><div class="small text-danger mt-1"><?= e(t('wallet.bank_list_unavailable')) ?></div><?php endif; ?>
                     </div>
                     <div class="mb-3">
                         <label class="form-label"><?= e(t('wallet.account_number_label')) ?></label>
-                        <input class="form-control" name="account_number" value="<?= e($bankAccount['account_number'] ?? '') ?>" required>
+                        <input class="form-control" name="account_number" id="account-number-input" value="<?= e($bankAccount['account_number'] ?? '') ?>" maxlength="10" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label"><?= e(t('wallet.account_name_label')) ?></label>
-                        <input class="form-control" name="account_name" value="<?= e($bankAccount['account_name'] ?? '') ?>" required>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="verify-account-btn"><?= e(t('wallet.verify_account_button')) ?></button>
+                        <div id="verify-result" class="small mt-2"></div>
                     </div>
+                    <?php if (!empty($bankAccount['account_name']) && !empty($bankAccount['verified_at'])): ?>
+                        <div class="small text-soft mb-3"><?= e(t('wallet.verified_account_name_label')) ?>: <strong><?= e((string) $bankAccount['account_name']) ?></strong></div>
+                    <?php endif; ?>
+                    <p class="small text-soft"><?= e(t('wallet.verify_first_hint')) ?></p>
                     <button class="btn btn-primary fw-bold" type="submit"><?= e(t('wallet.save_bank_details')) ?></button>
                 </form>
             </div>
@@ -254,7 +293,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="col-lg-6">
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3"><?= e(t('wallet.request_withdrawal_heading')) ?></h2>
-                <?php if (!$bankAccount): ?>
+                <?php if (!$bankAccount || empty($bankAccount['bank_code']) || empty($bankAccount['verified_at'])): ?>
                     <div class="text-soft"><?= e(t('wallet.add_bank_details_first')) ?></div>
                 <?php else: ?>
                     <form method="post">
@@ -296,6 +335,54 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function () {
+    const verifyBtn = document.getElementById('verify-account-btn');
+    const verifyResult = document.getElementById('verify-result');
+    const bankSelect = document.getElementById('bank-code-select');
+    const accountInput = document.getElementById('account-number-input');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const verifyUrl = <?= json_encode(url_path('rider/ajax_verify_bank_account.php')) ?>;
+
+    if (verifyBtn) {
+        verifyBtn.addEventListener('click', async function () {
+            const bankCode = bankSelect.value;
+            const accountNumber = accountInput.value.trim();
+            verifyResult.textContent = '';
+            verifyResult.className = 'small mt-2';
+
+            if (!bankCode || !accountNumber) {
+                verifyResult.textContent = <?= json_encode(t('wallet.verify_select_bank_first')) ?>;
+                verifyResult.classList.add('text-danger');
+                return;
+            }
+
+            verifyBtn.disabled = true;
+            const originalLabel = verifyBtn.textContent;
+            verifyBtn.textContent = <?= json_encode(t('wallet.verifying_label')) ?>;
+
+            try {
+                const response = await fetch(verifyUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csrf_token: csrfToken, bank_code: bankCode, account_number: accountNumber })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    verifyResult.textContent = <?= json_encode(t('wallet.verified_prefix')) ?> + ' ' + data.account_name;
+                    verifyResult.classList.add('text-success', 'fw-bold');
+                } else {
+                    verifyResult.textContent = data.message || <?= json_encode(t('wallet.account_verification_failed')) ?>;
+                    verifyResult.classList.add('text-danger');
+                }
+            } catch (err) {
+                verifyResult.textContent = <?= json_encode(t('wallet.verify_network_error')) ?>;
+                verifyResult.classList.add('text-danger');
+            } finally {
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = originalLabel;
+            }
+        });
+    }
+
     let signature = <?= json_encode($walletSignature) ?>;
     const snapshotUrl = <?= json_encode(url_path('rider/wallet.php?ajax=snapshot')) ?>;
     const availableLabel = <?= json_encode(t('wallet.available_to_withdraw_prefix')) ?>;

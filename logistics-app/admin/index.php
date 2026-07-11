@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/functions.php';
 require_role(['admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
+require_once __DIR__ . '/../config/paystack.php';
 
 $user = current_user();
 $success = flash('success');
@@ -36,6 +37,124 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$user['id'], $requestId]);
             flash('success', t('admin.marked_processing'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'processing');
+        }
+        redirect_to('admin/index.php');
+    }
+
+    if ($formAction === 'approve_and_pay') {
+        if (!in_array($withdrawal['status'], ['pending', 'processing'], true)) {
+            flash('error', t('admin.withdrawal_not_pending'));
+            redirect_to('admin/index.php');
+        }
+
+        if (empty($withdrawal['bank_code'])) {
+            flash('error', t('admin.withdrawal_missing_bank_code'));
+            redirect_to('admin/index.php');
+        }
+
+        // Atomic lock: claim this request before calling Paystack so a double-click or two
+        // admin sessions racing on the same row can never trigger two real transfers. The
+        // lock is only released below if we can prove no transfer was actually created.
+        $claim = $pdo->prepare('
+            UPDATE withdrawal_requests
+            SET paystack_transfer_attempted_at = NOW()
+            WHERE id = ? AND paystack_transfer_attempted_at IS NULL AND status IN ("pending", "processing")
+        ');
+        $claim->execute([$requestId]);
+        if ($claim->rowCount() === 0) {
+            flash('error', t('admin.withdrawal_transfer_in_progress'));
+            redirect_to('admin/index.php');
+        }
+
+        $releaseLock = function () use ($pdo, $requestId): void {
+            $stmt = $pdo->prepare('UPDATE withdrawal_requests SET paystack_transfer_attempted_at = NULL WHERE id = ?');
+            $stmt->execute([$requestId]);
+        };
+
+        // Reuse a cached recipient code for this rider's bank account if we already made
+        // one, otherwise create it now and cache it for future withdrawals.
+        $stmt = $pdo->prepare('SELECT paystack_recipient_code FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
+        $stmt->execute([(int) $withdrawal['rider_user_id']]);
+        $recipientCode = (string) ($stmt->fetchColumn() ?: '');
+
+        if ($recipientCode === '') {
+            $recipientResult = paystack_create_transfer_recipient(
+                (string) $withdrawal['account_name'],
+                (string) $withdrawal['account_number'],
+                (string) $withdrawal['bank_code']
+            );
+            if (!$recipientResult['ok']) {
+                $releaseLock();
+                flash('error', t('admin.paystack_recipient_failed') . ' ' . $recipientResult['message']);
+                redirect_to('admin/index.php');
+            }
+            $recipientCode = (string) $recipientResult['recipient_code'];
+            $stmt = $pdo->prepare('UPDATE rider_bank_accounts SET paystack_recipient_code = ? WHERE rider_user_id = ?');
+            $stmt->execute([$recipientCode, (int) $withdrawal['rider_user_id']]);
+        }
+
+        $reference = 'WD-' . $requestId . '-' . time();
+        $transferResult = paystack_initiate_transfer($recipientCode, (float) $withdrawal['amount'], 'SwiftDrop rider withdrawal #' . $requestId, $reference);
+
+        if (!$transferResult['ok']) {
+            $releaseLock();
+            flash('error', t('admin.paystack_transfer_failed') . ' ' . $transferResult['message']);
+            redirect_to('admin/index.php');
+        }
+
+        $transferStatus = (string) $transferResult['status'];
+
+        if ($transferStatus === 'success') {
+            try {
+                $pdo->beginTransaction();
+
+                $stmt = $pdo->prepare('
+                    UPDATE withdrawal_requests
+                    SET status = "paid", admin_user_id = ?, processed_at = NOW(), paystack_transfer_code = ?, paystack_transfer_reference = ?
+                    WHERE id = ? AND status IN ("pending", "processing")
+                ');
+                $stmt->execute([$user['id'], $transferResult['transfer_code'], $reference, $requestId]);
+                if ($stmt->rowCount() === 0) {
+                    throw new RuntimeException('Withdrawal request was already processed.');
+                }
+
+                $stmt = $pdo->prepare('
+                    INSERT INTO wallet_transactions (rider_user_id, withdrawal_request_id, type, amount, description)
+                    VALUES (?, ?, "withdrawal", ?, ?)
+                ');
+                $stmt->execute([
+                    (int) $withdrawal['rider_user_id'],
+                    $requestId,
+                    -1 * (float) $withdrawal['amount'],
+                    sprintf('Withdrawal to %s (%s) via Paystack', $withdrawal['bank_name'], $withdrawal['account_number']),
+                ]);
+
+                $pdo->commit();
+                flash('success', t('admin.marked_paid'));
+                send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                flash('error', t('admin.withdrawal_process_failed') . ' ' . $e->getMessage());
+            }
+        } elseif (in_array($transferStatus, ['otp', 'pending'], true)) {
+            // Paystack accepted the transfer but it still needs finalization (OTP) or is
+            // queued - a real transfer now exists, so the lock stays set permanently and
+            // must never be retried automatically. Admin finalizes via the Paystack
+            // dashboard, then can manually mark this paid once confirmed.
+            $stmt = $pdo->prepare('
+                UPDATE withdrawal_requests
+                SET status = "processing", admin_user_id = ?, paystack_transfer_code = ?, paystack_transfer_reference = ?
+                WHERE id = ? AND status IN ("pending", "processing")
+            ');
+            $stmt->execute([$user['id'], $transferResult['transfer_code'], $reference, $requestId]);
+            flash('success', t('admin.paystack_transfer_pending'));
+        } else {
+            // failed/reversed/unknown - no transfer was actually created, safe to release
+            // the lock and let the admin retry.
+            $releaseLock();
+            flash('error', t('admin.paystack_transfer_failed') . ' ' . ($transferResult['message'] ?: $transferStatus));
         }
         redirect_to('admin/index.php');
     }
@@ -163,11 +282,23 @@ function render_open_withdrawals_html(array $rows): string {
                         <button class="btn btn-sm btn-outline-info fw-bold" type="submit"><?= e(t('admin.mark_processing')) ?></button>
                     </form>
                 <?php endif; ?>
+                <?php if (!empty($w['bank_code']) && empty($w['paystack_transfer_attempted_at'])): ?>
+                    <form method="post" class="d-inline">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
+                        <input type="hidden" name="form_action" value="approve_and_pay">
+                        <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.approve_and_pay')) ?></button>
+                    </form>
+                <?php elseif (empty($w['bank_code'])): ?>
+                    <span class="badge bg-secondary align-self-center"><?= e(t('admin.no_verified_bank')) ?></span>
+                <?php elseif (!empty($w['paystack_transfer_attempted_at'])): ?>
+                    <span class="badge bg-info text-dark align-self-center"><?= e(t('admin.paystack_transfer_awaiting')) ?></span>
+                <?php endif; ?>
                 <form method="post" class="d-inline">
                     <?= csrf_field() ?>
                     <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
                     <input type="hidden" name="form_action" value="mark_paid">
-                    <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.mark_paid')) ?></button>
+                    <button class="btn btn-sm btn-outline-success fw-bold" type="submit"><?= e(t('admin.mark_paid_manual')) ?></button>
                 </form>
                 <form method="post" class="d-inline d-flex gap-2 align-items-center">
                     <?= csrf_field() ?>

@@ -113,6 +113,45 @@ function render_pending_kyc_html(array $rows): string {
                 </div>
                 <span class="badge <?= e(admin_kyc_badge_class((string) $r['kyc_status'])) ?>"><?= e(ucfirst((string) $r['kyc_status'])) ?></span>
             </div>
+
+            <div class="small text-soft mb-1">
+                <?php if (!empty($r['kyc_age'])): ?><?= e(t('admin.age_label')) ?>: <?= (int) $r['kyc_age'] ?> &middot; <?php endif; ?>
+                <?php if (!empty($r['kyc_national_id_number'])): ?><?= e(t('admin.national_id_label')) ?>: <?= e((string) $r['kyc_national_id_number']) ?><?php endif; ?>
+            </div>
+            <?php if (!empty($r['kyc_state_of_origin']) || !empty($r['kyc_lga_of_origin']) || !empty($r['kyc_hometown'])): ?>
+                <div class="small text-soft mb-1">
+                    <?= e(t('admin.origin_label')) ?>:
+                    <?= e(trim(implode(' / ', array_filter([$r['kyc_state_of_origin'] ?? '', $r['kyc_lga_of_origin'] ?? '', $r['kyc_hometown'] ?? '']))) ) ?>
+                </div>
+            <?php endif; ?>
+            <?php if (!empty($r['kyc_address'])): ?>
+                <div class="small text-soft mb-1"><?= e(t('admin.address_label')) ?>: <?= e((string) $r['kyc_address']) ?></div>
+            <?php endif; ?>
+            <?php if (!empty($r['kyc_guarantor_name'])): ?>
+                <div class="small text-soft mb-1">
+                    <?= e(t('admin.guarantor_label')) ?>: <?= e((string) $r['kyc_guarantor_name']) ?>
+                    <?php if (!empty($r['kyc_guarantor_phone'])): ?> &middot; <?= e((string) $r['kyc_guarantor_phone']) ?><?php endif; ?>
+                    <?php if (!empty($r['kyc_guarantor_relationship'])): ?> &middot; <?= e((string) $r['kyc_guarantor_relationship']) ?><?php endif; ?>
+                    <?php if (!empty($r['kyc_guarantor_address'])): ?> &middot; <?= e((string) $r['kyc_guarantor_address']) ?><?php endif; ?>
+                </div>
+            <?php endif; ?>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+                <?php if (!empty($r['kyc_proof_of_address_path'])): ?>
+                    <a href="<?= e(url_path($r['kyc_proof_of_address_path'])) ?>" target="_blank" rel="noopener">
+                        <img src="<?= e(url_path($r['kyc_proof_of_address_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.proof_of_address_alt')) ?>">
+                    </a>
+                <?php endif; ?>
+                <?php if (!empty($r['kyc_vehicle_document_path'])): ?>
+                    <a href="<?= e(url_path($r['kyc_vehicle_document_path'])) ?>" target="_blank" rel="noopener">
+                        <img src="<?= e(url_path($r['kyc_vehicle_document_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.vehicle_document_alt')) ?>">
+                    </a>
+                <?php endif; ?>
+                <?php if (!empty($r['kyc_driving_license_path'])): ?>
+                    <a href="<?= e(url_path($r['kyc_driving_license_path'])) ?>" target="_blank" rel="noopener">
+                        <img src="<?= e(url_path($r['kyc_driving_license_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.driving_license_alt')) ?>">
+                    </a>
+                <?php endif; ?>
+            </div>
             <div class="d-flex flex-wrap gap-2 mt-2">
                 <form method="post" class="d-inline">
                     <?= csrf_field() ?>

@@ -23,16 +23,6 @@ if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0) && (($use
     exit;
 }
 
-$etag = sha1(implode('|', [
-    $booking['id'] ?? '',
-    $booking['updated_at'] ?? '',
-    $booking['pickup_latitude'] ?? '',
-    $booking['pickup_longitude'] ?? '',
-    $booking['delivery_latitude'] ?? '',
-    $booking['delivery_longitude'] ?? ''
-]));
-response_cache_headers($etag, 10);
-
 $pickupLat = (float)$booking['pickup_latitude'];
 $pickupLng = (float)$booking['pickup_longitude'];
 $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
@@ -71,5 +61,11 @@ foreach($riders as &$r) {
     $r['suggested_fee'] = max(1500, round($base, -2));
 }
 unset($r);
+
+// The ETag must reflect the actual result set, not just the booking's static fields - a rider
+// coming online/offline changes this list without ever touching the booking row, and caching
+// against a key that can't detect that froze the sender's rider list until a hard refresh.
+$etag = sha1(json_encode(array_map(fn($r) => [$r['id'], $r['last_latitude'], $r['last_longitude']], $riders)));
+response_cache_headers($etag, 5);
 
 echo json_encode($riders);

@@ -2101,7 +2101,7 @@ function initSenderWorkspace() {
                         </div>`;
                 }
                 try {
-                    const response = await fetch('bookings/send_request.php', {
+                    const response = await fetch('<?= e(url_path('bookings/send_request.php')) ?>', {
                         method: 'POST',
                         headers: {
                             'Accept': 'application/json',

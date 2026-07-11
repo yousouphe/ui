@@ -17,7 +17,8 @@ if ($clientId === '' || $clientSecret === '' || $code === '' || $state === '' ||
     redirect_to('login');
 }
 
-$redirectUri = rtrim((string)($config['app_url'] ?? ''), '/') . url_path('auth/google_callback.php');
+// Must match auth/google_login.php exactly - Google rejects the token exchange otherwise.
+$redirectUri = rtrim((string)($config['app_url'] ?? ''), '/') . '/auth/google_callback.php';
 
 function google_http_post(string $url, array $fields) {
     $ch = curl_init($url);

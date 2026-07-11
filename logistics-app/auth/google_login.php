@@ -12,7 +12,10 @@ if ($clientId === '' || str_starts_with($clientId, 'REDACTED')) {
 $state = bin2hex(random_bytes(16));
 $_SESSION['google_oauth_state'] = $state;
 
-$redirectUri = rtrim((string)($config['app_url'] ?? ''), '/') . url_path('auth/google_callback.php');
+// app_url already includes any subdirectory the app is deployed under (see payments/start.php
+// for the same convention) - do not also route this through url_path(), which independently
+// re-detects that subdirectory from SCRIPT_NAME and would double it.
+$redirectUri = rtrim((string)($config['app_url'] ?? ''), '/') . '/auth/google_callback.php';
 
 $params = [
     'client_id' => $clientId,

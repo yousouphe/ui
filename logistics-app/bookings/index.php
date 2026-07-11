@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin', 'super_admin']);
+require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
@@ -48,9 +48,6 @@ function realtime_booking_context(PDO $pdo, array $user, int $bookingId): ?array
     if ($role === 'rider') {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
         $stmt->execute([$bookingId, (int)$user['id']]);
-    } elseif (in_array($role, ['admin', 'super_admin'], true)) {
-        $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? LIMIT 1');
-        $stmt->execute([$bookingId]);
     } else {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1');
         $stmt->execute([$bookingId, (int)$user['id']]);

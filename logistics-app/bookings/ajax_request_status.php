@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin', 'super_admin']);
+require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json');
@@ -17,7 +17,7 @@ $stmt = $pdo->prepare('SELECT id, booking_status, sender_user_id FROM bookings W
 $stmt->execute([$bookingId]);
 $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$booking || ((int)$booking['sender_user_id'] !== (int)$user['id'] && !in_array($user['role'] ?? '', ['admin', 'super_admin'], true))) {
+if (!$booking || (int)$booking['sender_user_id'] !== (int)$user['id']) {
     echo json_encode(['success' => false]);
     exit;
 }

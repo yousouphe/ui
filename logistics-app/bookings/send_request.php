@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin', 'super_admin']);
+require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
@@ -76,26 +76,15 @@ try {
     $pdo->beginTransaction();
 
     // Lock booking row
-    if (in_array($user['role'] ?? '', ['admin', 'super_admin'], true)) {
-        $stmt = $pdo->prepare("
-            SELECT *
-            FROM bookings
-            WHERE id = ?
-            LIMIT 1
-            FOR UPDATE
-        ");
-        $stmt->execute([$bookingId]);
-    } else {
-        $stmt = $pdo->prepare("
-            SELECT *
-            FROM bookings
-            WHERE id = ?
-              AND sender_user_id = ?
-            LIMIT 1
-            FOR UPDATE
-        ");
-        $stmt->execute([$bookingId, (int)$user['id']]);
-    }
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND sender_user_id = ?
+        LIMIT 1
+        FOR UPDATE
+    ");
+    $stmt->execute([$bookingId, (int)$user['id']]);
 
     $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 

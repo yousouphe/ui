@@ -7,11 +7,13 @@ $user = current_user();
 $success = flash('success');
 $error = flash('error');
 
+// Riders only ever see their post-cut earnings (85% of what the sender pays), never the
+// underlying full price - it's presented to them simply as "the price" for the job.
 function sum_amount(array $rows): float
 {
     $total = 0.0;
     foreach ($rows as $row) {
-        $total += (float)($row['agreed_cost'] ?? $row['proposed_cost'] ?? 0);
+        $total += rider_payout_amount((float)($row['agreed_cost'] ?? $row['proposed_cost'] ?? 0));
     }
     return $total;
 }
@@ -53,11 +55,11 @@ function render_awaiting_confirmation_html(array $bookings): string
                         <div class="fw-bold"><?= e($b['booking_code'] ?? '') ?></div>
                         <div class="small text-soft"><?= e($b['sender_name'] ?? '') ?></div>
                     </div>
-                    <span class="price-tag">₦<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></span>
+                    <span class="price-tag">₦<?= number_format(rider_payout_amount((float) ($b['agreed_cost'] ?? 0)), 2) ?></span>
                 </div>
                 <div class="system-msg mb-2">
                     <?php if (!$isPaid): ?>
-                        <i class="fa-solid fa-hourglass-half text-warning me-2"></i><?= e(t('rider.waiting_for_sender_payment', ['amount' => '₦' . number_format((float) ($b['agreed_cost'] ?? 0), 2)])) ?>
+                        <i class="fa-solid fa-hourglass-half text-warning me-2"></i><?= e(t('rider.waiting_for_sender_payment', ['amount' => '₦' . number_format(rider_payout_amount((float) ($b['agreed_cost'] ?? 0)), 2)])) ?>
                     <?php else: ?>
                         <i class="fa-solid fa-circle-check text-success me-2"></i><?= e(t('rider.payment_received_notice')) ?>
                     <?php endif; ?>
@@ -457,7 +459,7 @@ $pickupLng = ($activeBooking && $activeBooking['pickup_longitude'] !== null) ? (
 $destLat   = ($activeBooking && $activeBooking['delivery_latitude'] !== null) ? (float)$activeBooking['delivery_latitude'] : null;
 $destLng   = ($activeBooking && $activeBooking['delivery_longitude'] !== null) ? (float)$activeBooking['delivery_longitude'] : null;
 
-$bookingAmount = $activeBooking ? (float)($activeBooking['agreed_cost'] ?? 0) : 0;
+$bookingAmount = $activeBooking ? rider_payout_amount((float)($activeBooking['agreed_cost'] ?? 0)) : 0;
 $currentStatus = $activeBooking['booking_status'] ?? null;
 
 $senderConfirmedHandover =
@@ -635,7 +637,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             'delivery_address' => (string)$firstPending['delivery_address'],
             'sender_name' => (string)($firstPending['sender_name'] ?? 'Unknown'),
             'item_name' => (string)($firstPending['item_name'] ?? 'Package'),
-            'proposed_cost' => (float)($firstPending['proposed_cost'] ?? 0),
+            'proposed_cost' => rider_payout_amount((float)($firstPending['proposed_cost'] ?? 0)),
         ];
     }
 
@@ -652,7 +654,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                 <div class="col-lg-6">
                     <div class="req-card p-3 border-warning h-100">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                            <span class="price-tag">₦<?= number_format(rider_payout_amount((float)$req['proposed_cost']), 2) ?></span>
                             <span class="small text-soft">#<?= htmlspecialchars($req['booking_code']) ?></span>
                         </div>
                         <div class="small text-soft mb-2"><?= e(t('rider.sender_prefix')) ?> <?= htmlspecialchars($req['sender_name'] ?? 'Unknown') ?></div>
@@ -879,7 +881,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                         <div class="col-lg-6">
                             <div class="req-card p-3 border-warning h-100">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <span class="price-tag">₦<?= number_format((float)$req['proposed_cost'], 2) ?></span>
+                                    <span class="price-tag">₦<?= number_format(rider_payout_amount((float)$req['proposed_cost']), 2) ?></span>
                                     <span class="small text-soft">#<?= e($req['booking_code']) ?></span>
                                 </div>
                                 <div class="small text-soft mb-2"><?= e(t('rider.sender_prefix')) ?> <?= e($req['sender_name'] ?? 'Unknown') ?></div>
@@ -1183,6 +1185,7 @@ const I18N = <?= json_encode([
     'workflowFailed' => t('rider.workflow_failed'),
     'statusUpdated' => t('rider.status_updated'),
     'actionFailed' => t('rider.action_failed'),
+    'requestTimedOut' => t('rider.request_timed_out'),
     'syncLive' => t('rider.sync.live'),
     'syncGpsIssue' => t('rider.sync.gps_issue'),
     'syncOffline' => t('rider.sync.offline'),
@@ -1728,11 +1731,17 @@ async function runConfirmPaymentAction(btn) {
     const originalHtml = btn.innerHTML;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
+    // Hard cap so the button can never spin forever, regardless of what's slow server-side
+    // (e.g. a stalled outbound SMTP handshake) - it always recovers to a retryable state.
+    const abortController = new AbortController();
+    const abortTimer = setTimeout(() => abortController.abort(), 20000);
+
     try {
         const response = await fetch(safeAbsoluteUrl(ajaxConfirmPaymentUrl), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ booking_id: targetBookingId, csrf_token: CSRF_TOKEN })
+            body: JSON.stringify({ booking_id: targetBookingId, csrf_token: CSRF_TOKEN }),
+            signal: abortController.signal
         });
 
         const data = await response.json();
@@ -1743,9 +1752,12 @@ async function runConfirmPaymentAction(btn) {
 
         window.location.reload();
     } catch (err) {
-        if (geoMessage) geoMessage.textContent = err.message || I18N.actionFailed;
+        const timedOut = err && err.name === 'AbortError';
+        if (geoMessage) geoMessage.textContent = timedOut ? I18N.requestTimedOut : (err.message || I18N.actionFailed);
         btn.disabled = false;
         btn.innerHTML = originalHtml;
+    } finally {
+        clearTimeout(abortTimer);
     }
 }
 

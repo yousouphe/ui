@@ -385,6 +385,7 @@ return [
     'rider.workflow_failed' => 'Aikin sauya matsayi ya kasa.',
     'rider.status_updated' => 'An sabunta matsayi.',
     'rider.action_failed' => 'Aikin ya kasa.',
+    'rider.request_timed_out' => 'Wannan yana ɗaukar lokaci fiye da yadda ake tsammani. Da fatan za a sake gwadawa.',
     'rider.sync.live' => 'YANA AIKI',
     'rider.sync.gps_issue' => 'MATSALAR GPS',
     'rider.sync.offline' => 'BA A KAN LAYI BA',

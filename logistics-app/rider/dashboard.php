@@ -21,10 +21,12 @@ function badge_class(string $status): string {
     };
 }
 
+// Riders only ever see their post-cut earnings (85% of what the sender pays), never the
+// underlying full price - it's presented to them simply as "the price" for the job.
 function sum_amount(array $rows): float {
     $total = 0.0;
     foreach ($rows as $row) {
-        $total += (float) ($row['agreed_cost'] ?? $row['proposed_cost'] ?? 0);
+        $total += rider_payout_amount((float) ($row['agreed_cost'] ?? $row['proposed_cost'] ?? 0));
     }
     return $total;
 }
@@ -214,7 +216,7 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                     <div class="small text-soft mb-1"><?= e(t('rider.sender_prefix')) ?> <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' &middot; ' . e($b['sender_phone']) : '' ?></div>
                                     <div class="small text-soft mb-1"><?= e(t('booking.pickup_label')) ?> <?= e($b['pickup_address'] ?? '') ?></div>
                                     <div class="small text-soft mb-2"><?= e(t('booking.delivery_label')) ?> <?= e($b['delivery_address'] ?? '') ?></div>
-                                    <div class="price-tag">&#8358;<?= number_format((float) ($b['agreed_cost'] ?? 0), 2) ?></div>
+                                    <div class="price-tag">&#8358;<?= number_format(rider_payout_amount((float) ($b['agreed_cost'] ?? 0)), 2) ?></div>
                                 </div>
                             <?php endforeach; ?>
                             </div>
@@ -250,7 +252,7 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                             <div class="small text-soft"><?= e($row['sender_name'] ?? '') ?></div>
                                         </div>
                                         <div class="text-end">
-                                            <div class="price-tag">&#8358;<?= number_format((float) ($row['agreed_cost'] ?? 0), 2) ?></div>
+                                            <div class="price-tag">&#8358;<?= number_format(rider_payout_amount((float) ($row['agreed_cost'] ?? 0)), 2) ?></div>
                                             <span class="badge <?= e(badge_class((string) ($row['payment_status'] ?? 'pending'))) ?>">
                                                 <?= e(booking_status_label((string) ($row['payment_status'] ?? 'pending'))) ?>
                                             </span>
@@ -287,7 +289,7 @@ $historyRows = array_filter($allRequests, fn($req) =>
                             </div>
                             <div class="small text-soft mb-1"><?= e(t('booking.pickup_label')) ?> <?= e($req['pickup_address'] ?? '') ?></div>
                             <div class="small text-soft mb-1"><?= e(t('booking.delivery_label')) ?> <?= e($req['delivery_address'] ?? '') ?></div>
-                            <div class="small text-soft"><?= e(t('rider.deliveries.offer_value_prefix')) ?> &#8358;<?= number_format((float) ($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0), 2) ?></div>
+                            <div class="small text-soft"><?= e(t('rider.deliveries.offer_value_prefix')) ?> &#8358;<?= number_format(rider_payout_amount((float) ($req['proposed_cost'] ?? $req['agreed_cost'] ?? 0)), 2) ?></div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>

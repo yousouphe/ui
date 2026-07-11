@@ -58,6 +58,10 @@ function mailer_send(string $toEmail, string $toName, string $subject, string $h
         if (!$socket) {
             throw new RuntimeException("Could not connect to SMTP host: $errstr ($errno)");
         }
+        // The connect timeout above only bounds the initial TCP handshake - every read after
+        // that (EHLO/STARTTLS/AUTH/MAIL FROM/RCPT TO/DATA responses) would otherwise block on
+        // PHP's default_socket_timeout (60s each) if the server stops responding mid-transaction.
+        stream_set_timeout($socket, 5);
 
         $expect = static function ($socket, string $prefix) {
             $line = '';

@@ -101,6 +101,57 @@ function withdrawal_status_badge_class(string $status): string {
         default => 'bg-dark border border-secondary',
     };
 }
+
+function render_withdrawal_history_html(array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('wallet.no_withdrawal_history')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $w): ?>
+        <div class="mini-row">
+            <div>
+                <div class="fw-bold">&#8358;<?= number_format((float) $w['amount'], 2) ?></div>
+                <div class="small text-soft"><?= e((string) $w['requested_at']) ?></div>
+            </div>
+            <span class="badge <?= e(withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+function render_ledger_html(array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('wallet.no_ledger_history')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $tx): ?>
+        <div class="mini-row">
+            <div>
+                <div class="small text-soft"><?= e((string) $tx['description']) ?></div>
+                <div class="small text-soft"><?= e((string) $tx['created_at']) ?></div>
+            </div>
+            <div class="fw-bold <?= $tx['type'] === 'earning' ? 'text-success' : 'text-danger' ?>">
+                <?= $tx['type'] === 'earning' ? '+' : '' ?>&#8358;<?= number_format((float) $tx['amount'], 2) ?>
+            </div>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+$withdrawalHistoryHtml = render_withdrawal_history_html($withdrawalRows);
+$ledgerHtml = render_ledger_html($ledgerRows);
+$walletSignature = sha1(json_encode([$availableBalance, $totalEarned, $totalWithdrawn, $withdrawalRows, $ledgerRows]));
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
+    respond_json([
+        'available_balance' => $availableBalance,
+        'total_earned' => $totalEarned,
+        'total_withdrawn' => $totalWithdrawn,
+        'withdrawal_history_html' => $withdrawalHistoryHtml,
+        'ledger_html' => $ledgerHtml,
+        'signature' => $walletSignature,
+    ]);
+}
 ?>
 <!doctype html>
 <html lang="<?= e(current_locale()) ?>">
@@ -154,19 +205,19 @@ function withdrawal_status_badge_class(string $status): string {
         <div class="col-md-4">
             <div class="summary-card">
                 <div class="stat-label"><?= e(t('wallet.available_balance')) ?></div>
-                <div class="money-big text-info">&#8358;<?= number_format($availableBalance, 2) ?></div>
+                <div class="money-big text-info" id="wallet-available-balance">&#8358;<?= number_format($availableBalance, 2) ?></div>
             </div>
         </div>
         <div class="col-md-4">
             <div class="summary-card">
                 <div class="stat-label"><?= e(t('wallet.total_earned')) ?></div>
-                <div class="money-big">&#8358;<?= number_format($totalEarned, 2) ?></div>
+                <div class="money-big" id="wallet-total-earned">&#8358;<?= number_format($totalEarned, 2) ?></div>
             </div>
         </div>
         <div class="col-md-4">
             <div class="summary-card">
                 <div class="stat-label"><?= e(t('wallet.total_withdrawn')) ?></div>
-                <div class="money-big">&#8358;<?= number_format($totalWithdrawn, 2) ?></div>
+                <div class="money-big" id="wallet-total-withdrawn">&#8358;<?= number_format($totalWithdrawn, 2) ?></div>
             </div>
         </div>
     </div>
@@ -208,12 +259,12 @@ function withdrawal_status_badge_class(string $status): string {
                             <label class="form-label"><?= e(t('wallet.withdrawal_amount_label')) ?></label>
                             <div class="input-group">
                                 <span class="input-group-text">&#8358;</span>
-                                <input class="form-control" type="number" step="0.01" min="0.01" max="<?= e((string) $availableBalance) ?>" name="amount" required>
+                                <input class="form-control" type="number" step="0.01" min="0.01" max="<?= e((string) $availableBalance) ?>" name="amount" id="wallet-withdraw-amount-input" required>
                             </div>
-                            <div class="form-text"><?= e(t('wallet.available_to_withdraw_prefix')) ?> &#8358;<?= number_format($availableBalance, 2) ?></div>
+                            <div class="form-text" id="wallet-available-to-withdraw"><?= e(t('wallet.available_to_withdraw_prefix')) ?> &#8358;<?= number_format($availableBalance, 2) ?></div>
                         </div>
                         <p class="small text-soft"><?= e(t('wallet.withdrawal_processing_note')) ?></p>
-                        <button class="btn btn-success fw-bold" type="submit" <?= $availableBalance <= 0 ? 'disabled' : '' ?>><?= e(t('wallet.submit_withdrawal_request')) ?></button>
+                        <button class="btn btn-success fw-bold" type="submit" id="wallet-withdraw-submit-btn" <?= $availableBalance <= 0 ? 'disabled' : '' ?>><?= e(t('wallet.submit_withdrawal_request')) ?></button>
                     </form>
                 <?php endif; ?>
             </div>
@@ -224,45 +275,64 @@ function withdrawal_status_badge_class(string $status): string {
         <div class="col-lg-6">
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3"><?= e(t('wallet.withdrawal_history_heading')) ?></h2>
-                <?php if (empty($withdrawalRows)): ?>
-                    <div class="text-soft"><?= e(t('wallet.no_withdrawal_history')) ?></div>
-                <?php else: ?>
-                    <?php foreach ($withdrawalRows as $w): ?>
-                        <div class="mini-row">
-                            <div>
-                                <div class="fw-bold">&#8358;<?= number_format((float) $w['amount'], 2) ?></div>
-                                <div class="small text-soft"><?= e((string) $w['requested_at']) ?></div>
-                            </div>
-                            <span class="badge <?= e(withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
-                        </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
+                <div id="wallet-withdrawal-history"><?= $withdrawalHistoryHtml ?></div>
             </div>
         </div>
 
         <div class="col-lg-6">
             <div class="cardx p-4 h-100">
                 <h2 class="h5 fw-bold mb-3"><?= e(t('wallet.ledger_heading')) ?></h2>
-                <?php if (empty($ledgerRows)): ?>
-                    <div class="text-soft"><?= e(t('wallet.no_ledger_history')) ?></div>
-                <?php else: ?>
-                    <?php foreach ($ledgerRows as $tx): ?>
-                        <div class="mini-row">
-                            <div>
-                                <div class="small text-soft"><?= e((string) $tx['description']) ?></div>
-                                <div class="small text-soft"><?= e((string) $tx['created_at']) ?></div>
-                            </div>
-                            <div class="fw-bold <?= $tx['type'] === 'earning' ? 'text-success' : 'text-danger' ?>">
-                                <?= $tx['type'] === 'earning' ? '+' : '' ?>&#8358;<?= number_format((float) $tx['amount'], 2) ?>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
+                <div id="wallet-ledger"><?= $ledgerHtml ?></div>
             </div>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    let signature = <?= json_encode($walletSignature) ?>;
+    const snapshotUrl = <?= json_encode(url_path('rider/wallet.php?ajax=snapshot')) ?>;
+    const availableLabel = <?= json_encode(t('wallet.available_to_withdraw_prefix')) ?>;
+
+    function formatMoney(amount) {
+        return Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    async function pollWallet() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch(snapshotUrl, { headers: { 'Accept': 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data || data.signature === signature) return;
+            signature = data.signature;
+
+            const balanceEl = document.getElementById('wallet-available-balance');
+            if (balanceEl) balanceEl.textContent = '₦' + formatMoney(data.available_balance);
+            const earnedEl = document.getElementById('wallet-total-earned');
+            if (earnedEl) earnedEl.textContent = '₦' + formatMoney(data.total_earned);
+            const withdrawnEl = document.getElementById('wallet-total-withdrawn');
+            if (withdrawnEl) withdrawnEl.textContent = '₦' + formatMoney(data.total_withdrawn);
+
+            const amountInput = document.getElementById('wallet-withdraw-amount-input');
+            if (amountInput) amountInput.max = data.available_balance;
+            const availableHint = document.getElementById('wallet-available-to-withdraw');
+            if (availableHint) availableHint.textContent = availableLabel + ' ₦' + formatMoney(data.available_balance);
+            const submitBtn = document.getElementById('wallet-withdraw-submit-btn');
+            if (submitBtn) submitBtn.disabled = Number(data.available_balance) <= 0;
+
+            const historyWrap = document.getElementById('wallet-withdrawal-history');
+            if (historyWrap && typeof data.withdrawal_history_html === 'string') historyWrap.innerHTML = data.withdrawal_history_html;
+            const ledgerWrap = document.getElementById('wallet-ledger');
+            if (ledgerWrap && typeof data.ledger_html === 'string') ledgerWrap.innerHTML = data.ledger_html;
+        } catch (err) {
+            console.error('Wallet poll failed:', err);
+        }
+    }
+
+    setInterval(pollWallet, 10000);
+})();
+</script>
 </body>
 </html>

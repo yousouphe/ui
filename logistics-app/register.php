@@ -150,6 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$errors && $newUserId !== null) {
+            // Same reasoning as login.php - a fresh account also needs a fresh session ID.
+            session_regenerate_id(true);
             $_SESSION['user'] = [
                 'id' => $newUserId,
                 'full_name' => $fullName,

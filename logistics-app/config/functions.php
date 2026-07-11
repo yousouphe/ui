@@ -1,5 +1,18 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) {
+    // use_strict_mode rejects session IDs the server never generated (e.g. a session ID
+    // set by an attacker before a victim logs in), which is what session fixation relies on.
+    ini_set('session.use_strict_mode', '1');
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
 

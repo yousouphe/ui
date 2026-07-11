@@ -614,6 +614,7 @@ $initialLng = isset($profile['last_longitude']) ? (float)$profile['last_longitud
 $ajaxUpdateLocationUrl = url_path('rider/ajax_update_location.php');
 $ajaxUpdateStatusUrl = url_path('rider/ajax_update_status.php');
 $ajaxWorkflowUrl = url_path('rider/ajax_workflow_action.php');
+$ajaxConfirmPaymentUrl = url_path('rider/ajax_confirm_payment.php');
 $logoutUrl = url_path('logout');
 
 $canChat = $activeBooking && (int)($activeBooking['sender_user_id'] ?? 0) > 0;
@@ -1138,6 +1139,7 @@ const routeDetailsBody = document.getElementById('route_details_body');
 const ajaxUpdateLocationUrl = <?= json_encode($ajaxUpdateLocationUrl) ?>;
 const ajaxUpdateStatusUrl = <?= json_encode($ajaxUpdateStatusUrl) ?>;
 const ajaxWorkflowUrl = <?= json_encode($ajaxWorkflowUrl) ?>;
+const ajaxConfirmPaymentUrl = <?= json_encode($ajaxConfirmPaymentUrl) ?>;
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
 const STATUS_LABELS = <?= json_encode([
@@ -1329,7 +1331,7 @@ function unlockAudio() {
     state.audioUnlocked = true;
 
     try {
-        state.requestAudio = new Audio(safeAbsoluteUrl('assets/sounds/request-alert.wav'));
+        state.requestAudio = new Audio(safeAbsoluteUrl('<?= e(url_path('assets/sounds/request-alert.wav')) ?>'));
         state.requestAudio.preload = 'auto';
         state.requestAudio.volume = 1;
         state.requestAudio.muted = true;
@@ -1727,7 +1729,7 @@ async function runConfirmPaymentAction(btn) {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
-        const response = await fetch(safeAbsoluteUrl('rider/ajax_confirm_payment.php'), {
+        const response = await fetch(safeAbsoluteUrl(ajaxConfirmPaymentUrl), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ booking_id: targetBookingId, csrf_token: CSRF_TOKEN })

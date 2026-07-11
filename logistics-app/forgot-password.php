@@ -26,7 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))');
             $stmt->execute([$foundUser['id'], $tokenHash]);
 
-            $resetUrl = rtrim((string)(config_app()['app_url'] ?? ''), '/') . url_path('reset-password?token=' . $token);
+            // app_url already includes any subdirectory the app is deployed under - do not also
+            // route this through url_path(), which would independently re-detect and double it.
+            $resetUrl = rtrim((string)(config_app()['app_url'] ?? ''), '/') . '/reset-password?token=' . $token;
             send_password_reset_email($foundUser['email'], $foundUser['full_name'], $resetUrl);
         }
     }

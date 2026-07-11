@@ -28,10 +28,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'full_name' => $user['full_name'],
             'email' => $user['email'],
             'phone' => $user['phone'],
-            'role' => $user['role']
+            'role' => $user['role'],
+            'profile_completed' => (int)($user['profile_completed'] ?? 1)
         ];
         flash('success', t('login.welcome_back', ['name' => $user['full_name']]));
+        if ((int)($user['profile_completed'] ?? 1) === 0) redirect_to('complete-profile');
         if ($user['role'] === 'rider') redirect_to('rider/');
+        if ($user['role'] === 'admin') redirect_to('admin/');
         redirect_to('/bookings');
     }
 }
@@ -69,10 +72,15 @@ body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:1
         <form method="post">
           <?= csrf_field() ?>
           <div class="mb-3"><label class="form-label"><?= e(t('login.email_label')) ?></label><input class="form-control" type="email" name="email"></div>
-          <div class="mb-4"><label class="form-label"><?= e(t('login.password_label')) ?></label><input class="form-control" type="password" name="password"></div>
+          <div class="mb-2"><label class="form-label"><?= e(t('login.password_label')) ?></label><input class="form-control" type="password" name="password"></div>
+          <div class="mb-4 text-end"><a class="small text-soft" href="<?= e(url_path('forgot-password')) ?>"><?= e(t('login.forgot_password')) ?></a></div>
           <button class="btn btn-primary" type="submit"><?= e(t('login.submit')) ?></button>
           <a class="btn btn-outline-secondary ms-2" href="<?= e(url_path('')) ?>"><?= e(t('common.back')) ?></a>
         </form>
+        <a class="btn btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2 mt-3" href="<?= e(url_path('auth/google_login.php')) ?>">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 01-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 009 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 013.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.46 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0A9 9 0 00.96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+          <?= e(t('login.google_signin')) ?>
+        </a>
         <p class="text-soft mt-4 mb-0"><?= e(t('login.no_account')) ?> <a href="<?= e(url_path('register')) ?>"><?= e(t('login.register_link')) ?></a></p>
       </div>
     </div>

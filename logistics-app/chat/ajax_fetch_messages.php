@@ -9,6 +9,7 @@ $user = current_user();
 $bookingId = (int)($_GET['booking_id'] ?? 0);
 $sinceId = max(0, (int)($_GET['since_id'] ?? 0));
 $limit = min(100, max(1, (int)($_GET['limit'] ?? 50)));
+$markRead = ($_GET['mark_read'] ?? '1') !== '0';
 
 if ($bookingId <= 0) {
     http_response_code(422);
@@ -47,7 +48,7 @@ $hasIsRead = db_column_exists($pdo, 'booking_chat_messages', 'is_read');
 $hasDeliveredAt = db_column_exists($pdo, 'booking_chat_messages', 'delivered_at');
 $hasReadAt = db_column_exists($pdo, 'booking_chat_messages', 'read_at');
 
-if ($hasReceiver && $hasIsRead) {
+if ($hasReceiver && $hasIsRead && $markRead) {
     $stmt = $pdo->prepare("
         UPDATE booking_chat_messages
         SET is_read = 1" . ($hasReadAt ? ", read_at = NOW()" : "") . "

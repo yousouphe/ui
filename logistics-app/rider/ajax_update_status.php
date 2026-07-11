@@ -19,6 +19,17 @@ if ($status === null) {
     exit;
 }
 
+if ($status === 'available') {
+    $stmt = $pdo->prepare('SELECT kyc_status FROM rider_profiles WHERE user_id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    $kycStatus = $stmt->fetchColumn();
+    if ($kycStatus !== 'approved') {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => t('rider.kyc_not_approved')]);
+        exit;
+    }
+}
+
 $stmt = $pdo->prepare('UPDATE rider_profiles SET availability_status = ? WHERE user_id = ?');
 $stmt->execute([$status, $user['id']]);
 echo json_encode(['success' => true]);

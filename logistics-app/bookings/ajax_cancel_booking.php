@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin']);
+require_role(['sender', 'admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json');
@@ -59,5 +59,7 @@ $stmt = $pdo->prepare("
     WHERE id = ?
 ");
 $stmt->execute([$reason, $bookingId]);
+
+log_event($pdo, 'booking_cancelled', 'Booking #' . $bookingId . ' cancelled by sender', (int) $user['id'], (string) $user['role'], 'booking', $bookingId, ['reason' => $reason]);
 
 echo json_encode(['success' => true, 'message' => 'Booking cancelled successfully.']);

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['admin']);
+require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 require_once __DIR__ . '/../config/paystack.php';
@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$user['id'], $requestId]);
             flash('success', t('admin.marked_processing'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'processing');
+            log_event($pdo, 'withdrawal_processing', 'Marked withdrawal #' . $requestId . ' as processing', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount']]);
         }
         redirect_to('admin/index.php');
     }
@@ -86,6 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$recipientResult['ok']) {
                 $releaseLock();
                 flash('error', t('admin.paystack_recipient_failed') . ' ' . $recipientResult['message']);
+                log_event($pdo, 'paystack_recipient_failed', 'Could not create Paystack recipient for withdrawal #' . $requestId . ': ' . $recipientResult['message'], (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
                 redirect_to('admin/index.php');
             }
             $recipientCode = (string) $recipientResult['recipient_code'];
@@ -99,6 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$transferResult['ok']) {
             $releaseLock();
             flash('error', t('admin.paystack_transfer_failed') . ' ' . $transferResult['message']);
+            log_event($pdo, 'paystack_transfer_failed', 'Paystack transfer initiation failed for withdrawal #' . $requestId . ': ' . $transferResult['message'], (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
             redirect_to('admin/index.php');
         }
 
@@ -132,6 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 flash('success', t('admin.marked_paid'));
                 send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+                log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' paid via Paystack (' . $transferResult['transfer_code'] . ')', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'transfer_code' => $transferResult['transfer_code'], 'reference' => $reference]);
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -150,11 +154,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ');
             $stmt->execute([$user['id'], $transferResult['transfer_code'], $reference, $requestId]);
             flash('success', t('admin.paystack_transfer_pending'));
+            log_event($pdo, 'withdrawal_transfer_pending', 'Withdrawal #' . $requestId . ' transfer initiated, status: ' . $transferStatus, (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['transfer_code' => $transferResult['transfer_code'], 'reference' => $reference]);
         } else {
             // failed/reversed/unknown - no transfer was actually created, safe to release
             // the lock and let the admin retry.
             $releaseLock();
             flash('error', t('admin.paystack_transfer_failed') . ' ' . ($transferResult['message'] ?: $transferStatus));
+            log_event($pdo, 'paystack_transfer_failed', 'Withdrawal #' . $requestId . ' transfer status: ' . $transferStatus, (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
         }
         redirect_to('admin/index.php');
     }
@@ -193,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
             flash('success', t('admin.marked_paid'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+            log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' marked paid manually', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'manual' => true]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -215,6 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$user['id'], $note !== '' ? $note : null, $requestId]);
             flash('success', t('admin.marked_rejected'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'rejected', $note !== '' ? $note : null);
+            log_event($pdo, 'withdrawal_rejected', 'Withdrawal #' . $requestId . ' rejected', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['note' => $note]);
         }
         redirect_to('admin/index.php');
     }
@@ -373,6 +381,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>

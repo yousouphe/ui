@@ -163,7 +163,7 @@ function require_guest(): void {
         $user = current_user();
         $role = $user['role'] ?? '';
         if ($role === 'rider') redirect_to('rider/');
-        if ($role === 'admin') redirect_to('admin/');
+        if (in_array($role, ['admin', 'super_admin'], true)) redirect_to('admin/');
         redirect_to('bookings/');
     }
 }
@@ -378,4 +378,44 @@ function complaint_category_label(string $category): string {
     $key = 'complaint.category.' . $category;
     $label = t($key);
     return $label !== $key ? $label : ucwords(str_replace('_', ' ', $category));
+}
+
+// Once the rider has confirmed payment received, the delivery is fully closed out and
+// there's no more reason for either party to be able to call/message the other directly -
+// phone numbers stop being shown from this point on, on every dashboard and the public
+// tracking link.
+function booking_is_concluded(array $booking): bool {
+    return (int) ($booking['rider_payment_confirmed'] ?? 0) === 1;
+}
+
+// Central troubleshooting trail for admins - bookings, payments, withdrawals, admin
+// actions, and outbound emails all funnel through here. A logging failure must never
+// break the calling flow, same principle as the mailer.
+function log_event(
+    PDO $pdo,
+    string $eventType,
+    string $description,
+    ?int $actorUserId = null,
+    ?string $actorRole = null,
+    ?string $targetType = null,
+    ?int $targetId = null,
+    array $meta = []
+): void {
+    try {
+        $stmt = $pdo->prepare('
+            INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute([
+            $eventType,
+            $actorUserId,
+            $actorRole,
+            $targetType,
+            $targetId,
+            $description,
+            $meta !== [] ? json_encode($meta) : null,
+        ]);
+    } catch (Throwable $e) {
+        error_log('log_event failed for ' . $eventType . ': ' . $e->getMessage());
+    }
 }

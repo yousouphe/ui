@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin']);
+require_role(['sender', 'admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
@@ -48,7 +48,7 @@ function realtime_booking_context(PDO $pdo, array $user, int $bookingId): ?array
     if ($role === 'rider') {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
         $stmt->execute([$bookingId, (int)$user['id']]);
-    } elseif ($role === 'admin') {
+    } elseif (in_array($role, ['admin', 'super_admin'], true)) {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? LIMIT 1');
         $stmt->execute([$bookingId]);
     } else {
@@ -301,6 +301,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute($payload);
 
             $selectedBookingId = (int) $pdo->lastInsertId();
+
+            log_event($pdo, $saveAsDraft ? 'booking_drafted' : 'booking_created', 'Booking ' . $payload['booking_code'] . ' ' . ($saveAsDraft ? 'saved as draft' : 'submitted'), (int) $user['id'], (string) $user['role'], 'booking', $selectedBookingId);
 
             if ($saveAsDraft) {
                 flash('success', 'Booking saved as draft.');
@@ -593,6 +595,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         data-selected-booking-id="<?= (int) $selectedBookingId ?>"
         data-selected-booking-status="<?= e((string) ($selectedBooking['booking_status'] ?? '')) ?>"
         data-selected-payment-status="<?= e((string) ($selectedBooking['payment_status'] ?? 'unpaid')) ?>"
+        data-selected-rider-payment-confirmed="<?= booking_is_concluded($selectedBooking ?? []) ? '1' : '0' ?>"
         data-selected-has-rider="<?= !empty($selectedBooking['selected_rider_user_id']) ? '1' : '0' ?>"
         data-needs-rider="<?= $needsRider ? '1' : '0' ?>"
         data-can-track="<?= $canTrack ? '1' : '0' ?>"
@@ -810,7 +813,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     <div class="col-md-6">
                         <div class="small text-soft mb-2"><strong><?= e(t('booking.distance_label')) ?></strong> <?= $selectedDistanceKm !== null ? number_format($selectedDistanceKm, 2) . ' km' : '--' ?></div>
                         <div class="small text-soft mb-2"><strong><?= e(t('booking.rider_label')) ?></strong> <?= e((string) ($selectedBooking['rider_name'] ?? t('booking.not_assigned_yet'))) ?></div>
+                        <?php if (!booking_is_concluded($selectedBooking)): ?>
                         <div class="small text-soft mb-2"><strong><?= e(t('booking.rider_phone_label')) ?></strong> <?= e((string) ($selectedBooking['rider_phone'] ?? '--')) ?></div>
+                        <?php endif; ?>
                         <?php if (trim((string) ($selectedBooking['special_instructions'] ?? '')) !== ''): ?>
                             <div class="small text-soft mb-2"><strong><?= e(t('booking.instructions_label')) ?></strong> <?= e($selectedBooking['special_instructions']) ?></div>
                         <?php endif; ?>
@@ -1136,7 +1141,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <?php if (!empty($selectedBooking['rider_phone'])): ?>
+                    <?php if (!empty($selectedBooking['rider_phone']) && !booking_is_concluded($selectedBooking)): ?>
                     <a class="chat-icon-btn" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $selectedBooking['rider_phone'])) ?>" title="<?= e(t('chat.call_rider_phone_title')) ?>">
                         <i class="fa-solid fa-phone"></i>
                     </a>
@@ -1473,6 +1478,7 @@ function initSenderWorkspace() {
     const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
     const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
     const selectedPaymentStatus = root.dataset.selectedPaymentStatus || 'unpaid';
+    const selectedRiderPaymentConfirmed = root.dataset.selectedRiderPaymentConfirmed === '1';
     const selectedHasRider = root.dataset.selectedHasRider === '1';
     const shouldSearchRiders = root.dataset.needsRider === '1';
     const canTrack = root.dataset.canTrack === '1';
@@ -1896,6 +1902,7 @@ function initSenderWorkspace() {
             let currentTrackTarget = null;
             let trackedBookingStatus = selectedBookingStatus;
             let trackedPaymentStatus = selectedPaymentStatus;
+            let trackedRiderPaymentConfirmed = selectedRiderPaymentConfirmed;
 
             async function pollTracking() {
                 try {
@@ -1908,9 +1915,11 @@ function initSenderWorkspace() {
                     // A status/payment change can flip which action buttons, rating widget, or
                     // payment prompt should be visible - those are server-rendered, so refresh
                     // the whole workspace fragment rather than just patching the status text.
-                    if (d.booking_status !== trackedBookingStatus || d.payment_status !== trackedPaymentStatus) {
+                    const riderPaymentConfirmedNow = !!d.rider_payment_confirmed;
+                    if (d.booking_status !== trackedBookingStatus || d.payment_status !== trackedPaymentStatus || riderPaymentConfirmedNow !== trackedRiderPaymentConfirmed) {
                         trackedBookingStatus = d.booking_status;
                         trackedPaymentStatus = d.payment_status;
+                        trackedRiderPaymentConfirmed = riderPaymentConfirmedNow;
                         ajaxLoadWorkspace(`<?= e(url_path('bookings/')) ?>?booking_id=${selectedBookingId}`, false);
                         return;
                     }

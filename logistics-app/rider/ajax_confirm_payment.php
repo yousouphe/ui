@@ -93,6 +93,8 @@ send_rider_earning_email((string) $user['email'], (string) $user['full_name'], [
     'item_name' => $booking['item_name'],
 ], $payoutAmount);
 
+log_event($pdo, 'booking_concluded', 'Booking ' . $booking['booking_code'] . ' concluded - rider confirmed payment received', (int) $user['id'], (string) $user['role'], 'booking', $bookingId, ['payout' => $payoutAmount]);
+
 echo json_encode(['success' => true, 'message' => 'Payment confirmed. Job closed out.']);
 // Send the response now; the deferred email dispatch above runs afterward via a
 // shutdown function, so a slow/unreachable mail server can never delay this reply.

@@ -14,6 +14,7 @@ if ($token === '') {
 $stmt = $pdo->prepare("
     SELECT
         b.booking_status,
+        b.rider_payment_confirmed,
         b.pickup_latitude,
         b.pickup_longitude,
         b.delivery_latitude,
@@ -38,6 +39,7 @@ if (!$data) {
 $etag = sha1(implode('|', [
     $token,
     $data['booking_status'] ?? '',
+    $data['rider_payment_confirmed'] ?? '',
     $data['last_latitude'] ?? '',
     $data['last_longitude'] ?? '',
     $data['state_version'] ?? ''
@@ -48,6 +50,7 @@ echo json_encode([
     'status' => true,
     'data' => [
         'booking_status' => $data['booking_status'],
+        'rider_payment_confirmed' => (int) $data['rider_payment_confirmed'],
         'rider_lat' => $data['last_latitude'],
         'rider_lng' => $data['last_longitude'],
         'vehicle_type' => $data['vehicle_type'],

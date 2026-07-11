@@ -1,18 +1,27 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['admin']);
+require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
 $success = flash('success');
 $error = flash('error');
+$isSuperAdmin = $user['role'] === 'super_admin';
 
-$allowedRoles = ['sender', 'rider', 'admin'];
+$allowedRoles = ['sender', 'rider', 'admin', 'super_admin'];
+$adminLevelRoles = ['admin', 'super_admin'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $targetUserId = (int) ($_POST['user_id'] ?? 0);
     $formAction = (string) ($_POST['form_action'] ?? '');
+
+    // Only a super admin can assign roles - a regular admin can still suspend/activate
+    // accounts, but role assignment (including promoting to admin) is super-admin-only.
+    if ($formAction === 'change_role' && !$isSuperAdmin) {
+        flash('error', t('admin.role_change_requires_super_admin'));
+        redirect_to('admin/users.php');
+    }
 
     if ($targetUserId === (int) $user['id'] && in_array($formAction, ['change_role', 'suspend_user'], true)) {
         flash('error', t('admin.cannot_modify_self'));
@@ -35,8 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('admin/users.php');
         }
 
-        if ($targetUser['role'] === 'admin' && $newRole !== 'admin') {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'");
+        if (in_array($targetUser['role'], $adminLevelRoles, true) && !in_array($newRole, $adminLevelRoles, true)) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role IN ('admin', 'super_admin') AND status = 'active'");
             $stmt->execute();
             if ((int) $stmt->fetchColumn() <= 1) {
                 flash('error', t('admin.cannot_demote_last_admin'));
@@ -57,12 +66,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         flash('success', t('admin.role_updated'));
+        log_event($pdo, 'role_changed', 'Changed role of ' . $targetUser['full_name'] . ' from ' . $targetUser['role'] . ' to ' . $newRole, (int) $user['id'], (string) $user['role'], 'user', $targetUserId, ['from' => $targetUser['role'], 'to' => $newRole]);
         redirect_to('admin/users.php');
     }
 
     if ($formAction === 'suspend_user') {
-        if ($targetUser['role'] === 'admin') {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'");
+        if (in_array($targetUser['role'], $adminLevelRoles, true)) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role IN ('admin', 'super_admin') AND status = 'active'");
             $stmt->execute();
             if ((int) $stmt->fetchColumn() <= 1) {
                 flash('error', t('admin.cannot_suspend_last_admin'));
@@ -74,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE rider_profiles SET availability_status = "offline" WHERE user_id = ?');
         $stmt->execute([$targetUserId]);
         flash('success', t('admin.user_suspended'));
+        log_event($pdo, 'user_suspended', 'Suspended ' . $targetUser['full_name'], (int) $user['id'], (string) $user['role'], 'user', $targetUserId);
         redirect_to('admin/users.php');
     }
 
@@ -81,6 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE users SET status = "active" WHERE id = ?');
         $stmt->execute([$targetUserId]);
         flash('success', t('admin.user_activated'));
+        log_event($pdo, 'user_activated', 'Activated ' . $targetUser['full_name'], (int) $user['id'], (string) $user['role'], 'user', $targetUserId);
         redirect_to('admin/users.php');
     }
 }
@@ -109,6 +121,7 @@ $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 function admin_role_badge_class(string $role): string {
     return match ($role) {
+        'super_admin' => 'bg-dark',
         'admin' => 'bg-primary',
         'rider' => 'bg-info text-dark',
         default => 'bg-secondary',
@@ -146,6 +159,7 @@ function admin_role_badge_class(string $role): string {
             <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>
@@ -171,6 +185,7 @@ function admin_role_badge_class(string $role): string {
                     <option value="sender" <?= $roleFilter === 'sender' ? 'selected' : '' ?>><?= e(t('register.account_type_sender')) ?></option>
                     <option value="rider" <?= $roleFilter === 'rider' ? 'selected' : '' ?>><?= e(t('register.account_type_rider')) ?></option>
                     <option value="admin" <?= $roleFilter === 'admin' ? 'selected' : '' ?>><?= e(t('admin.role_admin')) ?></option>
+                    <option value="super_admin" <?= $roleFilter === 'super_admin' ? 'selected' : '' ?>><?= e(t('admin.role_super_admin')) ?></option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -203,17 +218,20 @@ function admin_role_badge_class(string $role): string {
                     </div>
                     <div class="d-flex flex-wrap gap-2 align-items-center">
                         <?php if ((int) $u['id'] !== (int) $user['id']): ?>
-                            <form method="post" class="d-flex gap-1 align-items-center">
-                                <?= csrf_field() ?>
-                                <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
-                                <input type="hidden" name="form_action" value="change_role">
-                                <select name="role" class="form-select form-select-sm" style="width:auto">
-                                    <option value="sender" <?= $u['role'] === 'sender' ? 'selected' : '' ?>><?= e(t('register.account_type_sender')) ?></option>
-                                    <option value="rider" <?= $u['role'] === 'rider' ? 'selected' : '' ?>><?= e(t('register.account_type_rider')) ?></option>
-                                    <option value="admin" <?= $u['role'] === 'admin' ? 'selected' : '' ?>><?= e(t('admin.role_admin')) ?></option>
-                                </select>
-                                <button class="btn btn-sm btn-outline-primary fw-bold" type="submit"><?= e(t('admin.change_role')) ?></button>
-                            </form>
+                            <?php if ($isSuperAdmin): ?>
+                                <form method="post" class="d-flex gap-1 align-items-center">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                    <input type="hidden" name="form_action" value="change_role">
+                                    <select name="role" class="form-select form-select-sm" style="width:auto">
+                                        <option value="sender" <?= $u['role'] === 'sender' ? 'selected' : '' ?>><?= e(t('register.account_type_sender')) ?></option>
+                                        <option value="rider" <?= $u['role'] === 'rider' ? 'selected' : '' ?>><?= e(t('register.account_type_rider')) ?></option>
+                                        <option value="admin" <?= $u['role'] === 'admin' ? 'selected' : '' ?>><?= e(t('admin.role_admin')) ?></option>
+                                        <option value="super_admin" <?= $u['role'] === 'super_admin' ? 'selected' : '' ?>><?= e(t('admin.role_super_admin')) ?></option>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-primary fw-bold" type="submit"><?= e(t('admin.change_role')) ?></button>
+                                </form>
+                            <?php endif; ?>
                             <form method="post" class="d-inline">
                                 <?= csrf_field() ?>
                                 <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">

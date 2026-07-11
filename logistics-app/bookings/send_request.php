@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin']);
+require_role(['sender', 'admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 $user = current_user();
@@ -76,7 +76,7 @@ try {
     $pdo->beginTransaction();
 
     // Lock booking row
-    if (($user['role'] ?? '') === 'admin') {
+    if (in_array($user['role'] ?? '', ['admin', 'super_admin'], true)) {
         $stmt = $pdo->prepare("
             SELECT *
             FROM bookings

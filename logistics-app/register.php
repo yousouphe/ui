@@ -32,6 +32,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $vehicleType = in_array($vehicleType, ['bike', 'car', 'van'], true) ? $vehicleType : 'bike';
     $vehiclePlate = trim($_POST['vehicle_plate'] ?? '');
     $vehicleColor = trim($_POST['vehicle_color'] ?? '');
+    $age = trim($_POST['age'] ?? '');
+    $stateOfOrigin = trim($_POST['state_of_origin'] ?? '');
+    $lgaOfOrigin = trim($_POST['lga_of_origin'] ?? '');
+    $hometown = trim($_POST['hometown'] ?? '');
+    $nationalIdNumber = trim($_POST['national_id_number'] ?? '');
+    $riderAddress = trim($_POST['address'] ?? '');
+    $guarantorName = trim($_POST['guarantor_name'] ?? '');
+    $guarantorPhone = trim($_POST['guarantor_phone'] ?? '');
+    $guarantorAddress = trim($_POST['guarantor_address'] ?? '');
+    $guarantorRelationship = trim($_POST['guarantor_relationship'] ?? '');
 
     if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = t('register.error.invalid_email');
     if ($password && strlen($password) < 6) $errors['password'] = t('register.error.password_length');
@@ -41,6 +51,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($vehiclePlate === '') $errors['vehicle_plate'] = t('register.error.vehicle_plate_required');
         if (empty($_FILES['kyc_document']['name'])) $errors['kyc_document'] = t('register.error.kyc_document_required');
         if (empty($_FILES['profile_photo']['name'])) $errors['profile_photo'] = t('register.error.profile_photo_required');
+
+        if ($age === '' ) $errors['age'] = t('register.error.age_required');
+        elseif (!ctype_digit($age) || (int)$age < 18 || (int)$age > 100) $errors['age'] = t('register.error.age_invalid');
+        if ($nationalIdNumber === '') $errors['national_id_number'] = t('register.error.national_id_required');
+        if ($stateOfOrigin === '') $errors['state_of_origin'] = t('register.error.state_of_origin_required');
+        if ($lgaOfOrigin === '') $errors['lga_of_origin'] = t('register.error.lga_of_origin_required');
+        if ($hometown === '') $errors['hometown'] = t('register.error.hometown_required');
+        if ($riderAddress === '') $errors['address'] = t('register.error.address_required');
+        if (empty($_FILES['proof_of_address']['name'])) $errors['proof_of_address'] = t('register.error.proof_of_address_required');
+
+        if ($guarantorName === '') $errors['guarantor_name'] = t('register.error.guarantor_name_required');
+        if ($guarantorPhone === '') $errors['guarantor_phone'] = t('register.error.guarantor_phone_required');
+        if ($guarantorAddress === '') $errors['guarantor_address'] = t('register.error.guarantor_address_required');
+        if ($guarantorRelationship === '') $errors['guarantor_relationship'] = t('register.error.guarantor_relationship_required');
+
+        if (empty($_FILES['vehicle_document']['name'])) $errors['vehicle_document'] = t('register.error.vehicle_document_required');
+        if (in_array($vehicleType, ['car', 'van'], true) && empty($_FILES['driving_license']['name'])) {
+            $errors['driving_license'] = t('register.error.driving_license_required');
+        }
     }
 
     if (!$errors) {
@@ -51,6 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $kycDocPath = null;
     $profilePhotoPath = null;
+    $proofOfAddressPath = null;
+    $vehicleDocumentPath = null;
+    $drivingLicensePath = null;
     if (!$errors && $accountType === 'rider') {
         try {
             $kycDocPath = save_kyc_document($_FILES['kyc_document']);
@@ -61,6 +93,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $profilePhotoPath = save_uploaded_image($_FILES['profile_photo'], 'avatars', 'avatar', t('profile.avatar_label'));
         } catch (Throwable $e) {
             $errors['profile_photo'] = $e->getMessage();
+        }
+        try {
+            $proofOfAddressPath = save_uploaded_image($_FILES['proof_of_address'], 'kyc', 'proof_address', t('register.proof_of_address_label'));
+        } catch (Throwable $e) {
+            $errors['proof_of_address'] = $e->getMessage();
+        }
+        try {
+            $vehicleDocumentPath = save_uploaded_image($_FILES['vehicle_document'], 'kyc', 'vehicle_doc', t('register.vehicle_document_label'));
+        } catch (Throwable $e) {
+            $errors['vehicle_document'] = $e->getMessage();
+        }
+        if (in_array($vehicleType, ['car', 'van'], true)) {
+            try {
+                $drivingLicensePath = save_uploaded_image($_FILES['driving_license'], 'kyc', 'license', t('register.driving_license_label'));
+            } catch (Throwable $e) {
+                $errors['driving_license'] = $e->getMessage();
+            }
         }
     }
 
@@ -75,10 +124,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($accountType === 'rider') {
                 $stmt = $pdo->prepare('
-                    INSERT INTO rider_profiles (user_id, vehicle_type, availability_status, kyc_status, kyc_id_document_path, kyc_vehicle_plate, kyc_vehicle_color)
-                    VALUES (?, ?, "offline", "pending", ?, ?, ?)
+                    INSERT INTO rider_profiles (
+                        user_id, vehicle_type, availability_status, kyc_status,
+                        kyc_id_document_path, kyc_vehicle_plate, kyc_vehicle_color,
+                        kyc_age, kyc_state_of_origin, kyc_lga_of_origin, kyc_hometown,
+                        kyc_national_id_number, kyc_address, kyc_proof_of_address_path,
+                        kyc_guarantor_name, kyc_guarantor_phone, kyc_guarantor_address, kyc_guarantor_relationship,
+                        kyc_vehicle_document_path, kyc_driving_license_path
+                    )
+                    VALUES (?, ?, "offline", "pending", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ');
-                $stmt->execute([$newUserId, $vehicleType, $kycDocPath, $vehiclePlate, $vehicleColor !== '' ? $vehicleColor : null]);
+                $stmt->execute([
+                    $newUserId, $vehicleType, $kycDocPath, $vehiclePlate, $vehicleColor !== '' ? $vehicleColor : null,
+                    (int) $age, $stateOfOrigin, $lgaOfOrigin, $hometown,
+                    $nationalIdNumber, $riderAddress, $proofOfAddressPath,
+                    $guarantorName, $guarantorPhone, $guarantorAddress, $guarantorRelationship,
+                    $vehicleDocumentPath, $drivingLicensePath,
+                ]);
             }
 
             $pdo->commit();
@@ -183,9 +245,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php if (!empty($errors['password_confirmation'])): ?><div class="small text-danger mt-1"><?= e($errors['password_confirmation']) ?></div><?php endif; ?>
               </div>
               <div id="rider-fields" class="<?= $accountType === 'rider' ? '' : 'd-none' ?>">
+                <h2 class="h6 fw-bold text-uppercase text-soft mt-2 mb-3"><?= e(t('register.vehicle_heading')) ?></h2>
                 <div class="mb-3">
                   <label class="form-label"><?= e(t('register.vehicle_type_label')) ?></label>
-                  <select class="form-select" name="vehicle_type">
+                  <select class="form-select" name="vehicle_type" id="vehicle_type_select">
                     <option value="bike"><?= e(t('vehicle.bike')) ?></option>
                     <option value="car"><?= e(t('vehicle.car')) ?></option>
                     <option value="van"><?= e(t('vehicle.van')) ?></option>
@@ -201,6 +264,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   <input class="form-control" name="vehicle_color" value="<?= e(old('vehicle_color')) ?>">
                 </div>
                 <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.vehicle_document_label')) ?></label>
+                  <input class="form-control" type="file" name="vehicle_document" accept="image/jpeg,image/png,image/webp">
+                  <div class="form-text text-soft"><?= e(t('register.vehicle_document_hint')) ?></div>
+                  <?php if (!empty($errors['vehicle_document'])): ?><div class="small text-danger mt-1"><?= e($errors['vehicle_document']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-4" id="driving-license-field">
+                  <label class="form-label"><?= e(t('register.driving_license_label')) ?></label>
+                  <input class="form-control" type="file" name="driving_license" accept="image/jpeg,image/png,image/webp">
+                  <div class="form-text text-soft"><?= e(t('register.driving_license_hint')) ?></div>
+                  <?php if (!empty($errors['driving_license'])): ?><div class="small text-danger mt-1"><?= e($errors['driving_license']) ?></div><?php endif; ?>
+                </div>
+
+                <h2 class="h6 fw-bold text-uppercase text-soft mt-3 mb-3"><?= e(t('register.biodata_heading')) ?></h2>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.age_label')) ?></label>
+                  <input class="form-control" type="number" min="18" max="100" name="age" value="<?= e(old('age')) ?>">
+                  <?php if (!empty($errors['age'])): ?><div class="small text-danger mt-1"><?= e($errors['age']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.national_id_label')) ?></label>
+                  <input class="form-control" name="national_id_number" value="<?= e(old('national_id_number')) ?>">
+                  <?php if (!empty($errors['national_id_number'])): ?><div class="small text-danger mt-1"><?= e($errors['national_id_number']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.state_of_origin_label')) ?></label>
+                  <input class="form-control" name="state_of_origin" value="<?= e(old('state_of_origin')) ?>">
+                  <?php if (!empty($errors['state_of_origin'])): ?><div class="small text-danger mt-1"><?= e($errors['state_of_origin']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.lga_of_origin_label')) ?></label>
+                  <input class="form-control" name="lga_of_origin" value="<?= e(old('lga_of_origin')) ?>">
+                  <?php if (!empty($errors['lga_of_origin'])): ?><div class="small text-danger mt-1"><?= e($errors['lga_of_origin']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.hometown_label')) ?></label>
+                  <input class="form-control" name="hometown" value="<?= e(old('hometown')) ?>">
+                  <?php if (!empty($errors['hometown'])): ?><div class="small text-danger mt-1"><?= e($errors['hometown']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.address_label')) ?></label>
+                  <textarea class="form-control" name="address" rows="2"><?= e(old('address')) ?></textarea>
+                  <?php if (!empty($errors['address'])): ?><div class="small text-danger mt-1"><?= e($errors['address']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.proof_of_address_label')) ?></label>
+                  <input class="form-control" type="file" name="proof_of_address" accept="image/jpeg,image/png,image/webp">
+                  <div class="form-text text-soft"><?= e(t('register.proof_of_address_hint')) ?></div>
+                  <?php if (!empty($errors['proof_of_address'])): ?><div class="small text-danger mt-1"><?= e($errors['proof_of_address']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
                   <label class="form-label"><?= e(t('register.kyc_document_label')) ?></label>
                   <input class="form-control" type="file" name="kyc_document" accept="image/jpeg,image/png,image/webp">
                   <div class="form-text text-soft"><?= e(t('register.kyc_document_hint')) ?></div>
@@ -212,6 +325,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   <div class="form-text text-soft"><?= e(t('register.profile_photo_hint')) ?></div>
                   <?php if (!empty($errors['profile_photo'])): ?><div class="small text-danger mt-1"><?= e($errors['profile_photo']) ?></div><?php endif; ?>
                 </div>
+
+                <h2 class="h6 fw-bold text-uppercase text-soft mt-3 mb-3"><?= e(t('register.guarantor_heading')) ?></h2>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.guarantor_name_label')) ?></label>
+                  <input class="form-control" name="guarantor_name" value="<?= e(old('guarantor_name')) ?>">
+                  <?php if (!empty($errors['guarantor_name'])): ?><div class="small text-danger mt-1"><?= e($errors['guarantor_name']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.guarantor_phone_label')) ?></label>
+                  <input class="form-control" name="guarantor_phone" value="<?= e(old('guarantor_phone')) ?>">
+                  <?php if (!empty($errors['guarantor_phone'])): ?><div class="small text-danger mt-1"><?= e($errors['guarantor_phone']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.guarantor_address_label')) ?></label>
+                  <textarea class="form-control" name="guarantor_address" rows="2"><?= e(old('guarantor_address')) ?></textarea>
+                  <?php if (!empty($errors['guarantor_address'])): ?><div class="small text-danger mt-1"><?= e($errors['guarantor_address']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-4">
+                  <label class="form-label"><?= e(t('register.guarantor_relationship_label')) ?></label>
+                  <input class="form-control" name="guarantor_relationship" value="<?= e(old('guarantor_relationship')) ?>">
+                  <?php if (!empty($errors['guarantor_relationship'])): ?><div class="small text-danger mt-1"><?= e($errors['guarantor_relationship']) ?></div><?php endif; ?>
+                </div>
               </div>
               <div class="d-flex gap-2 flex-wrap">
                 <button class="btn btn-primary" type="submit"><?= e(t('register.submit')) ?></button>
@@ -219,6 +354,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               </div>
             </form>
             <script>
+              function updateDrivingLicenseVisibility() {
+                var vehicleType = document.getElementById('vehicle_type_select').value;
+                var field = document.getElementById('driving-license-field');
+                if (field) field.classList.toggle('d-none', vehicleType === 'bike');
+              }
               document.querySelectorAll('.account-type-tab').forEach(function (btn) {
                 btn.addEventListener('click', function () {
                   document.querySelectorAll('.account-type-tab').forEach(function (b) { b.classList.remove('active'); });
@@ -226,19 +366,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   var type = btn.getAttribute('data-type');
                   document.getElementById('account_type').value = type;
                   document.getElementById('rider-fields').classList.toggle('d-none', type !== 'rider');
+                  document.getElementById('sender-features').classList.toggle('d-none', type !== 'sender');
+                  document.getElementById('rider-features').classList.toggle('d-none', type !== 'rider');
                 });
               });
+              document.getElementById('vehicle_type_select').addEventListener('change', updateDrivingLicenseVisibility);
+              updateDrivingLicenseVisibility();
             </script>
           </div>
           <div class="col-lg-6">
             <div class="cardx p-4 h-100">
-              <h2 class="h4"><?= e(t('register.features_heading')) ?></h2>
-              <ul class="text-soft mb-0">
-                <li class="mb-2"><?= e(t('register.feature.1')) ?></li>
-                <li class="mb-2"><?= e(t('register.feature.2')) ?></li>
-                <li class="mb-2"><?= e(t('register.feature.3')) ?></li>
-                <li class="mb-2"><?= e(t('register.feature.4')) ?></li>
-              </ul>
+              <div id="sender-features" class="<?= $accountType === 'rider' ? 'd-none' : '' ?>">
+                <h2 class="h4"><?= e(t('register.features_heading_sender')) ?></h2>
+                <ul class="text-soft mb-0">
+                  <li class="mb-2"><?= e(t('register.sender_feature.1')) ?></li>
+                  <li class="mb-2"><?= e(t('register.sender_feature.2')) ?></li>
+                  <li class="mb-2"><?= e(t('register.sender_feature.3')) ?></li>
+                  <li class="mb-2"><?= e(t('register.sender_feature.4')) ?></li>
+                </ul>
+              </div>
+              <div id="rider-features" class="<?= $accountType === 'rider' ? '' : 'd-none' ?>">
+                <h2 class="h4"><?= e(t('register.features_heading_rider')) ?></h2>
+                <ul class="text-soft mb-0">
+                  <li class="mb-2"><?= e(t('register.rider_feature.1')) ?></li>
+                  <li class="mb-2"><?= e(t('register.rider_feature.2')) ?></li>
+                  <li class="mb-2"><?= e(t('register.rider_feature.3')) ?></li>
+                  <li class="mb-2"><?= e(t('register.rider_feature.4')) ?></li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>

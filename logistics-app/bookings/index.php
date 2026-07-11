@@ -575,6 +575,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
             <div class="small">

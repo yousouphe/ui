@@ -362,3 +362,20 @@ function admin_emails(PDO $pdo): array {
     $stmt->execute();
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+// Shared between admin/complaints.php and bookings/complaints.php so both sides of the
+// complaint lifecycle render the same badge colors and category wording.
+function complaint_status_badge_class(string $status): string {
+    return match ($status) {
+        'open' => 'bg-danger',
+        'reviewing' => 'bg-warning text-dark',
+        'resolved' => 'bg-success',
+        default => 'bg-dark border border-secondary',
+    };
+}
+
+function complaint_category_label(string $category): string {
+    $key = 'complaint.category.' . $category;
+    $label = t($key);
+    return $label !== $key ? $label : ucwords(str_replace('_', ' ', $category));
+}

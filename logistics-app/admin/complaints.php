@@ -60,23 +60,7 @@ $stmt = $pdo->prepare("
 $stmt->execute();
 $complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-function admin_complaint_badge_class(string $status): string {
-    return match ($status) {
-        'open' => 'bg-danger',
-        'reviewing' => 'bg-warning text-dark',
-        'resolved' => 'bg-success',
-        default => 'bg-dark border border-secondary',
-    };
-}
-
 function render_complaints_html(array $rows): string {
-    $categoryLabels = [
-        'damaged_item' => 'complaint.category.damaged_item',
-        'late_delivery' => 'complaint.category.late_delivery',
-        'wrong_item' => 'complaint.category.wrong_item',
-        'rider_behavior' => 'complaint.category.rider_behavior',
-        'other' => 'complaint.category.other',
-    ];
     if (empty($rows)) {
         return '<div class="text-soft">' . e(t('admin.no_complaints')) . '</div>';
     }
@@ -85,18 +69,28 @@ function render_complaints_html(array $rows): string {
         <div class="req-card p-3">
             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
                 <div>
-                    <div class="fw-bold"><?= e((string) $c['booking_code']) ?> &middot; <?= e(t($categoryLabels[$c['category']] ?? $c['category'])) ?></div>
+                    <div class="fw-bold"><?= e((string) $c['booking_code']) ?> &middot; <?= e(complaint_category_label((string) $c['category'])) ?></div>
                     <div class="small text-soft">
                         <?= e(t('admin.complaint_from_label')) ?>: <?= e((string) $c['sender_name']) ?>
                         <?php if (!empty($c['rider_name'])): ?> &middot; <?= e(t('admin.complaint_rider_label')) ?>: <?= e((string) $c['rider_name']) ?><?php endif; ?>
                         &middot; <?= e((string) $c['created_at']) ?>
                     </div>
                 </div>
-                <span class="badge <?= e(admin_complaint_badge_class((string) $c['status'])) ?>"><?= e(booking_status_label((string) $c['status'])) ?></span>
+                <span class="badge <?= e(complaint_status_badge_class((string) $c['status'])) ?>"><?= e(booking_status_label((string) $c['status'])) ?></span>
             </div>
             <p class="mb-2"><?= nl2br(e((string) $c['message'])) ?></p>
             <?php if (!empty($c['admin_note'])): ?>
                 <div class="small text-soft mb-2"><?= e(t('admin.admin_note_label')) ?>: <?= e((string) $c['admin_note']) ?></div>
+            <?php endif; ?>
+            <?php if (!empty($c['feedback_submitted_at'])): ?>
+                <div class="small mb-2 p-2 rounded" style="background:rgba(15,42,68,.04)">
+                    <span class="badge <?= (int) $c['sender_satisfied'] === 1 ? 'bg-success' : 'bg-danger' ?>">
+                        <?= (int) $c['sender_satisfied'] === 1 ? e(t('complaint.feedback_satisfied_label')) : e(t('complaint.feedback_unsatisfied_label')) ?>
+                    </span>
+                    <?php if (!empty($c['sender_feedback_text'])): ?>
+                        <span class="text-soft">&mdash; "<?= e((string) $c['sender_feedback_text']) ?>"</span>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
             <form method="post" class="d-flex flex-wrap gap-2 align-items-center">
                 <?= csrf_field() ?>

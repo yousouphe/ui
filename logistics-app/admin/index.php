@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['admin']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $user = current_user();
 $success = flash('success');
@@ -12,7 +13,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $requestId = (int) ($_POST['request_id'] ?? 0);
     $formAction = (string) ($_POST['form_action'] ?? '');
 
-    $stmt = $pdo->prepare('SELECT * FROM withdrawal_requests WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('
+        SELECT wr.*, u.full_name AS rider_full_name, u.email AS rider_email
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.id = ?
+        LIMIT 1
+    ');
     $stmt->execute([$requestId]);
     $withdrawal = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -28,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare('UPDATE withdrawal_requests SET status = "processing", admin_user_id = ? WHERE id = ?');
             $stmt->execute([$user['id'], $requestId]);
             flash('success', t('admin.marked_processing'));
+            send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'processing');
         }
         redirect_to('admin/index.php');
     }
@@ -65,6 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->commit();
             flash('success', t('admin.marked_paid'));
+            send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -86,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ');
             $stmt->execute([$user['id'], $note !== '' ? $note : null, $requestId]);
             flash('success', t('admin.marked_rejected'));
+            send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'rejected', $note !== '' ? $note : null);
         }
         redirect_to('admin/index.php');
     }
@@ -121,6 +131,86 @@ function admin_withdrawal_status_badge_class(string $status): string {
         default => 'bg-dark border border-secondary',
     };
 }
+
+function render_open_withdrawals_html(array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('admin.no_pending_requests')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $w): ?>
+        <div class="req-card p-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                <div>
+                    <div class="fw-bold"><?= e((string) $w['rider_name']) ?></div>
+                    <div class="small text-soft"><?= e((string) ($w['rider_phone'] ?? '')) ?></div>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="price-tag">&#8358;<?= number_format((float) $w['amount'], 2) ?></span>
+                    <span class="badge <?= e(admin_withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
+                </div>
+            </div>
+            <div class="small text-soft mb-1"><?= e(t('wallet.bank_name_label')) ?>: <?= e((string) $w['bank_name']) ?></div>
+            <div class="small text-soft mb-1"><?= e(t('wallet.account_number_label')) ?>: <?= e((string) $w['account_number']) ?></div>
+            <div class="small text-soft mb-2"><?= e(t('wallet.account_name_label')) ?>: <?= e((string) $w['account_name']) ?></div>
+            <div class="small text-soft mb-3"><?= e(t('admin.requested_at_label')) ?>: <?= e((string) $w['requested_at']) ?></div>
+
+            <div class="d-flex flex-wrap gap-2">
+                <?php if ($w['status'] === 'pending'): ?>
+                    <form method="post" class="d-inline">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
+                        <input type="hidden" name="form_action" value="mark_processing">
+                        <button class="btn btn-sm btn-outline-info fw-bold" type="submit"><?= e(t('admin.mark_processing')) ?></button>
+                    </form>
+                <?php endif; ?>
+                <form method="post" class="d-inline">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
+                    <input type="hidden" name="form_action" value="mark_paid">
+                    <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.mark_paid')) ?></button>
+                </form>
+                <form method="post" class="d-inline d-flex gap-2 align-items-center">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
+                    <input type="hidden" name="form_action" value="reject">
+                    <input type="text" name="admin_note" class="form-control form-control-sm" placeholder="<?= e(t('admin.rejection_note_placeholder')) ?>" style="max-width:220px">
+                    <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.reject')) ?></button>
+                </form>
+            </div>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+function render_closed_withdrawals_html(array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('admin.no_history')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $w): ?>
+        <div class="mini-row">
+            <div>
+                <div class="fw-bold"><?= e((string) $w['rider_name']) ?> &middot; &#8358;<?= number_format((float) $w['amount'], 2) ?></div>
+                <div class="small text-soft"><?= e((string) ($w['processed_at'] ?? $w['requested_at'])) ?><?php if (!empty($w['admin_note'])): ?> &middot; <?= e((string) $w['admin_note']) ?><?php endif; ?></div>
+            </div>
+            <span class="badge <?= e(admin_withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+$openWithdrawalsHtml = render_open_withdrawals_html($openRequests);
+$closedWithdrawalsHtml = render_closed_withdrawals_html($closedRequests);
+$withdrawalsSignature = sha1(json_encode([$openRequests, $closedRequests]));
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
+    respond_json([
+        'open_html' => $openWithdrawalsHtml,
+        'closed_html' => $closedWithdrawalsHtml,
+        'open_count' => count($openRequests),
+        'signature' => $withdrawalsSignature,
+    ]);
+}
 ?>
 <!doctype html>
 <html lang="<?= e(current_locale()) ?>">
@@ -151,6 +241,8 @@ function admin_withdrawal_status_badge_class(string $status): string {
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>
     </div>
@@ -164,72 +256,41 @@ function admin_withdrawal_status_badge_class(string $status): string {
 
     <div class="cardx p-4 mb-4">
         <h2 class="h5 fw-bold mb-3"><?= e(t('admin.pending_requests_heading')) ?></h2>
-        <?php if (empty($openRequests)): ?>
-            <div class="text-soft"><?= e(t('admin.no_pending_requests')) ?></div>
-        <?php else: ?>
-            <?php foreach ($openRequests as $w): ?>
-                <div class="req-card p-3">
-                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                        <div>
-                            <div class="fw-bold"><?= e((string) $w['rider_name']) ?></div>
-                            <div class="small text-soft"><?= e((string) ($w['rider_phone'] ?? '')) ?></div>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="price-tag">&#8358;<?= number_format((float) $w['amount'], 2) ?></span>
-                            <span class="badge <?= e(admin_withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
-                        </div>
-                    </div>
-                    <div class="small text-soft mb-1"><?= e(t('wallet.bank_name_label')) ?>: <?= e((string) $w['bank_name']) ?></div>
-                    <div class="small text-soft mb-1"><?= e(t('wallet.account_number_label')) ?>: <?= e((string) $w['account_number']) ?></div>
-                    <div class="small text-soft mb-2"><?= e(t('wallet.account_name_label')) ?>: <?= e((string) $w['account_name']) ?></div>
-                    <div class="small text-soft mb-3"><?= e(t('admin.requested_at_label')) ?>: <?= e((string) $w['requested_at']) ?></div>
-
-                    <div class="d-flex flex-wrap gap-2">
-                        <?php if ($w['status'] === 'pending'): ?>
-                            <form method="post" class="d-inline">
-                                <?= csrf_field() ?>
-                                <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
-                                <input type="hidden" name="form_action" value="mark_processing">
-                                <button class="btn btn-sm btn-outline-info fw-bold" type="submit"><?= e(t('admin.mark_processing')) ?></button>
-                            </form>
-                        <?php endif; ?>
-                        <form method="post" class="d-inline">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
-                            <input type="hidden" name="form_action" value="mark_paid">
-                            <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.mark_paid')) ?></button>
-                        </form>
-                        <form method="post" class="d-inline d-flex gap-2 align-items-center">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="request_id" value="<?= (int) $w['id'] ?>">
-                            <input type="hidden" name="form_action" value="reject">
-                            <input type="text" name="admin_note" class="form-control form-control-sm" placeholder="<?= e(t('admin.rejection_note_placeholder')) ?>" style="max-width:220px">
-                            <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.reject')) ?></button>
-                        </form>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <div id="admin-open-withdrawals"><?= $openWithdrawalsHtml ?></div>
     </div>
 
     <div class="cardx p-4">
         <h2 class="h5 fw-bold mb-3"><?= e(t('admin.history_heading')) ?></h2>
-        <?php if (empty($closedRequests)): ?>
-            <div class="text-soft"><?= e(t('admin.no_history')) ?></div>
-        <?php else: ?>
-            <?php foreach ($closedRequests as $w): ?>
-                <div class="mini-row">
-                    <div>
-                        <div class="fw-bold"><?= e((string) $w['rider_name']) ?> &middot; &#8358;<?= number_format((float) $w['amount'], 2) ?></div>
-                        <div class="small text-soft"><?= e((string) ($w['processed_at'] ?? $w['requested_at'])) ?><?php if (!empty($w['admin_note'])): ?> &middot; <?= e((string) $w['admin_note']) ?><?php endif; ?></div>
-                    </div>
-                    <span class="badge <?= e(admin_withdrawal_status_badge_class((string) $w['status'])) ?>"><?= e(booking_status_label((string) $w['status'])) ?></span>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <div id="admin-closed-withdrawals"><?= $closedWithdrawalsHtml ?></div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    let signature = <?= json_encode($withdrawalsSignature) ?>;
+    const snapshotUrl = <?= json_encode(url_path('admin/index.php?ajax=snapshot')) ?>;
+
+    async function poll() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch(snapshotUrl, { headers: { 'Accept': 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data || data.signature === signature) return;
+            signature = data.signature;
+
+            const openWrap = document.getElementById('admin-open-withdrawals');
+            if (openWrap && typeof data.open_html === 'string') openWrap.innerHTML = data.open_html;
+            const closedWrap = document.getElementById('admin-closed-withdrawals');
+            if (closedWrap && typeof data.closed_html === 'string') closedWrap.innerHTML = data.closed_html;
+        } catch (err) {
+            console.error('Withdrawals poll failed:', err);
+        }
+    }
+
+    setInterval(poll, 10000);
+})();
+</script>
 </body>
 </html>

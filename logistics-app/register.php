@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $vehicleType = $_POST['vehicle_type'] ?? 'bike';
     $vehicleType = in_array($vehicleType, ['bike', 'car', 'van'], true) ? $vehicleType : 'bike';
     $vehiclePlate = trim($_POST['vehicle_plate'] ?? '');
+    $vehicleColor = trim($_POST['vehicle_color'] ?? '');
 
     if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = t('register.error.invalid_email');
     if ($password && strlen($password) < 6) $errors['password'] = t('register.error.password_length');
@@ -39,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($accountType === 'rider') {
         if ($vehiclePlate === '') $errors['vehicle_plate'] = t('register.error.vehicle_plate_required');
         if (empty($_FILES['kyc_document']['name'])) $errors['kyc_document'] = t('register.error.kyc_document_required');
+        if (empty($_FILES['profile_photo']['name'])) $errors['profile_photo'] = t('register.error.profile_photo_required');
     }
 
     if (!$errors) {
@@ -48,11 +50,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $kycDocPath = null;
+    $profilePhotoPath = null;
     if (!$errors && $accountType === 'rider') {
         try {
             $kycDocPath = save_kyc_document($_FILES['kyc_document']);
         } catch (Throwable $e) {
             $errors['kyc_document'] = $e->getMessage();
+        }
+        try {
+            $profilePhotoPath = save_uploaded_image($_FILES['profile_photo'], 'avatars', 'avatar', t('profile.avatar_label'));
+        } catch (Throwable $e) {
+            $errors['profile_photo'] = $e->getMessage();
         }
     }
 
@@ -61,16 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare('INSERT INTO users (full_name,email,phone,password_hash,role,status) VALUES (?,?,?,?,?,"active")');
-            $stmt->execute([$fullName, $email, $phone, password_hash($password, PASSWORD_DEFAULT), $accountType]);
+            $stmt = $pdo->prepare('INSERT INTO users (full_name,email,phone,password_hash,role,status,avatar_path) VALUES (?,?,?,?,?,"active",?)');
+            $stmt->execute([$fullName, $email, $phone, password_hash($password, PASSWORD_DEFAULT), $accountType, $profilePhotoPath]);
             $newUserId = (int)$pdo->lastInsertId();
 
             if ($accountType === 'rider') {
                 $stmt = $pdo->prepare('
-                    INSERT INTO rider_profiles (user_id, vehicle_type, availability_status, kyc_status, kyc_id_document_path, kyc_vehicle_plate)
-                    VALUES (?, ?, "offline", "pending", ?, ?)
+                    INSERT INTO rider_profiles (user_id, vehicle_type, availability_status, kyc_status, kyc_id_document_path, kyc_vehicle_plate, kyc_vehicle_color)
+                    VALUES (?, ?, "offline", "pending", ?, ?, ?)
                 ');
-                $stmt->execute([$newUserId, $vehicleType, $kycDocPath, $vehiclePlate]);
+                $stmt->execute([$newUserId, $vehicleType, $kycDocPath, $vehiclePlate, $vehicleColor !== '' ? $vehicleColor : null]);
             }
 
             $pdo->commit();
@@ -89,6 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'profile_completed' => 1
             ];
             send_welcome_email($email, $fullName, $accountType);
+            if ($accountType === 'rider') {
+                notify_admins($pdo, 'New rider registration awaiting KYC review', '<p><strong>' . e($fullName) . '</strong> (' . e($email) . ') has registered as a rider and is awaiting KYC review.</p><p>Review it from the admin portal.</p>');
+            }
             flash('success', $accountType === 'rider' ? t('register.success_rider') : t('register.success'));
             redirect_to($accountType === 'rider' ? 'rider/' : '/bookings');
         }
@@ -185,11 +196,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   <input class="form-control" name="vehicle_plate" value="<?= e(old('vehicle_plate')) ?>">
                   <?php if (!empty($errors['vehicle_plate'])): ?><div class="small text-danger mt-1"><?= e($errors['vehicle_plate']) ?></div><?php endif; ?>
                 </div>
-                <div class="mb-4">
+                <div class="mb-3">
+                  <label class="form-label"><?= e(t('register.vehicle_color_label')) ?></label>
+                  <input class="form-control" name="vehicle_color" value="<?= e(old('vehicle_color')) ?>">
+                </div>
+                <div class="mb-3">
                   <label class="form-label"><?= e(t('register.kyc_document_label')) ?></label>
                   <input class="form-control" type="file" name="kyc_document" accept="image/jpeg,image/png,image/webp">
                   <div class="form-text text-soft"><?= e(t('register.kyc_document_hint')) ?></div>
                   <?php if (!empty($errors['kyc_document'])): ?><div class="small text-danger mt-1"><?= e($errors['kyc_document']) ?></div><?php endif; ?>
+                </div>
+                <div class="mb-4">
+                  <label class="form-label"><?= e(t('register.profile_photo_label')) ?></label>
+                  <input class="form-control" type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp">
+                  <div class="form-text text-soft"><?= e(t('register.profile_photo_hint')) ?></div>
+                  <?php if (!empty($errors['profile_photo'])): ?><div class="small text-danger mt-1"><?= e($errors['profile_photo']) ?></div><?php endif; ?>
                 </div>
               </div>
               <div class="d-flex gap-2 flex-wrap">

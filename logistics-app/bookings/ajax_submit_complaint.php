@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender', 'admin']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 header('Content-Type: application/json');
 
@@ -27,7 +28,7 @@ if ($message === '') {
 }
 
 $stmt = $pdo->prepare('
-    SELECT id, sender_user_id, booking_status
+    SELECT id, sender_user_id, booking_status, booking_code
     FROM bookings
     WHERE id = ?
     LIMIT 1
@@ -48,5 +49,7 @@ $stmt = $pdo->prepare('
     VALUES (?, ?, ?, ?, "open", NOW())
 ');
 $stmt->execute([$bookingId, (int) $user['id'], $category, $message]);
+
+notify_admins($pdo, 'New complaint reported - ' . $booking['booking_code'], '<p><strong>' . e((string) $user['full_name']) . '</strong> reported an issue with booking <strong>' . e((string) $booking['booking_code']) . '</strong>.</p><p><strong>Category:</strong> ' . e($category) . '</p><p>' . nl2br(e($message)) . '</p><p>Review it from the admin portal.</p>');
 
 respond_json(['success' => true, 'message' => 'Your report has been submitted. Our team will follow up.']);

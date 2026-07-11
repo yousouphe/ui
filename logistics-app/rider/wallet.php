@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $user = current_user();
 $success = flash('success');
@@ -57,6 +58,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bankAccount['account_name'],
             ]);
             flash('success', t('wallet.withdrawal_request_submitted'));
+
+            send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount);
+            notify_admins($pdo, 'New withdrawal request', '<p><strong>' . e((string) $user['full_name']) . '</strong> requested a withdrawal of ₦' . number_format($amount, 2) . '.</p><p>Review it from the admin portal.</p>');
         }
         redirect_to('rider/wallet');
     }
@@ -185,6 +189,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
             <a class="nav-link active" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
             <div class="small">
                 <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/wallet')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>

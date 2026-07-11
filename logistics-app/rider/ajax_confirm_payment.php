@@ -88,6 +88,11 @@ send_order_completion_email($booking['sender_email'], $booking['sender_full_name
     'agreed_cost' => $booking['agreed_cost'],
 ]);
 
+send_rider_earning_email((string) $user['email'], (string) $user['full_name'], [
+    'booking_code' => $booking['booking_code'],
+    'item_name' => $booking['item_name'],
+], $payoutAmount);
+
 echo json_encode(['success' => true, 'message' => 'Payment confirmed. Job closed out.']);
 // Send the response now; the deferred email dispatch above runs afterward via a
 // shutdown function, so a slow/unreachable mail server can never delay this reply.

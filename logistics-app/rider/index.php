@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $user = current_user();
 $success = flash('success');
@@ -312,15 +313,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
 
     try {
         $stmt = $pdo->prepare('
-            SELECT 
+            SELECT
                 rr.*,
                 b.id AS booking_id,
+                b.booking_code,
                 b.booking_status,
                 b.selected_rider_user_id,
                 b.agreed_cost,
-                b.payment_status
+                b.payment_status,
+                s.full_name AS sender_full_name,
+                s.email AS sender_email
             FROM rider_requests rr
             INNER JOIN bookings b ON b.id = rr.booking_id
+            INNER JOIN users s ON s.id = b.sender_user_id
             WHERE rr.id = ?
               AND rr.rider_user_id = ?
             LIMIT 1
@@ -405,6 +410,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
 
         if ($pdo->inTransaction()) {
             $pdo->commit();
+        }
+
+        if ($action === 'accepted') {
+            send_rider_matched_email(
+                (string) $requestRow['sender_email'],
+                (string) $requestRow['sender_full_name'],
+                (string) $user['full_name'],
+                (string) $requestRow['booking_code']
+            );
         }
 
         respond_json([
@@ -826,6 +840,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
             <div class="small">
                 <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>

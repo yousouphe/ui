@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['admin']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $user = current_user();
 $success = flash('success');
@@ -12,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $riderUserId = (int) ($_POST['rider_user_id'] ?? 0);
     $formAction = (string) ($_POST['form_action'] ?? '');
 
-    $stmt = $pdo->prepare('SELECT rp.*, u.status AS account_status FROM rider_profiles rp INNER JOIN users u ON u.id = rp.user_id WHERE rp.user_id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT rp.*, u.full_name, u.email, u.status AS account_status FROM rider_profiles rp INNER JOIN users u ON u.id = rp.user_id WHERE rp.user_id = ? LIMIT 1');
     $stmt->execute([$riderUserId]);
     $rider = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -25,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE rider_profiles SET kyc_status = "approved", kyc_note = NULL, kyc_reviewed_by = ?, kyc_reviewed_at = NOW() WHERE user_id = ?');
         $stmt->execute([$user['id'], $riderUserId]);
         flash('success', t('admin.kyc_approved'));
+        send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], true);
         redirect_to('admin/riders.php');
     }
 
@@ -33,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE rider_profiles SET kyc_status = "rejected", kyc_note = ?, kyc_reviewed_by = ?, kyc_reviewed_at = NOW() WHERE user_id = ?');
         $stmt->execute([$note !== '' ? $note : null, $user['id'], $riderUserId]);
         flash('success', t('admin.kyc_rejected'));
+        send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], false, $note !== '' ? $note : null);
         redirect_to('admin/riders.php');
     }
 
@@ -54,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $stmt = $pdo->prepare("
-    SELECT rp.*, u.full_name, u.email, u.phone, u.status AS account_status
+    SELECT rp.*, u.full_name, u.email, u.phone, u.avatar_path, u.status AS account_status
     FROM rider_profiles rp
     INNER JOIN users u ON u.id = rp.user_id
     WHERE rp.kyc_status = 'pending'
@@ -64,7 +67,7 @@ $stmt->execute();
 $pendingKyc = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $stmt = $pdo->prepare("
-    SELECT rp.*, u.full_name, u.email, u.phone, u.status AS account_status,
+    SELECT rp.*, u.full_name, u.email, u.phone, u.avatar_path, u.status AS account_status,
         (SELECT COUNT(*) FROM bookings b WHERE b.selected_rider_user_id = u.id AND b.booking_status = 'delivered') AS completed_count,
         (SELECT COUNT(*) FROM booking_complaints bc INNER JOIN bookings b2 ON b2.id = bc.booking_id WHERE b2.selected_rider_user_id = u.id) AS complaint_count
     FROM rider_profiles rp
@@ -81,6 +84,103 @@ function admin_kyc_badge_class(string $status): string {
         'rejected' => 'bg-danger',
         default => 'bg-dark border border-secondary',
     };
+}
+
+function render_pending_kyc_html(array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('admin.no_pending_kyc')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $r): ?>
+        <div class="req-card p-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-2">
+                <div class="d-flex align-items-center gap-3">
+                    <?php if (!empty($r['kyc_id_document_path'])): ?>
+                        <a href="<?= e(url_path($r['kyc_id_document_path'])) ?>" target="_blank" rel="noopener">
+                            <img src="<?= e(url_path($r['kyc_id_document_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.kyc_document_alt')) ?>">
+                        </a>
+                    <?php endif; ?>
+                    <?php if (!empty($r['avatar_path'])): ?>
+                        <a href="<?= e(url_path($r['avatar_path'])) ?>" target="_blank" rel="noopener">
+                            <img src="<?= e(url_path($r['avatar_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.kyc_photo_alt')) ?>">
+                        </a>
+                    <?php endif; ?>
+                    <div>
+                        <div class="fw-bold"><?= e((string) $r['full_name']) ?></div>
+                        <div class="small text-soft"><?= e((string) $r['email']) ?> &middot; <?= e((string) $r['phone']) ?></div>
+                        <div class="small text-soft"><?= e(t('register.vehicle_plate_label')) ?>: <?= e((string) ($r['kyc_vehicle_plate'] ?? '')) ?> &middot; <?= e(ucfirst((string) $r['vehicle_type'])) ?><?php if (!empty($r['kyc_vehicle_color'])): ?> &middot; <?= e((string) $r['kyc_vehicle_color']) ?><?php endif; ?></div>
+                    </div>
+                </div>
+                <span class="badge <?= e(admin_kyc_badge_class((string) $r['kyc_status'])) ?>"><?= e(ucfirst((string) $r['kyc_status'])) ?></span>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <form method="post" class="d-inline">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
+                    <input type="hidden" name="form_action" value="approve_kyc">
+                    <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.approve_kyc')) ?></button>
+                </form>
+                <form method="post" class="d-inline d-flex gap-2 align-items-center">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
+                    <input type="hidden" name="form_action" value="reject_kyc">
+                    <input type="text" name="admin_note" class="form-control form-control-sm" placeholder="<?= e(t('admin.rejection_note_placeholder')) ?>" style="max-width:220px">
+                    <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.reject_kyc')) ?></button>
+                </form>
+            </div>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+function render_all_riders_html(PDO $pdo, array $rows): string {
+    if (empty($rows)) {
+        return '<div class="text-soft">' . e(t('admin.no_riders')) . '</div>';
+    }
+    ob_start();
+    foreach ($rows as $r): ?>
+        <div class="mini-row">
+            <div>
+                <div class="fw-bold">
+                    <?= e((string) $r['full_name']) ?>
+                    <span class="badge <?= e(admin_kyc_badge_class((string) $r['kyc_status'])) ?> ms-1"><?= e(ucfirst((string) $r['kyc_status'])) ?></span>
+                    <?php if ($r['account_status'] === 'suspended'): ?><span class="badge bg-secondary ms-1"><?= e(t('admin.suspended_badge')) ?></span><?php endif; ?>
+                </div>
+                <div class="small text-soft">
+                    <?= e((string) $r['email']) ?> &middot;
+                    <?= e(t('admin.rating_label')) ?>: <?= e(number_format((float) $r['rating'], 2)) ?> &middot;
+                    <?= e(t('admin.completed_deliveries_label')) ?>: <?= (int) $r['completed_count'] ?> &middot;
+                    <?= e(t('admin.complaints_label')) ?>: <?= (int) $r['complaint_count'] ?> &middot;
+                    <?= e(t('wallet.available_balance')) ?>: &#8358;<?= number_format(rider_available_balance($pdo, (int) $r['user_id']), 2) ?>
+                </div>
+            </div>
+            <form method="post" class="d-inline">
+                <?= csrf_field() ?>
+                <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
+                <?php if ($r['account_status'] === 'suspended'): ?>
+                    <input type="hidden" name="form_action" value="activate_rider">
+                    <button class="btn btn-sm btn-outline-success fw-bold" type="submit"><?= e(t('admin.activate_rider')) ?></button>
+                <?php else: ?>
+                    <input type="hidden" name="form_action" value="suspend_rider">
+                    <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.suspend_rider')) ?></button>
+                <?php endif; ?>
+            </form>
+        </div>
+    <?php endforeach;
+    return ob_get_clean();
+}
+
+$pendingKycHtml = render_pending_kyc_html($pendingKyc);
+$allRidersHtml = render_all_riders_html($pdo, $allRiders);
+$ridersSignature = sha1(json_encode([$pendingKyc, array_map(fn($r) => [$r['user_id'], $r['kyc_status'], $r['account_status'], rider_available_balance($pdo, (int) $r['user_id'])], $allRiders)]));
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
+    respond_json([
+        'pending_kyc_html' => $pendingKycHtml,
+        'all_riders_html' => $allRidersHtml,
+        'pending_kyc_count' => count($pendingKyc),
+        'signature' => $ridersSignature,
+    ]);
 }
 ?>
 <!doctype html>
@@ -112,6 +212,8 @@ function admin_kyc_badge_class(string $status): string {
             <a class="nav-link" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>
     </div>
@@ -125,84 +227,41 @@ function admin_kyc_badge_class(string $status): string {
 
     <div class="cardx p-4 mb-4">
         <h2 class="h5 fw-bold mb-3"><?= e(t('admin.pending_kyc_heading')) ?></h2>
-        <?php if (empty($pendingKyc)): ?>
-            <div class="text-soft"><?= e(t('admin.no_pending_kyc')) ?></div>
-        <?php else: ?>
-            <?php foreach ($pendingKyc as $r): ?>
-                <div class="req-card p-3">
-                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-2">
-                        <div class="d-flex align-items-center gap-3">
-                            <?php if (!empty($r['kyc_id_document_path'])): ?>
-                                <a href="<?= e(url_path($r['kyc_id_document_path'])) ?>" target="_blank" rel="noopener">
-                                    <img src="<?= e(url_path($r['kyc_id_document_path'])) ?>" class="kyc-doc-thumb" alt="<?= e(t('admin.kyc_document_alt')) ?>">
-                                </a>
-                            <?php endif; ?>
-                            <div>
-                                <div class="fw-bold"><?= e((string) $r['full_name']) ?></div>
-                                <div class="small text-soft"><?= e((string) $r['email']) ?> &middot; <?= e((string) $r['phone']) ?></div>
-                                <div class="small text-soft"><?= e(t('register.vehicle_plate_label')) ?>: <?= e((string) ($r['kyc_vehicle_plate'] ?? '')) ?> &middot; <?= e(ucfirst((string) $r['vehicle_type'])) ?></div>
-                            </div>
-                        </div>
-                        <span class="badge <?= e(admin_kyc_badge_class((string) $r['kyc_status'])) ?>"><?= e(ucfirst((string) $r['kyc_status'])) ?></span>
-                    </div>
-                    <div class="d-flex flex-wrap gap-2 mt-2">
-                        <form method="post" class="d-inline">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
-                            <input type="hidden" name="form_action" value="approve_kyc">
-                            <button class="btn btn-sm btn-success fw-bold" type="submit"><?= e(t('admin.approve_kyc')) ?></button>
-                        </form>
-                        <form method="post" class="d-inline d-flex gap-2 align-items-center">
-                            <?= csrf_field() ?>
-                            <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
-                            <input type="hidden" name="form_action" value="reject_kyc">
-                            <input type="text" name="admin_note" class="form-control form-control-sm" placeholder="<?= e(t('admin.rejection_note_placeholder')) ?>" style="max-width:220px">
-                            <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.reject_kyc')) ?></button>
-                        </form>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <div id="admin-pending-kyc"><?= $pendingKycHtml ?></div>
     </div>
 
     <div class="cardx p-4">
         <h2 class="h5 fw-bold mb-3"><?= e(t('admin.all_riders_heading')) ?></h2>
-        <?php if (empty($allRiders)): ?>
-            <div class="text-soft"><?= e(t('admin.no_riders')) ?></div>
-        <?php else: ?>
-            <?php foreach ($allRiders as $r): ?>
-                <div class="mini-row">
-                    <div>
-                        <div class="fw-bold">
-                            <?= e((string) $r['full_name']) ?>
-                            <span class="badge <?= e(admin_kyc_badge_class((string) $r['kyc_status'])) ?> ms-1"><?= e(ucfirst((string) $r['kyc_status'])) ?></span>
-                            <?php if ($r['account_status'] === 'suspended'): ?><span class="badge bg-secondary ms-1"><?= e(t('admin.suspended_badge')) ?></span><?php endif; ?>
-                        </div>
-                        <div class="small text-soft">
-                            <?= e((string) $r['email']) ?> &middot;
-                            <?= e(t('admin.rating_label')) ?>: <?= e(number_format((float) $r['rating'], 2)) ?> &middot;
-                            <?= e(t('admin.completed_deliveries_label')) ?>: <?= (int) $r['completed_count'] ?> &middot;
-                            <?= e(t('admin.complaints_label')) ?>: <?= (int) $r['complaint_count'] ?> &middot;
-                            <?= e(t('wallet.available_balance')) ?>: &#8358;<?= number_format(rider_available_balance($pdo, (int) $r['user_id']), 2) ?>
-                        </div>
-                    </div>
-                    <form method="post" class="d-inline">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
-                        <?php if ($r['account_status'] === 'suspended'): ?>
-                            <input type="hidden" name="form_action" value="activate_rider">
-                            <button class="btn btn-sm btn-outline-success fw-bold" type="submit"><?= e(t('admin.activate_rider')) ?></button>
-                        <?php else: ?>
-                            <input type="hidden" name="form_action" value="suspend_rider">
-                            <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.suspend_rider')) ?></button>
-                        <?php endif; ?>
-                    </form>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <div id="admin-all-riders"><?= $allRidersHtml ?></div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    let signature = <?= json_encode($ridersSignature) ?>;
+    const snapshotUrl = <?= json_encode(url_path('admin/riders.php?ajax=snapshot')) ?>;
+
+    async function poll() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch(snapshotUrl, { headers: { 'Accept': 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data || data.signature === signature) return;
+            signature = data.signature;
+
+            const pendingWrap = document.getElementById('admin-pending-kyc');
+            if (pendingWrap && typeof data.pending_kyc_html === 'string') pendingWrap.innerHTML = data.pending_kyc_html;
+            const allWrap = document.getElementById('admin-all-riders');
+            if (allWrap && typeof data.all_riders_html === 'string') allWrap.innerHTML = data.all_riders_html;
+        } catch (err) {
+            console.error('Riders poll failed:', err);
+        }
+    }
+
+    setInterval(poll, 10000);
+})();
+</script>
 </body>
 </html>

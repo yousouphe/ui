@@ -1,11 +1,9 @@
 <?php
-require_once __DIR__ . '/config/functions.php';
-require_auth();
+require_once __DIR__ . '/../config/functions.php';
+require_role(['admin', 'super_admin']);
+require_once __DIR__ . '/../config/db.php';
+
 $user = current_user();
-if (in_array($user['role'], ['admin', 'super_admin'], true)) {
-    redirect_to('admin/profile.php');
-}
-require_once __DIR__ . '/config/db.php';
 $success = flash('success');
 $error = flash('error');
 
@@ -55,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             flash('success', t('profile.details_updated'));
         }
-        redirect_to('profile');
+        redirect_to('admin/profile.php');
     }
 
     if ($formAction === 'change_password') {
@@ -74,19 +72,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), $user['id']]);
             flash('success', t('profile.password_updated'));
         }
-        redirect_to('profile');
+        redirect_to('admin/profile.php');
     }
 }
 
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
 $stmt->execute([$user['id']]);
 $dbUser = $stmt->fetch(PDO::FETCH_ASSOC);
-
-$hubUrl = match ($user['role']) {
-    'rider' => 'rider/',
-    'admin' => 'admin/',
-    default => 'bookings/',
-};
 ?>
 <!doctype html>
 <html lang="<?= e(current_locale()) ?>">
@@ -94,7 +86,7 @@ $hubUrl = match ($user['role']) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
-    <title><?= e(t('profile.heading')) ?> | SwiftDrop</title>
+    <title><?= e(t('profile.heading')) ?> | SwiftDrop <?= e(t('admin.brand_suffix')) ?></title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -112,10 +104,14 @@ $hubUrl = match ($user['role']) {
 <body>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path($hubUrl)) ?>"><?= e(t('common.brand')) ?></a>
+        <a class="navbar-brand fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('common.brand')) ?> <?= e(t('admin.brand_suffix')) ?></a>
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path($hubUrl)) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
-            <a class="nav-link fw-bold" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
+            <a class="nav-link fw-bold" href="<?= e(url_path('admin/profile.php')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>
     </div>

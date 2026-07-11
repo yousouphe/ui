@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/config/functions.php';
-require_role(['sender', 'admin', 'super_admin']);
+require_role(['sender']);
 require_once __DIR__ . '/config/db.php';
 
 $user = current_user();

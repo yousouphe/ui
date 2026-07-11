@@ -8,6 +8,26 @@ function mailer_config(): array {
     return config_app();
 }
 
+function mailer_dispatch(string $toEmail, string $toName, string $subject, string $htmlBody): void {
+    // Deferred until after the response is flushed to the client (see mailer_flush_response()
+    // below), so a slow or unreachable mail server can never delay a user-facing action -
+    // e.g. the rider's "confirm payment received" button waiting on an SMTP handshake.
+    register_shutdown_function(static function () use ($toEmail, $toName, $subject, $htmlBody) {
+        mailer_send($toEmail, $toName, $subject, $htmlBody);
+    });
+}
+
+function mailer_flush_response(): void {
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+        return;
+    }
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    flush();
+}
+
 function mailer_send(string $toEmail, string $toName, string $subject, string $htmlBody): bool {
     $config = mailer_config();
     $host = trim((string)($config['smtp_host'] ?? ''));
@@ -18,7 +38,9 @@ function mailer_send(string $toEmail, string $toName, string $subject, string $h
     $fromName = trim((string)($config['smtp_from_name'] ?? ($config['app_name'] ?? 'SwiftDrop')));
     $secure = strtolower(trim((string)($config['smtp_secure'] ?? 'tls')));
 
-    if ($host === '' || $fromEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+    $isConfigured = $host !== '' && $fromEmail !== '' && !str_starts_with($host, 'REDACTED') && !str_starts_with($fromEmail, 'REDACTED');
+
+    if (!$isConfigured || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
         error_log('mailer_send skipped: SMTP not configured or invalid recipient (' . $toEmail . ')');
         return false;
     }
@@ -29,7 +51,7 @@ function mailer_send(string $toEmail, string $toName, string $subject, string $h
             $transport . ':' . $port,
             $errno,
             $errstr,
-            15,
+            5,
             STREAM_CLIENT_CONNECT,
             stream_context_create(['ssl' => ['verify_peer' => true, 'verify_peer_name' => true]])
         );

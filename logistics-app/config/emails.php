@@ -9,7 +9,7 @@ function send_welcome_email(string $toEmail, string $fullName, string $role): vo
             ? '<p>Your registration is being reviewed by our team. You will be able to go online and accept deliveries once your documents are approved.</p>'
             : '<p>You can now book your first delivery from your dashboard.</p>')
         . '<p>Thanks for choosing us.</p>';
-    mailer_send($toEmail, $fullName, 'Welcome to SwiftDrop', mailer_layout('Welcome, ' . $fullName . '!', $body));
+    mailer_dispatch($toEmail, $fullName, 'Welcome to SwiftDrop', mailer_layout('Welcome, ' . $fullName . '!', $body));
 }
 
 function send_transaction_receipt_email(string $toEmail, string $fullName, array $booking, string $reference): void {
@@ -22,7 +22,7 @@ function send_transaction_receipt_email(string $toEmail, string $fullName, array
         . '<p>We have received your payment. Here is your receipt:</p>'
         . '<div style="margin:16px 0;">' . $rows . '</div>'
         . '<p>Thank you for using SwiftDrop.</p>';
-    mailer_send($toEmail, $fullName, 'Payment Receipt - ' . $booking['booking_code'], mailer_layout('Payment Receipt', $body));
+    mailer_dispatch($toEmail, $fullName, 'Payment Receipt - ' . $booking['booking_code'], mailer_layout('Payment Receipt', $body));
 }
 
 function send_order_completion_email(string $toEmail, string $fullName, array $booking): void {
@@ -34,7 +34,7 @@ function send_order_completion_email(string $toEmail, string $fullName, array $b
         . '<p>Your delivery has been completed and closed out. Here is a summary:</p>'
         . '<div style="margin:16px 0;">' . $rows . '</div>'
         . '<p>We hope you had a great experience. You can leave a rating from your dashboard.</p>';
-    mailer_send($toEmail, $fullName, 'Delivery Completed - ' . $booking['booking_code'], mailer_layout('Delivery Completed', $body));
+    mailer_dispatch($toEmail, $fullName, 'Delivery Completed - ' . $booking['booking_code'], mailer_layout('Delivery Completed', $body));
 }
 
 function send_password_reset_email(string $toEmail, string $fullName, string $resetUrl): void {
@@ -42,5 +42,5 @@ function send_password_reset_email(string $toEmail, string $fullName, string $re
         . '<p>We received a request to reset your password. Click the button below to choose a new one. This link expires in 30 minutes.</p>'
         . '<p style="text-align:center;margin:24px 0;"><a href="' . e($resetUrl) . '" style="background:#0284c7;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Reset Password</a></p>'
         . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, you can safely ignore this email.</p>';
-    mailer_send($toEmail, $fullName, 'Reset your SwiftDrop password', mailer_layout('Reset Your Password', $body));
+    mailer_dispatch($toEmail, $fullName, 'Reset your SwiftDrop password', mailer_layout('Reset Your Password', $body));
 }

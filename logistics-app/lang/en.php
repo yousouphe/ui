@@ -382,6 +382,7 @@ return [
     'rider.workflow_failed' => 'Workflow action failed.',
     'rider.status_updated' => 'Status updated.',
     'rider.action_failed' => 'Action failed.',
+    'rider.request_timed_out' => 'This is taking longer than expected. Please try again.',
     'rider.sync.live' => 'LIVE',
     'rider.sync.gps_issue' => 'GPS ISSUE',
     'rider.sync.offline' => 'OFFLINE',

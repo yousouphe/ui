@@ -69,7 +69,7 @@ try {
         $user['id'],
         $bookingId,
         $payoutAmount,
-        sprintf('Delivery %s (85%% of %s)', $booking['booking_code'], number_format((float) $booking['agreed_cost'], 2)),
+        sprintf('Delivery %s', $booking['booking_code']),
     ]);
 
     $pdo->commit();

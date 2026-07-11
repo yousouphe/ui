@@ -150,6 +150,8 @@ try {
         'agreed_cost' => $payment['agreed_cost'],
     ], $reference);
 
+    log_event($pdo, 'payment_confirmed', 'Payment confirmed for booking ' . $payment['booking_code'], (int) $user['id'], (string) $user['role'], 'booking', (int) $payment['booking_id'], ['reference' => $reference, 'amount' => (float) $payment['agreed_cost']]);
+
     flash('success', 'Payment verified successfully.');
     go_to('/bookings/index.php?booking_id=' . (int)$payment['booking_id']);
 

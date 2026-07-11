@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['admin']);
+require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 
@@ -27,6 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$user['id'], $riderUserId]);
         flash('success', t('admin.kyc_approved'));
         send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], true);
+        log_event($pdo, 'kyc_approved', 'Approved KYC for ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId);
         redirect_to('admin/riders.php');
     }
 
@@ -36,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$note !== '' ? $note : null, $user['id'], $riderUserId]);
         flash('success', t('admin.kyc_rejected'));
         send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], false, $note !== '' ? $note : null);
+        log_event($pdo, 'kyc_rejected', 'Rejected KYC for ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId, ['note' => $note]);
         redirect_to('admin/riders.php');
     }
 
@@ -45,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE rider_profiles SET availability_status = "offline" WHERE user_id = ?');
         $stmt->execute([$riderUserId]);
         flash('success', t('admin.rider_suspended'));
+        log_event($pdo, 'rider_suspended', 'Suspended rider ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId);
         redirect_to('admin/riders.php');
     }
 
@@ -52,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('UPDATE users SET status = "active" WHERE id = ?');
         $stmt->execute([$riderUserId]);
         flash('success', t('admin.rider_activated'));
+        log_event($pdo, 'rider_activated', 'Activated rider ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId);
         redirect_to('admin/riders.php');
     }
 }
@@ -252,6 +256,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>

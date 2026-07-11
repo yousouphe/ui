@@ -13,7 +13,25 @@ function mailer_dispatch(string $toEmail, string $toName, string $subject, strin
     // below), so a slow or unreachable mail server can never delay a user-facing action -
     // e.g. the rider's "confirm payment received" button waiting on an SMTP handshake.
     register_shutdown_function(static function () use ($toEmail, $toName, $subject, $htmlBody) {
-        mailer_send($toEmail, $toName, $subject, $htmlBody);
+        $sent = mailer_send($toEmail, $toName, $subject, $htmlBody);
+
+        // Best-effort accountability log - $pdo is set up by config/db.php at the top
+        // level of whichever page triggered this email, so it's a PHP global by the time
+        // this shutdown function runs. Never let logging affect whether the email itself
+        // was considered sent.
+        global $pdo;
+        if (isset($pdo) && $pdo instanceof PDO && function_exists('log_event')) {
+            log_event(
+                $pdo,
+                'email',
+                ($sent ? 'Sent' : 'Failed to send') . ' "' . $subject . '" to ' . $toEmail,
+                null,
+                null,
+                'email',
+                null,
+                ['to' => $toEmail, 'to_name' => $toName, 'subject' => $subject, 'sent' => $sent]
+            );
+        }
     });
 }
 

@@ -573,6 +573,8 @@ return [
     'admin.filter_role_label' => 'Matsayi',
     'admin.all_roles' => 'Duk matsayi',
     'admin.role_admin' => 'Admin',
+    'admin.role_super_admin' => 'Babban Admin',
+    'admin.role_change_requires_super_admin' => 'Babban admin ne kaɗai zai iya canza matsayin masu amfani.',
     'admin.change_role' => 'Sabunta Matsayi',
     'admin.invalid_role' => 'Da fatan za a zaɓi matsayi mai inganci.',
     'admin.role_updated' => 'An sabunta matsayin mai amfani.',
@@ -584,6 +586,23 @@ return [
     'admin.cannot_demote_last_admin' => 'Ba za ku iya cire admin na ƙarshe ba.',
     'admin.cannot_suspend_last_admin' => 'Ba za ku iya dakatar da admin na ƙarshe ba.',
     'admin.you_badge' => 'Ku',
+
+    // Admin - event log
+    'admin.nav_logs' => 'Rajistan Ayyuka',
+    'admin.logs_heading' => 'Rajistan Ayyuka',
+    'admin.logs_search_label' => 'Bincike',
+    'admin.logs_search_placeholder' => 'Bincika bayanai...',
+    'admin.logs_event_type_label' => 'Nau\'in Taron',
+    'admin.all_events' => 'Duk tarurruka',
+    'admin.logs_target_type_label' => 'Manufa',
+    'admin.all_targets' => 'Duk manufofi',
+    'admin.logs_date_from_label' => 'Daga',
+    'admin.logs_date_to_label' => 'Zuwa',
+    'admin.logs_total_prefix' => 'Jimlar tarurruka:',
+    'admin.logs_page_prefix' => 'Shafi',
+    'admin.no_logs_found' => 'Babu tarurrukan da suka dace da tacewar ku.',
+    'admin.logs_actor_prefix' => 'Daga',
+    'admin.logs_next_page' => 'Na Gaba',
 
     // Self-service profile
     'profile.nav_label' => 'Bayanin Martaba',
@@ -599,6 +618,35 @@ return [
     'profile.error.full_name_required' => 'Ana buƙatar cikakken suna.',
     'profile.error.phone_required' => 'Ana buƙatar lambar waya.',
     'profile.error.current_password_incorrect' => 'Kalmar sirri ta yanzu ba daidai ba ce.',
+
+    // Rider KYC self-service view/resubmit
+    'kyc.nav_label' => 'KYC Na',
+    'kyc.heading' => 'Bayanan KYC Na',
+    'kyc.no_profile_found' => 'Ba mu sami bayanin direban ku ba.',
+    'kyc.locked_no_edits' => 'An amince da KYC ɗinku kuma ba za a ƙara gyara shi ba.',
+    'kyc.approved_hint' => 'An amince da KYC ɗinku. Yanzu ba za a iya gyara waɗannan bayanan ba.',
+    'kyc.rejected_hint' => 'Ba a amince da KYC ɗinku ba.',
+    'kyc.pending_hint' => 'Ana jiran duba KYC ɗinku. Har yanzu kuna iya sabunta bayanan ku a ƙasa.',
+    'kyc.replace_only_if_changed' => 'Ku bar shi babu kome domin ku ci gaba da amfani da takardar da kuke da ita.',
+    'kyc.resubmit_button' => 'Ajiye kuma Sake Aikawa Don Dubawa',
+    'kyc.resubmitted_success' => 'An sabunta bayanan KYC ɗinku kuma an sake aikawa don dubawa.',
+
+    // Rider training / onboarding
+    'training.nav_label' => 'Horo',
+    'training.heading' => 'Horo da Shirye-shiryen Direba',
+    'training.subheading' => 'Jagora mai sauri don bayar da kyakkyawar dabi\'a ga kowane mai turawa da mai karɓa.',
+    'training.section.professionalism_title' => 'Ƙwarewa',
+    'training.section.professionalism_items' => 'Ka kasance mai ladabi da kirki ga masu turawa da masu karɓa|Sa tufafi masu tsabta da kyau yayin isarwa|Kai kanka a kan lokaci don karɓar kaya kuma ka kasance abin dogaro da lokutan da ka bayar|Wakilci SwiftDrop yadda ya kamata a kowane lokaci, ko da a wajen app',
+    'training.section.communication_title' => 'Sadarwa',
+    'training.section.communication_items' => 'Ka amsa saƙonnin hira da kiran waya daga masu turawa cikin sauri|Ka sanar da masu turawa idan kana makara ko kana fuskantar matsala|Yi amfani da hirar cikin app don duk sadarwar da ta shafi isarwa|Ka kasance mai bayyanawa da ladabi a kowace tattaunawa, ko da lokacin sabani',
+    'training.section.handling_title' => 'Kula da Kaya',
+    'training.section.handling_items' => 'Ka kula da kowane kaya kamar naka ne|Tabbatar da cewa kayan ya dace da bayanin da aka bayar kafin karɓa|Kada ka buɗe, ka canza, ko ka duba kaya da aka rufe|Ka tabbatar da kaya yana da tsaro kuma yana da kariya daga yanayin sararin sama yayin tafiya',
+    'training.section.safety_title' => 'Aminci',
+    'training.section.safety_items' => 'Ka sanya hular kwano koyaushe kuma ka bi dokokin zirga-zirga|Kada ka yi amfani da wayarka yayin tuƙi - ka tsaya a gefe tukuna|Tabbatar da shaidar mai karɓa kafin ka miƙa kaya|Ka bayar da rahoton duk wata hatsari ko matsalar aminci ga SwiftDrop nan take',
+    'training.section.rating_title' => 'Kimantawa da Ci Gaba',
+    'training.section.rating_items' => 'Kimantawarka na shafar buƙatun isarwa da kake samu|Kimantawa mai kyau akai-akai na buɗe ƙarin ayyuka da fifiko|Rashin kyawun hali ko koke-koke akai-akai na iya kai ga dakatarwa|Ka roƙi masu turawa da suka gamsu su bar kimantawa da sharhi mai kyau',
+    'training.section.conduct_title' => 'Ƙa\'idodin Hali',
+    'training.section.conduct_items' => 'Kada ka nemi ko ka karɓi kuɗi a wajen app|Kada ka raba bayanan lambar sadarwa na masu turawa ko masu karɓa da wasu|Ba za a yarda da cin zarafi, rashin ladabi, ko hali marar aminci ba|Keta wannan ƙa\'ida na iya kai ga ƙin amincewa da KYC ko dakatar da asusu',
 
     // Rider registration - profile photo + vehicle color
     'register.profile_photo_label' => 'Hoton bayanin martaba',

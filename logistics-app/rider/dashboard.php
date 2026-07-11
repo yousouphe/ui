@@ -124,6 +124,8 @@ $historyRows = array_filter($allRequests, fn($req) =>
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
             <div class="small">
@@ -214,7 +216,7 @@ $historyRows = array_filter($allRequests, fn($req) =>
                                             <span class="badge <?= e(badge_class((string) ($b['payment_status'] ?? 'pending'))) ?>"><?= e(booking_status_label((string) ($b['payment_status'] ?? 'pending'))) ?></span>
                                         </div>
                                     </div>
-                                    <div class="small text-soft mb-1"><?= e(t('rider.sender_prefix')) ?> <?= e($b['sender_name'] ?? '') ?><?= !empty($b['sender_phone']) ? ' &middot; ' . e($b['sender_phone']) : '' ?></div>
+                                    <div class="small text-soft mb-1"><?= e(t('rider.sender_prefix')) ?> <?= e($b['sender_name'] ?? '') ?><?= (!empty($b['sender_phone']) && !booking_is_concluded($b)) ? ' &middot; ' . e($b['sender_phone']) : '' ?></div>
                                     <div class="small text-soft mb-1"><?= e(t('booking.pickup_label')) ?> <?= e($b['pickup_address'] ?? '') ?></div>
                                     <div class="small text-soft mb-2"><?= e(t('booking.delivery_label')) ?> <?= e($b['delivery_address'] ?? '') ?></div>
                                     <div class="price-tag">&#8358;<?= number_format(rider_payout_amount((float) ($b['agreed_cost'] ?? 0)), 2) ?></div>

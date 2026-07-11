@@ -91,7 +91,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
                 <div class="fw-bold"><?= e((string) $booking['rider_name']) ?></div>
                 <div class="text-soft small"><?= e(t('track.your_delivery_rider')) ?></div>
             </div>
-            <?php if (!empty($booking['rider_phone'])): ?>
+            <?php if (!empty($booking['rider_phone']) && !booking_is_concluded($booking)): ?>
             <a class="btn btn-sm btn-outline-info" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $booking['rider_phone'])) ?>">
                 <i class="fa-solid fa-phone me-1"></i><?= e(t('track.call')) ?>
             </a>
@@ -227,6 +227,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
 
     let riderMarker = null;
     let currentTrackTarget = null;
+    let trackedRiderPaymentConfirmed = <?= booking_is_concluded($booking) ? 'true' : 'false' ?>;
 
     async function pollTracking() {
         try {
@@ -235,6 +236,14 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
             if (!json.status) return;
 
             const d = json.data;
+
+            // Once the rider confirms payment received, the transaction is concluded and
+            // the call button must disappear - reload to get the server-rendered state.
+            if (!!d.rider_payment_confirmed !== trackedRiderPaymentConfirmed) {
+                window.location.reload();
+                return;
+            }
+
             const statusText = document.getElementById('booking_status_text');
             if (statusText) statusText.textContent = formatBookingStatus(d.booking_status);
 

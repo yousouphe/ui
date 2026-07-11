@@ -570,6 +570,8 @@ return [
     'admin.filter_role_label' => 'Role',
     'admin.all_roles' => 'All roles',
     'admin.role_admin' => 'Admin',
+    'admin.role_super_admin' => 'Super Admin',
+    'admin.role_change_requires_super_admin' => 'Only a super admin can change user roles.',
     'admin.change_role' => 'Update Role',
     'admin.invalid_role' => 'Please choose a valid role.',
     'admin.role_updated' => 'User role updated.',
@@ -581,6 +583,23 @@ return [
     'admin.cannot_demote_last_admin' => 'You cannot remove the last remaining admin.',
     'admin.cannot_suspend_last_admin' => 'You cannot suspend the last remaining admin.',
     'admin.you_badge' => 'You',
+
+    // Admin - event log
+    'admin.nav_logs' => 'Logs',
+    'admin.logs_heading' => 'Event Log',
+    'admin.logs_search_label' => 'Search',
+    'admin.logs_search_placeholder' => 'Search descriptions...',
+    'admin.logs_event_type_label' => 'Event Type',
+    'admin.all_events' => 'All events',
+    'admin.logs_target_type_label' => 'Target',
+    'admin.all_targets' => 'All targets',
+    'admin.logs_date_from_label' => 'From',
+    'admin.logs_date_to_label' => 'To',
+    'admin.logs_total_prefix' => 'Total events:',
+    'admin.logs_page_prefix' => 'Page',
+    'admin.no_logs_found' => 'No events match your filters.',
+    'admin.logs_actor_prefix' => 'By',
+    'admin.logs_next_page' => 'Next',
 
     // Self-service profile
     'profile.nav_label' => 'Profile',
@@ -596,6 +615,35 @@ return [
     'profile.error.full_name_required' => 'Full name is required.',
     'profile.error.phone_required' => 'Phone number is required.',
     'profile.error.current_password_incorrect' => 'Current password is incorrect.',
+
+    // Rider KYC self-service view/resubmit
+    'kyc.nav_label' => 'My KYC',
+    'kyc.heading' => 'My KYC Details',
+    'kyc.no_profile_found' => 'We could not find your rider profile.',
+    'kyc.locked_no_edits' => 'Your KYC is approved and can no longer be edited.',
+    'kyc.approved_hint' => 'Your KYC has been approved. These details are now read-only.',
+    'kyc.rejected_hint' => 'Your KYC was not approved.',
+    'kyc.pending_hint' => 'Your KYC is awaiting review. You can still update your details below.',
+    'kyc.replace_only_if_changed' => 'Leave empty to keep your current document.',
+    'kyc.resubmit_button' => 'Save and Resubmit for Review',
+    'kyc.resubmitted_success' => 'Your KYC details have been updated and resubmitted for review.',
+
+    // Rider training / onboarding
+    'training.nav_label' => 'Training',
+    'training.heading' => 'Rider Training & Onboarding',
+    'training.subheading' => 'A quick guide to delivering a great experience for every sender and recipient.',
+    'training.section.professionalism_title' => 'Professionalism',
+    'training.section.professionalism_items' => 'Always be polite and courteous with senders and recipients|Wear clean, presentable attire while on active deliveries|Arrive on time for pickups and be reliable with your ETAs|Represent SwiftDrop professionally at all times, even off-app',
+    'training.section.communication_title' => 'Communication',
+    'training.section.communication_items' => "Respond promptly to chat messages and calls from senders|Keep senders updated if you're running late or facing an issue|Use the in-app chat for all delivery-related communication|Be clear and polite in every conversation, even during disputes",
+    'training.section.handling_title' => 'Handling Packages',
+    'training.section.handling_items' => 'Handle every package with care, as if it were your own|Confirm the item matches the description before pickup|Never open, tamper with, or inspect sealed packages|Keep packages secure and protected from weather during transit',
+    'training.section.safety_title' => 'Safety',
+    'training.section.safety_items' => "Always wear a helmet and follow traffic laws|Never use your phone while riding - pull over first|Verify the recipient's identity before handing over a package|Report any accident or safety incident to SwiftDrop immediately",
+    'training.section.rating_title' => 'Ratings & Growth',
+    'training.section.rating_items' => 'Your rating affects the delivery requests you receive|Consistently high ratings unlock more jobs and priority access|Poor conduct or repeated complaints can lead to suspension|Ask satisfied senders to leave a positive rating and review',
+    'training.section.conduct_title' => 'Code of Conduct',
+    'training.section.conduct_items' => "Never request or accept payment outside the app|Do not share senders' or recipients' contact details with others|Harassment, rudeness, or unsafe behavior will not be tolerated|Violations of this code can result in KYC rejection or account suspension",
 
     // Rider registration - profile photo + vehicle color
     'register.profile_photo_label' => 'Profile photo',

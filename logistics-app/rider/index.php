@@ -105,7 +105,7 @@ function realtime_booking_context(PDO $pdo, array $user, int $bookingId): ?array
     if ($role === 'rider') {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
         $stmt->execute([$bookingId, (int)$user['id']]);
-    } elseif ($role === 'admin') {
+    } elseif (in_array($role, ['admin', 'super_admin'], true)) {
         $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? LIMIT 1');
         $stmt->execute([$bookingId]);
     } else {
@@ -420,6 +420,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
                 (string) $requestRow['booking_code']
             );
         }
+
+        log_event($pdo, 'booking_' . $action, 'Rider ' . $action . ' offer for booking ' . $requestRow['booking_code'], (int) $user['id'], (string) $user['role'], 'booking', (int) $requestRow['booking_id']);
 
         respond_json([
             'success' => true,
@@ -840,6 +842,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
             <div class="small">

@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['admin']);
+require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 
@@ -46,6 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     flash('success', t('admin.complaint_updated'));
+    log_event($pdo, 'complaint_status_changed', 'Complaint #' . $complaintId . ' (' . $complaintRow['booking_code'] . ') set to ' . $newStatus, (int) $user['id'], (string) $user['role'], 'complaint', $complaintId, ['status' => $newStatus, 'note' => $adminNote]);
     redirect_to('admin/complaints.php');
 }
 
@@ -145,6 +146,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
         </div>

@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         flash('success', t('complete_profile.success'));
         if ($user['role'] === 'rider') redirect_to('rider/');
-        if ($user['role'] === 'admin') redirect_to('admin/');
+        if (in_array($user['role'], ['admin', 'super_admin'], true)) redirect_to('admin/');
         redirect_to('/bookings');
     }
 }

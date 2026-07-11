@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['sender', 'admin']);
+require_role(['sender', 'admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json');
@@ -17,7 +17,7 @@ if (!$booking) {
     exit;
 }
 
-if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0) && (($user['role'] ?? '') !== 'admin')) {
+if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0) && !in_array($user['role'] ?? '', ['admin', 'super_admin'], true)) {
     http_response_code(403);
     echo json_encode(['error' => 'Unauthorized']);
     exit;

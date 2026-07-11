@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/push.php';
 
 header('Content-Type: application/json');
 
@@ -31,7 +32,7 @@ if (!isset($map[$action])) {
 $user = current_user();
 
 $stmt = $pdo->prepare('
-    SELECT id, booking_status
+    SELECT id, booking_status, sender_user_id, booking_code
     FROM bookings
     WHERE id = ? AND selected_rider_user_id = ?
     LIMIT 1
@@ -57,16 +58,28 @@ $stmt->execute([$action, $bookingId]);
 switch ($action) {
     case 'arrived_at_pickup':
         $message = 'Arrival confirmed. You can now confirm package receipt.';
+        $pushTitle = 'Your rider has arrived';
+        $pushBody = 'Your rider is at the pickup location for booking ' . $booking['booking_code'] . '.';
         break;
     case 'package_received':
         $message = 'Package received. Route switched to delivery point.';
+        $pushTitle = 'Package picked up';
+        $pushBody = 'Your rider has your package and is heading to the delivery address for booking ' . $booking['booking_code'] . '.';
         break;
     case 'delivered':
         $message = 'Delivery completed successfully.';
+        $pushTitle = 'Delivered';
+        $pushBody = 'Booking ' . $booking['booking_code'] . ' has been delivered.';
         break;
     default:
         $message = 'Status updated.';
+        $pushTitle = null;
+        $pushBody = null;
         break;
+}
+
+if ($pushTitle !== null) {
+    send_web_push($pdo, (int) $booking['sender_user_id'], $pushTitle, $pushBody, url_path('bookings/index.php?booking_id=' . $bookingId));
 }
 
 echo json_encode([

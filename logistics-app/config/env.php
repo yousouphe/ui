@@ -31,4 +31,8 @@ return [
     // set to {app_url}/auth/google_callback.php
     'google_client_id' => 'REDACTED_GOOGLE_CLIENT_ID',
     'google_client_secret' => 'REDACTED_GOOGLE_CLIENT_SECRET',
+    // Web Push (browser notifications for senders/riders). Generate once with
+    // `php scripts/generate_vapid_keys.php` and paste the PEM below - the public key is
+    // derived from it automatically, there is nothing else to configure.
+    'vapid_private_key_pem' => 'REDACTED_VAPID_PRIVATE_KEY_PEM',
 ];

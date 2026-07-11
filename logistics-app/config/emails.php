@@ -106,3 +106,10 @@ function send_rider_matched_email(string $toEmail, string $fullName, string $rid
         . '<p>You can track progress and chat with your rider from your dashboard.</p>';
     mailer_dispatch($toEmail, $fullName, 'Rider assigned - ' . $bookingCode, mailer_layout('Rider Assigned', $body));
 }
+
+function send_refund_email(string $toEmail, string $fullName, string $bookingCode, float $amount): void {
+    $body = '<p>Hi ' . e($fullName) . ',</p>'
+        . '<p>A refund of <strong>₦' . number_format($amount, 2) . '</strong> has been issued for booking <strong>' . e($bookingCode) . '</strong>.</p>'
+        . '<p>It can take a few business days to reflect back on your original payment method.</p>';
+    mailer_dispatch($toEmail, $fullName, 'Refund issued - ' . $bookingCode, mailer_layout('Refund Issued', $body));
+}

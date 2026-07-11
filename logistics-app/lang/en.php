@@ -30,6 +30,7 @@ return [
     'status.paid' => 'Paid',
     'status.pending' => 'Pending',
     'status.failed' => 'Failed',
+    'status.refunded' => 'Refunded',
     'status.rejected' => 'Rejected',
     'status.processing' => 'Processing',
     'status.open' => 'Open',
@@ -256,7 +257,7 @@ return [
     'modal.edit_booking_details_title' => 'Edit Booking Details',
     'modal.replace_photo_label' => 'Replace photo (optional)',
     'modal.save_changes' => 'Save Changes',
-    'modal.recalc_price_note' => 'If a rider has already agreed a price, it will be recalculated based on the new distance.',
+    'modal.recalc_price_note' => "If a rider has already agreed a price, it only goes up if the new address is farther away - it won't be reduced for a closer address.",
     'modal.new_delivery_address_label' => 'New delivery address',
     'modal.update_address' => 'Update Address',
     'common.no' => 'No',
@@ -695,4 +696,32 @@ return [
     'admin.proof_of_address_alt' => 'Proof of address',
     'admin.vehicle_document_alt' => 'Vehicle document',
     'admin.driving_license_alt' => 'Driving license',
+
+    // Admin - bookings management
+    'admin.nav_bookings' => 'Bookings',
+    'admin.bookings_heading' => 'All Bookings',
+    'admin.bookings_search_placeholder' => 'Search by code, sender, rider, or recipient...',
+    'admin.booking_status_label' => 'Booking Status',
+    'admin.payment_status_label' => 'Payment Status',
+    'admin.sender_label' => 'Sender',
+    'admin.amount_label' => 'Amount',
+    'admin.no_bookings_found' => 'No bookings match your filters.',
+    'admin.booking_not_found' => 'Booking not found.',
+    'admin.booking_timeline_heading' => 'Timeline',
+    'admin.force_cancel_booking' => 'Force Cancel',
+    'admin.confirm_force_cancel' => 'Are you sure you want to cancel this booking? This cannot be undone.',
+    'admin.booking_cannot_cancel' => 'This booking can no longer be cancelled.',
+    'admin.booking_cancelled' => 'Booking cancelled.',
+    'admin.issue_refund' => 'Issue Refund',
+    'admin.confirm_refund' => 'Are you sure you want to refund this payment?',
+    'admin.booking_not_refundable' => 'This booking is not eligible for a refund.',
+    'admin.booking_no_payment_reference' => 'No payment reference found for this booking.',
+    'admin.refund_issued' => 'Refund issued successfully.',
+    'admin.refund_failed' => 'Refund failed:',
+
+    // Rate limiting
+    'auth.too_many_attempts' => 'Too many attempts. Please wait a few minutes and try again.',
+
+    // Push notifications
+    'push.enable_button' => 'Enable notifications',
 ];

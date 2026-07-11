@@ -13,33 +13,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $email = strtolower(trim($_POST['email'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
+    $ip = client_ip();
 
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
-    $stmt->execute([$email]);
-    $user = $stmt->fetch();
-
-    if (!$user || !password_verify($password, $user['password_hash'])) {
-        $error = t('login.error.invalid');
-    } elseif ($user['status'] !== 'active') {
-        $error = t('login.error.inactive');
+    // Two separate limits: by IP (blocks a single source sweeping many accounts) and by
+    // email (blocks one account being targeted from many IPs). Either one tripping is
+    // enough to refuse the attempt.
+    if (is_rate_limited($pdo, 'login_ip', $ip, 10, 15) || ($email !== '' && is_rate_limited($pdo, 'login_email', $email, 5, 15))) {
+        $error = t('auth.too_many_attempts');
     } else {
-        // Rotate the session ID on every login so a session ID that existed before
-        // authentication (e.g. fixed by an attacker, or left over from a previous
-        // role on a shared device) can never be reused to inherit this login.
-        session_regenerate_id(true);
-        $_SESSION['user'] = [
-            'id' => (int)$user['id'],
-            'full_name' => $user['full_name'],
-            'email' => $user['email'],
-            'phone' => $user['phone'],
-            'role' => $user['role'],
-            'profile_completed' => (int)($user['profile_completed'] ?? 1)
-        ];
-        flash('success', t('login.welcome_back', ['name' => $user['full_name']]));
-        if ((int)($user['profile_completed'] ?? 1) === 0) redirect_to('complete-profile');
-        if ($user['role'] === 'rider') redirect_to('rider/');
-        if (in_array($user['role'], ['admin', 'super_admin'], true)) redirect_to('admin/');
-        redirect_to('/bookings');
+        $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $user = $stmt->fetch();
+
+        if (!$user || !password_verify($password, $user['password_hash'])) {
+            record_rate_limit_attempt($pdo, 'login_ip', $ip);
+            if ($email !== '') {
+                record_rate_limit_attempt($pdo, 'login_email', $email);
+            }
+            $error = t('login.error.invalid');
+        } elseif ($user['status'] !== 'active') {
+            $error = t('login.error.inactive');
+        } else {
+            // Rotate the session ID on every login so a session ID that existed before
+            // authentication (e.g. fixed by an attacker, or left over from a previous
+            // role on a shared device) can never be reused to inherit this login.
+            session_regenerate_id(true);
+            $_SESSION['user'] = [
+                'id' => (int)$user['id'],
+                'full_name' => $user['full_name'],
+                'email' => $user['email'],
+                'phone' => $user['phone'],
+                'role' => $user['role'],
+                'profile_completed' => (int)($user['profile_completed'] ?? 1)
+            ];
+            flash('success', t('login.welcome_back', ['name' => $user['full_name']]));
+            if ((int)($user['profile_completed'] ?? 1) === 0) redirect_to('complete-profile');
+            if ($user['role'] === 'rider') redirect_to('rider/');
+            if (in_array($user['role'], ['admin', 'super_admin'], true)) redirect_to('admin/');
+            redirect_to('/bookings');
+        }
     }
 }
 ?>

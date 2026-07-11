@@ -13,8 +13,16 @@ $errors = [];
 $accountType = $_POST['account_type'] ?? 'sender';
 $accountType = in_array($accountType, ['sender', 'rider'], true) ? $accountType : 'sender';
 
+$registerRateLimited = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
+    $registerRateLimited = is_rate_limited($pdo, 'register_ip', client_ip(), 5, 60);
+}
+
+if ($registerRateLimited) {
+    $errors['form'] = t('auth.too_many_attempts');
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    record_rate_limit_attempt($pdo, 'register_ip', client_ip());
     $errors = validate_required([
         'full_name' => 'Full name',
         'email' => 'Email',

@@ -13,23 +13,38 @@ $submitted = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $email = strtolower(trim($_POST['email'] ?? ''));
+    $ip = client_ip();
 
-    if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $stmt = $pdo->prepare('SELECT id, full_name, email FROM users WHERE email = ? LIMIT 1');
-        $stmt->execute([$email]);
-        $foundUser = $stmt->fetch(PDO::FETCH_ASSOC);
+    // Rate-limited by IP (stops this form being used as a mass-mailing tool) and by email
+    // (stops one inbox being spammed with reset links) - checked before anything else, but
+    // we still show the generic $submitted=true screen either way so this can't be used to
+    // enumerate which emails are registered.
+    $limited = is_rate_limited($pdo, 'forgot_password_ip', $ip, 5, 60)
+        || ($email !== '' && is_rate_limited($pdo, 'forgot_password_email', $email, 3, 60));
 
-        if ($foundUser) {
-            $token = bin2hex(random_bytes(32));
-            $tokenHash = hash('sha256', $token);
+    if (!$limited) {
+        record_rate_limit_attempt($pdo, 'forgot_password_ip', $ip);
+        if ($email !== '') {
+            record_rate_limit_attempt($pdo, 'forgot_password_email', $email);
+        }
 
-            $stmt = $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))');
-            $stmt->execute([$foundUser['id'], $tokenHash]);
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $stmt = $pdo->prepare('SELECT id, full_name, email FROM users WHERE email = ? LIMIT 1');
+            $stmt->execute([$email]);
+            $foundUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // app_url already includes any subdirectory the app is deployed under - do not also
-            // route this through url_path(), which would independently re-detect and double it.
-            $resetUrl = rtrim((string)(config_app()['app_url'] ?? ''), '/') . '/reset-password?token=' . $token;
-            send_password_reset_email($foundUser['email'], $foundUser['full_name'], $resetUrl);
+            if ($foundUser) {
+                $token = bin2hex(random_bytes(32));
+                $tokenHash = hash('sha256', $token);
+
+                $stmt = $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))');
+                $stmt->execute([$foundUser['id'], $tokenHash]);
+
+                // app_url already includes any subdirectory the app is deployed under - do not also
+                // route this through url_path(), which would independently re-detect and double it.
+                $resetUrl = rtrim((string)(config_app()['app_url'] ?? ''), '/') . '/reset-password?token=' . $token;
+                send_password_reset_email($foundUser['email'], $foundUser['full_name'], $resetUrl);
+            }
         }
     }
 

@@ -31,6 +31,7 @@ return [
     'status.paid' => 'An Biya',
     'status.pending' => 'Ana Jira',
     'status.failed' => 'Ya Kasa',
+    'status.refunded' => 'An Mayar da Kuɗi',
     'status.rejected' => 'An Ƙi',
     'status.processing' => 'Ana Aiwatarwa',
     'status.open' => 'A Buɗe',
@@ -257,7 +258,7 @@ return [
     'modal.edit_booking_details_title' => 'Gyara Bayanan Delivery',
     'modal.replace_photo_label' => 'Canja hoto (Optional)',
     'modal.save_changes' => 'Ajiye Canje-canje',
-    'modal.recalc_price_note' => 'Idan rider ya riga ya amince da farashi, farashin zai iya canzawa dangane da sabon nisan da aka saka.',
+    'modal.recalc_price_note' => 'Idan rider ya riga ya amince da farashi, zai ƙaru ne kawai idan sabon adireshin ya fi nisa - ba za a rage shi ba idan adireshin ya kusaci.',
     'modal.new_delivery_address_label' => 'Sabon adireshin kaiwa',
     'modal.update_address' => 'Sabunta Adireshi',
     'common.no' => 'A\'a',
@@ -696,4 +697,32 @@ return [
     'admin.proof_of_address_alt' => 'Hujjar adireshi',
     'admin.vehicle_document_alt' => 'Takardar abin hawa',
     'admin.driving_license_alt' => 'Lasisin tuƙi',
+
+    // Admin - bookings management
+    'admin.nav_bookings' => 'Deliveries',
+    'admin.bookings_heading' => 'Duk Deliveries',
+    'admin.bookings_search_placeholder' => 'Bincika ta lamba, mai turawa, rider, ko mai karɓa...',
+    'admin.booking_status_label' => 'Matsayin Delivery',
+    'admin.payment_status_label' => 'Matsayin Biya',
+    'admin.sender_label' => 'Mai Turawa',
+    'admin.amount_label' => 'Kuɗi',
+    'admin.no_bookings_found' => 'Babu deliveries da suka dace da tacewar ku.',
+    'admin.booking_not_found' => 'Ba a sami delivery ba.',
+    'admin.booking_timeline_heading' => 'Tarihin Ayyuka',
+    'admin.force_cancel_booking' => 'Soke Delivery Da Karfi',
+    'admin.confirm_force_cancel' => 'Ka tabbata kana son soke wannan delivery? Ba za a iya juyawa ba.',
+    'admin.booking_cannot_cancel' => 'Ba za a iya soke wannan delivery ba yanzu.',
+    'admin.booking_cancelled' => 'An soke delivery.',
+    'admin.issue_refund' => 'Mayar da Kuɗi',
+    'admin.confirm_refund' => 'Ka tabbata kana son mayar da wannan kuɗin?',
+    'admin.booking_not_refundable' => 'Ba za a iya mayar da kuɗin wannan delivery ba.',
+    'admin.booking_no_payment_reference' => 'Ba a sami tabbacin biya ga wannan delivery ba.',
+    'admin.refund_issued' => 'An mayar da kuɗin cikin nasara.',
+    'admin.refund_failed' => 'Mayar da kuɗi ya kasa:',
+
+    // Rate limiting
+    'auth.too_many_attempts' => 'Ka yi ƙoƙari sau da yawa. Da fatan za a jira ƴan mintuna sannan a sake gwadawa.',
+
+    // Push notifications
+    'push.enable_button' => 'Kunna sanarwa',
 ];

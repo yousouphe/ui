@@ -214,7 +214,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
+        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
             <a class="nav-link active" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>

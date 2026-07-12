@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/push.php';
 
 $user = current_user();
 $errors = [];
@@ -454,6 +455,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
+    <?= vapid_public_key_meta_tag() ?>
     <title><?= e(t('sender.page_title')) ?></title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -575,6 +577,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
+            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-secondary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell"></i></button>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
             <div class="small">
@@ -3369,8 +3372,57 @@ function initSenderWorkspace() {
     }
 }
 
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+}
+
+function initPushNotifications() {
+    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
+    const btn = document.getElementById('notif-enable-btn');
+    if (!vapidKey || !btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    navigator.serviceWorker.register('<?= e(url_path('sw.js')) ?>').then(function (registration) {
+        if (Notification.permission === 'granted') {
+            subscribeToPush(registration, vapidKey.content);
+        } else if (Notification.permission === 'default') {
+            btn.classList.remove('d-none');
+            btn.addEventListener('click', function () {
+                Notification.requestPermission().then(function (permission) {
+                    if (permission === 'granted') {
+                        subscribeToPush(registration, vapidKey.content);
+                        btn.classList.add('d-none');
+                    }
+                });
+            });
+        }
+    }).catch(function () {});
+}
+
+function subscribeToPush(registration, vapidKeyB64) {
+    registration.pushManager.getSubscription().then(function (existing) {
+        if (existing) return existing;
+        return registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKeyB64),
+        });
+    }).then(function (subscription) {
+        if (!subscription) return;
+        fetch('<?= e(url_path('notifications/ajax_save_subscription.php')) ?>', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: subscription.endpoint, csrf_token: document.querySelector('meta[name="csrf-token"]').content }),
+        }).catch(function () {});
+    }).catch(function () {});
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     initSenderWorkspace();
+    initPushNotifications();
 
     window.addEventListener('popstate', function () {
         ajaxLoadWorkspace(window.location.href, false);

@@ -134,3 +134,118 @@ function paystack_initiate_transfer(string $recipientCode, float $amount, string
         'message' => $result['message'],
     ];
 }
+
+function paystack_verify_transaction(string $reference): array {
+    $result = paystack_request('GET', '/transaction/verify/' . rawurlencode($reference));
+    if (!$result['ok'] || !is_array($result['data'])) {
+        return ['ok' => false, 'status' => null, 'amount_kobo' => 0, 'currency' => null, 'message' => $result['message']];
+    }
+    $data = $result['data'];
+    return [
+        'ok' => true,
+        'status' => strtolower(trim((string)($data['status'] ?? ''))),
+        'amount_kobo' => (int)($data['amount'] ?? 0),
+        'currency' => strtoupper(trim((string)($data['currency'] ?? 'NGN'))),
+        'message' => 'Verified.',
+    ];
+}
+
+// Shared by the browser-redirect callback (payments/callback.php) and the server-to-server
+// webhook (payments/webhook.php) so a payment only ever gets marked paid once, no matter
+// which path finds out about it first or whether the sender's browser ever makes it back
+// to the callback URL. Always re-verifies directly with Paystack rather than trusting the
+// caller's data, and is a safe no-op to call repeatedly once the booking is already paid.
+function finalize_booking_payment(PDO $pdo, string $reference): array {
+    require_once __DIR__ . '/emails.php';
+
+    $stmt = $pdo->prepare("
+        SELECT
+            bp.*,
+            b.id AS booking_id,
+            b.sender_user_id,
+            b.booking_code,
+            b.item_name,
+            b.payment_status AS booking_payment_status,
+            b.agreed_cost,
+            u.full_name AS sender_full_name,
+            u.email AS sender_email
+        FROM booking_payments bp
+        INNER JOIN bookings b ON b.id = bp.booking_id
+        INNER JOIN users u ON u.id = b.sender_user_id
+        WHERE bp.reference = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$reference]);
+    $payment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$payment) {
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => null, 'message' => 'Payment record not found.'];
+    }
+
+    if (($payment['booking_payment_status'] ?? '') === 'paid') {
+        return ['ok' => true, 'already_paid' => true, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Payment has already been confirmed.'];
+    }
+
+    $verified = paystack_verify_transaction($reference);
+    if (!$verified['ok']) {
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => $verified['message']];
+    }
+    if ($verified['status'] !== 'success') {
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Payment was not successful.'];
+    }
+
+    $expectedAmountKobo = (int) round(((float)$payment['agreed_cost']) * 100);
+    if ($verified['amount_kobo'] < $expectedAmountKobo) {
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Verified payment amount is less than expected.'];
+    }
+    if ($verified['currency'] !== 'NGN') {
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Unexpected payment currency returned from gateway.'];
+    }
+
+    $wasInTransaction = $pdo->inTransaction();
+    if (!$wasInTransaction) {
+        $pdo->beginTransaction();
+    }
+
+    try {
+        $stmt = $pdo->prepare("UPDATE booking_payments SET status = 'success', paid_at = NOW() WHERE id = ?");
+        $stmt->execute([$payment['id']]);
+
+        $stmt = $pdo->prepare("UPDATE bookings SET payment_status = 'paid', paystack_reference = ? WHERE id = ?");
+        $stmt->execute([$reference, $payment['booking_id']]);
+
+        if (!$wasInTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if (!$wasInTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Database update failed: ' . $e->getMessage()];
+    }
+
+    send_transaction_receipt_email((string)$payment['sender_email'], (string)$payment['sender_full_name'], [
+        'booking_code' => $payment['booking_code'],
+        'item_name' => $payment['item_name'],
+        'agreed_cost' => $payment['agreed_cost'],
+    ], $reference);
+
+    log_event($pdo, 'payment_confirmed', 'Payment confirmed for booking ' . $payment['booking_code'], (int)$payment['sender_user_id'], 'sender', 'booking', (int)$payment['booking_id'], ['reference' => $reference, 'amount' => (float)$payment['agreed_cost']]);
+
+    return ['ok' => true, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Payment verified successfully.'];
+}
+
+// Full or partial refund of an already-paid transaction. Paystack processes refunds
+// asynchronously - a successful call here means the refund was accepted, not that funds
+// have landed back with the customer yet.
+function paystack_initiate_refund(string $reference, ?int $amountKobo = null): array {
+    $body = ['transaction' => $reference];
+    if ($amountKobo !== null) {
+        $body['amount'] = $amountKobo;
+    }
+    $result = paystack_request('POST', '/refund', $body);
+    if (!$result['ok']) {
+        return ['ok' => false, 'status' => null, 'message' => $result['message']];
+    }
+    return ['ok' => true, 'status' => (string)($result['data']['status'] ?? 'pending'), 'message' => $result['message']];
+}

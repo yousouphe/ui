@@ -401,6 +401,35 @@ function booking_is_concluded(array $booking): bool {
     return (int) ($booking['rider_payment_confirmed'] ?? 0) === 1;
 }
 
+function client_ip(): string {
+    return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+}
+
+// Checked BEFORE doing sensitive work (verifying a password, sending a reset email,
+// creating an account) - true means the caller should refuse and show a "too many
+// attempts" message instead. Deliberately fails open (returns false, i.e. not limited)
+// on a DB error rather than locking everyone out if the rate_limit_attempts table has a
+// transient problem.
+function is_rate_limited(PDO $pdo, string $action, string $identifier, int $maxAttempts, int $windowMinutes): bool {
+    try {
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM rate_limit_attempts WHERE action = ? AND identifier = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)');
+        $stmt->execute([$action, $identifier, $windowMinutes]);
+        return (int) $stmt->fetchColumn() >= $maxAttempts;
+    } catch (Throwable $e) {
+        error_log('is_rate_limited check failed: ' . $e->getMessage());
+        return false;
+    }
+}
+
+function record_rate_limit_attempt(PDO $pdo, string $action, string $identifier): void {
+    try {
+        $stmt = $pdo->prepare('INSERT INTO rate_limit_attempts (action, identifier, created_at) VALUES (?, ?, NOW())');
+        $stmt->execute([$action, $identifier]);
+    } catch (Throwable $e) {
+        error_log('record_rate_limit_attempt failed: ' . $e->getMessage());
+    }
+}
+
 // Central troubleshooting trail for admins - bookings, payments, withdrawals, admin
 // actions, and outbound emails all funnel through here. A logging failure must never
 // break the calling flow, same principle as the mailer.

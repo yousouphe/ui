@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/functions.php';
 require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
+require_once __DIR__ . '/../config/push.php';
 
 $user = current_user();
 $success = flash('success');
@@ -416,6 +417,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
                 (string) $user['full_name'],
                 (string) $requestRow['booking_code']
             );
+            send_web_push($pdo, (int) $requestRow['sender_user_id'], (string) $user['full_name'] . ' accepted your delivery', 'Booking ' . $requestRow['booking_code'] . ' is on its way to pickup.', url_path('bookings/index.php?booking_id=' . (int) $requestRow['booking_id']));
+        } else {
+            send_web_push($pdo, (int) $requestRow['sender_user_id'], 'Rider declined your request', 'Booking ' . $requestRow['booking_code'] . ' - try another rider from your dashboard.', url_path('bookings/index.php?booking_id=' . (int) $requestRow['booking_id']));
         }
 
         log_event($pdo, 'booking_' . $action, 'Rider ' . $action . ' offer for booking ' . $requestRow['booking_code'], (int) $user['id'], (string) $user['role'], 'booking', (int) $requestRow['booking_id']);
@@ -736,6 +740,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
+    <?= vapid_public_key_meta_tag() ?>
     <title><?= e(t('rider.dashboard_heading')) ?> | SwiftDrop</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -841,6 +846,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
+            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-secondary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell"></i></button>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
             <div class="small">
@@ -2814,6 +2820,56 @@ document.body.addEventListener('click', function (e) {
 });
 
 initPage();
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+}
+
+function initPushNotifications() {
+    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
+    const btn = document.getElementById('notif-enable-btn');
+    if (!vapidKey || !btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    navigator.serviceWorker.register('<?= e(url_path('sw.js')) ?>').then(function (registration) {
+        if (Notification.permission === 'granted') {
+            subscribeToPush(registration, vapidKey.content);
+        } else if (Notification.permission === 'default') {
+            btn.classList.remove('d-none');
+            btn.addEventListener('click', function () {
+                Notification.requestPermission().then(function (permission) {
+                    if (permission === 'granted') {
+                        subscribeToPush(registration, vapidKey.content);
+                        btn.classList.add('d-none');
+                    }
+                });
+            });
+        }
+    }).catch(function () {});
+}
+
+function subscribeToPush(registration, vapidKeyB64) {
+    registration.pushManager.getSubscription().then(function (existing) {
+        if (existing) return existing;
+        return registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidKeyB64),
+        });
+    }).then(function (subscription) {
+        if (!subscription) return;
+        fetch('<?= e(url_path('notifications/ajax_save_subscription.php')) ?>', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: subscription.endpoint, csrf_token: document.querySelector('meta[name="csrf-token"]').content }),
+        }).catch(function () {});
+    }).catch(function () {});
+}
+
+initPushNotifications();
 
 // Each page load registers a PeerJS connection under a deterministic id
 // (booking-<id>-user-<id>). Leaving it dangling on the signaling server when the page

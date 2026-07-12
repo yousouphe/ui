@@ -4,6 +4,7 @@ require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 require_once __DIR__ . '/../config/paystack.php';
+require_once __DIR__ . '/../config/push.php';
 
 $user = current_user();
 $success = flash('success');
@@ -135,6 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 flash('success', t('admin.marked_paid'));
                 send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+                send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal paid', '₦' . number_format((float) $withdrawal['amount'], 2) . ' has been sent to your bank account.', url_path('rider/wallet'));
                 log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' paid via Paystack (' . $transferResult['transfer_code'] . ')', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'transfer_code' => $transferResult['transfer_code'], 'reference' => $reference]);
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
@@ -199,6 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
             flash('success', t('admin.marked_paid'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+            send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal paid', '₦' . number_format((float) $withdrawal['amount'], 2) . ' has been sent to your bank account.', url_path('rider/wallet'));
             log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' marked paid manually', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'manual' => true]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -222,6 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$user['id'], $note !== '' ? $note : null, $requestId]);
             flash('success', t('admin.marked_rejected'));
             send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'rejected', $note !== '' ? $note : null);
+            send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal rejected', 'Your withdrawal request for ₦' . number_format((float) $withdrawal['amount'], 2) . ' was rejected. Check your email for details.', url_path('rider/wallet'));
             log_event($pdo, 'withdrawal_rejected', 'Withdrawal #' . $requestId . ' rejected', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['note' => $note]);
         }
         redirect_to('admin/index.php');
@@ -378,6 +382,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <a class="navbar-brand fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('common.brand')) ?> <?= e(t('admin.brand_suffix')) ?></a>
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/bookings.php')) ?>"><?= e(t('admin.nav_bookings')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>

@@ -62,7 +62,13 @@ if (!empty($booking['selected_rider_user_id']) && $booking['pickup_latitude'] !=
     }
 
     if ($oldDistance && $oldDistance > 0.05 && $booking['agreed_cost'] !== null) {
-        $newAgreedCost = round(((float) $booking['agreed_cost']) * ($newDistance / $oldDistance), 2);
+        // Only reprice when the new destination is farther away. A closer destination
+        // keeps the already-agreed price - the rider doesn't lose out on a shorter trip
+        // just because the sender changed their mind, and it avoids re-negotiating a
+        // price the rider already committed to.
+        if ($newDistance > $oldDistance) {
+            $newAgreedCost = round(((float) $booking['agreed_cost']) * ($newDistance / $oldDistance), 2);
+        }
     } else {
         $base = ($newDistance * 400) + 1500;
         if (($booking['vehicle_type'] ?? '') === 'car') {

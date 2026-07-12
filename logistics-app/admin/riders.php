@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/functions.php';
 require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
+require_once __DIR__ . '/../config/push.php';
 
 $user = current_user();
 $success = flash('success');
@@ -27,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$user['id'], $riderUserId]);
         flash('success', t('admin.kyc_approved'));
         send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], true);
+        send_web_push($pdo, $riderUserId, 'KYC approved', 'You can now go online and start accepting deliveries.', url_path('rider/'));
         log_event($pdo, 'kyc_approved', 'Approved KYC for ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId);
         redirect_to('admin/riders.php');
     }
@@ -37,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$note !== '' ? $note : null, $user['id'], $riderUserId]);
         flash('success', t('admin.kyc_rejected'));
         send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], false, $note !== '' ? $note : null);
+        send_web_push($pdo, $riderUserId, 'KYC not approved', 'Your registration documents were not approved. Check your email for details.', url_path('rider/kyc.php'));
         log_event($pdo, 'kyc_rejected', 'Rejected KYC for ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId, ['note' => $note]);
         redirect_to('admin/riders.php');
     }
@@ -253,6 +256,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         <a class="navbar-brand fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('common.brand')) ?> <?= e(t('admin.brand_suffix')) ?></a>
         <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/bookings.php')) ?>"><?= e(t('admin.nav_bookings')) ?></a>
             <a class="nav-link fw-bold" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/push.php';
 
 $user = current_user();
 
@@ -215,6 +216,11 @@ try {
     $stmt->execute([$proposedCost, $newBookingStatus, $bookingId]);
 
     $pdo->commit();
+
+    // Not localized to the rider's own locale preference for the same reason emails.php
+    // isn't - t() reflects the current request's (the sender's) session/cookie locale, and
+    // there's no stored per-user locale preference to look up the rider's instead.
+    send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . $booking['booking_code'] . '.', url_path('rider/'));
 
     $successMessage = 'Rider request sent successfully.';
 

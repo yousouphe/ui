@@ -1770,7 +1770,12 @@ function initSenderWorkspace() {
         // here - fetched fresh every time this step is entered so a rider request/admin
         // assignment can never happen without a real, already-agreed price on the booking.
         // Reuses the route the wizard map already drew (workspaceState.routeDistanceKm/
-        // routeDurationMinutes) instead of forcing a second, independent Mapbox call here.
+        // routeDurationMinutes) when available, instead of forcing a second, independent
+        // Mapbox call here. That value is set by drawRoutePreview(), which fires
+        // fire-and-forget off the address-autocomplete/map-marker flow - there's no
+        // guarantee it has resolved by the time the sender reaches this step (a fast sender,
+        // or a resumed draft whose coordinates were never touched interactively, would race
+        // right past it), so this fetches it directly, awaited, whenever it's still missing.
         async function loadVehicleOptions() {
             const container = root.querySelector('#vehicle_options_container');
             const pricingStatus = root.querySelector('#vehicle-pricing-status');
@@ -1783,11 +1788,30 @@ function initSenderWorkspace() {
                 pricingStatus.innerHTML = `<span class="spinner-border spinner-border-sm text-info me-2" role="status"></span>${I18N.vehicleEstimating}`;
             }
 
+            const pickupLatVal = wizardForm.querySelector('#pickup_latitude')?.value || '';
+            const pickupLngVal = wizardForm.querySelector('#pickup_longitude')?.value || '';
+            const deliveryLatVal = wizardForm.querySelector('#delivery_latitude')?.value || '';
+            const deliveryLngVal = wizardForm.querySelector('#delivery_longitude')?.value || '';
+
+            if (
+                (workspaceState.routeDistanceKm === null || workspaceState.routeDurationMinutes === null)
+                && pickupLatVal && pickupLngVal && deliveryLatVal && deliveryLngVal
+            ) {
+                const route = await fetchMapboxRoute([
+                    [parseFloat(pickupLatVal), parseFloat(pickupLngVal)],
+                    [parseFloat(deliveryLatVal), parseFloat(deliveryLngVal)],
+                ]);
+                if (route) {
+                    workspaceState.routeDistanceKm = route.distanceMeters / 1000;
+                    workspaceState.routeDurationMinutes = route.durationSec / 60;
+                }
+            }
+
             const params = new URLSearchParams({
-                pickup_latitude: wizardForm.querySelector('#pickup_latitude')?.value || '',
-                pickup_longitude: wizardForm.querySelector('#pickup_longitude')?.value || '',
-                delivery_latitude: wizardForm.querySelector('#delivery_latitude')?.value || '',
-                delivery_longitude: wizardForm.querySelector('#delivery_longitude')?.value || '',
+                pickup_latitude: pickupLatVal,
+                pickup_longitude: pickupLngVal,
+                delivery_latitude: deliveryLatVal,
+                delivery_longitude: deliveryLngVal,
                 distance_km: workspaceState.routeDistanceKm ?? '',
                 duration_minutes: workspaceState.routeDurationMinutes ?? '',
             });

@@ -183,6 +183,13 @@ return [
     'wizard.item_image_label' => 'Hoton kaya (Optional)',
     'wizard.save_draft' => 'Ajiye a Matsayin Draft',
     'wizard.send_package' => 'Aika Kaya (Send Parcel)',
+    'wizard.step4.label' => 'Abin hawa',
+    'wizard.step4.heading' => 'Zaɓi abin hawan isar da kaya',
+    'wizard.step4.subheading' => 'Farashi zai tsaya tsayin daka da zarar ka zaɓi nau\'in abin hawa - ba zai canza ba komai wanne rider ya ɗauki aikin.',
+    'wizard.vehicle.estimating' => 'Ana lissafin farashi...',
+    'wizard.vehicle.unavailable' => 'An kasa lissafin farashi a yanzu. Da fatan a sake gwadawa ba da daɗewa ba.',
+    'wizard.vehicle.retry' => 'Sake gwadawa',
+    'wizard.vehicle.required' => 'Da fatan a zaɓi nau\'in abin hawa.',
 
     // Sender booking detail page
     'sender.page_title' => 'Cibiyar Mai Turawa | Aike',
@@ -314,6 +321,13 @@ return [
     'match.matching_you_now' => 'Ana haɗa ku yanzu...',
     'match.no_more_nearby_short' => 'Babu riders kusa a halin yanzu',
     'match.waiting_for_them' => 'Ana jiran amsarsu...',
+    'match.fallback_all_riders' => 'Babu wanda ya amsa tukuna - ga duk riders da suka dace',
+    'match.fallback_no_riders' => 'Babu rider da ya dace da wannan nau\'in abin hawa a yanzu. Za mu ci gaba da bincike.',
+    'match.fallback_order_count' => 'oda',
+    'match.fallback_location_unknown' => 'Ba a san wurin ba',
+    'match.fallback_no_performance_data' => 'Babu wata oda da aka kammala tukuna',
+    'match.fallback_performance_suffix' => 'na lokacin da aka tsara',
+    'match.request_sent' => 'An aika buƙata',
 
     // Map
     'map.tap_to_set' => 'Danna kan taswira don saita',
@@ -746,6 +760,7 @@ return [
     'admin.assign_rider_button' => 'Naɗa Rider',
     'admin.reassign_rider_button' => 'Sake Naɗa Rider',
     'admin.select_rider_placeholder' => 'Zaɓi rider...',
+    'admin.active_orders_suffix' => 'oda masu aiki',
     'admin.no_eligible_riders' => 'Babu wani rider da ya cancanta a yanzu.',
     'admin.booking_not_assignable' => 'Ba za a iya naɗa rider ga wannan delivery ba yanzu.',
     'admin.booking_missing_coordinates' => 'Wannan delivery ba shi da wurin ɗauka/kaiwa da aka tantance.',

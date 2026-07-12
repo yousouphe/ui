@@ -340,18 +340,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
         }
 
         if ($action === 'accepted') {
-            $stmt = $pdo->prepare('
-                SELECT COUNT(*) 
-                FROM bookings
-                WHERE selected_rider_user_id = ?
-                  AND booking_status IN ("matched", "accepted", "arrived_at_pickup", "package_received", "in_transit")
-                  AND id <> ?
-            ');
-            $stmt->execute([$user['id'], (int)$requestRow['booking_id']]);
-            $hasOtherActive = (int)$stmt->fetchColumn() > 0;
+            $activeOrderCount = rider_active_order_count($pdo, (int) $user['id'], (int) $requestRow['booking_id']);
 
-            if ($hasOtherActive) {
-                respond_json(['success' => false, 'message' => 'You already have another active delivery. Complete it before accepting a new one.'], 409);
+            if ($activeOrderCount >= RIDER_MAX_CONCURRENT_ORDERS) {
+                respond_json(['success' => false, 'message' => 'You already have the maximum number of active deliveries (' . RIDER_MAX_CONCURRENT_ORDERS . '). Complete one before accepting a new one.'], 409);
             }
         }
 
@@ -386,7 +378,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
                     booking_status = CASE
                         WHEN booking_status = "submitted" THEN "matched"
                         ELSE booking_status
-                    END
+                    END,
+                    matched_at = COALESCE(matched_at, NOW())
                 WHERE id = ?
             ');
             $stmt->execute([

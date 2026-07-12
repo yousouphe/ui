@@ -14,10 +14,12 @@ function mapbox_road_routing_configured(): bool {
     return $token !== '' && !str_starts_with($token, 'REDACTED');
 }
 
-// Returns null (rather than throwing) on any failure - pricing_distance_km() below is the
+// Returns null (rather than throwing) on any failure - pricing_route_metrics() below is the
 // one that turns that into a hard error, so this stays a low-level "couldn't get it" signal
-// that other, non-pricing callers could use permissively if they ever need to.
-function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?float {
+// that other, non-pricing callers could use permissively if they ever need to. Returns both
+// distance and drive-time duration from the same Directions API call - the duration is the
+// "planned time" a rider's actual delivery time is later compared against.
+function road_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2): ?array {
     if (!mapbox_road_routing_configured()) {
         return null;
     }
@@ -42,7 +44,16 @@ function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?
 
     $data = json_decode($response, true);
     $meters = $data['routes'][0]['distance'] ?? null;
-    return is_numeric($meters) ? ((float) $meters) / 1000 : null;
+    $seconds = $data['routes'][0]['duration'] ?? null;
+    if (!is_numeric($meters) || !is_numeric($seconds)) {
+        return null;
+    }
+    return ['distance_km' => ((float) $meters) / 1000, 'duration_min' => ((float) $seconds) / 60];
+}
+
+// Thin wrapper for the many existing callers that only ever wanted the distance.
+function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?float {
+    return road_route_metrics($lat1, $lng1, $lat2, $lng2)['distance_km'] ?? null;
 }
 
 // The one call site every pricing-relevant distance calculation must go through. Deliberately
@@ -51,9 +62,16 @@ function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?
 // against the distance actually driven. Callers must catch this and surface a retry rather
 // than ever price off an approximation.
 function pricing_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): float {
-    $km = road_distance_km($lat1, $lng1, $lat2, $lng2);
-    if ($km === null) {
+    return pricing_route_metrics($lat1, $lng1, $lat2, $lng2)['distance_km'];
+}
+
+// Same contract as pricing_distance_km() (throws instead of an approximate fallback) but
+// also returns the route's planned drive time, so callers that need to record
+// bookings.planned_duration_minutes don't have to make a second Directions call.
+function pricing_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2): array {
+    $metrics = road_route_metrics($lat1, $lng1, $lat2, $lng2);
+    if ($metrics === null) {
         throw new RuntimeException('Unable to determine road distance for pricing.');
     }
-    return $km;
+    return $metrics;
 }

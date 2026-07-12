@@ -136,9 +136,14 @@ try {
         fail_request('Selected user is not a rider.', 422, $ajax, $bookingId, 'user role is not rider');
     }
 
-    if (($rider['availability_status'] ?? '') !== 'available') {
+    // Not gated on availability_status ("online") here - the manual fallback picker
+    // deliberately surfaces riders regardless of their online toggle (that's the whole
+    // point of it: reach a rider even if their status ping isn't reliable), so a sender
+    // sending them a request needs to work the same way the admin's manual assignment
+    // already does. Capacity (below) is the real constraint that actually matters.
+    if (rider_active_order_count($pdo, $riderUserId) >= RIDER_MAX_CONCURRENT_ORDERS) {
         $pdo->rollBack();
-        fail_request('Selected rider is currently unavailable.', 409, $ajax, $bookingId, 'rider unavailable');
+        fail_request('Selected rider already has the maximum number of active deliveries.', 409, $ajax, $bookingId, 'rider at capacity');
     }
 
     // Only block duplicate pending request

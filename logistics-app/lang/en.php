@@ -331,11 +331,14 @@ return [
     'match.fallback_avg_delivery_suffix' => 'avg. delivery time',
     'match.resume_auto_scan' => 'Keep scanning automatically',
     'match.sort_label' => 'Sort by',
+    'match.sort_score' => 'Best match',
     'match.sort_distance' => 'Distance',
     'match.sort_eta' => 'ETA',
     'match.sort_rating' => 'Rating',
     'match.sort_avg_time' => 'Avg. delivery time',
     'match.request_sent' => 'Request sent',
+    'match.pricing_pending_title' => 'Finalizing your delivery price',
+    'match.pricing_pending_subtitle' => "We're having trouble calculating pricing right now - our team has been notified and this will continue automatically once it's resolved.",
 
     // Map
     'map.tap_to_set' => 'Tap the map to set',

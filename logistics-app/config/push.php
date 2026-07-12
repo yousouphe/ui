@@ -37,12 +37,20 @@ function vapid_public_key_raw(): ?string {
     }
     $key = openssl_pkey_get_private(vapid_private_key_pem());
     if ($key === false) {
+        // The single most common cause: the PEM's line breaks got mangled (collapsed to
+        // one line, or literal "\n" text instead of real newlines) when it was pasted into
+        // config/env.php or copied through a hosting panel's env-var editor - openssl can't
+        // parse a PEM without its real line structure. openssl_error_string() names the
+        // exact parse failure without ever logging the key material itself.
+        error_log('VAPID: openssl_pkey_get_private() failed to parse vapid_private_key_pem - ' . (openssl_error_string() ?: 'no OpenSSL error detail available') . '. Check that the PEM was pasted with real line breaks intact.');
         return $cached = null;
     }
     $details = openssl_pkey_get_details($key);
     $x = $details['ec']['x'] ?? null;
     $y = $details['ec']['y'] ?? null;
     if ($x === null || $y === null) {
+        $keyType = $details['type'] ?? null;
+        error_log('VAPID: private key parsed but is not an EC (P-256) key (openssl key type constant: ' . var_export($keyType, true) . '). Web Push requires an EC P-256 key - regenerate with php scripts/generate_vapid_keys.php.');
         return $cached = null;
     }
     $x = str_pad($x, 32, "\x00", STR_PAD_LEFT);
@@ -98,6 +106,7 @@ function build_vapid_jwt(string $audienceOrigin): ?string {
     }
     $key = openssl_pkey_get_private(vapid_private_key_pem());
     if ($key === false) {
+        error_log('VAPID: build_vapid_jwt() failed to load the private key - ' . (openssl_error_string() ?: 'no OpenSSL error detail available'));
         return null;
     }
 
@@ -111,6 +120,7 @@ function build_vapid_jwt(string $audienceOrigin): ?string {
 
     $derSignature = '';
     if (!openssl_sign($signingInput, $derSignature, $key, OPENSSL_ALGO_SHA256)) {
+        error_log('VAPID: openssl_sign() failed while building the push auth JWT - ' . (openssl_error_string() ?: 'no OpenSSL error detail available'));
         return null;
     }
     $joseSignature = vapid_der_to_jose_signature($derSignature);
@@ -170,15 +180,22 @@ function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?stri
                 CURLOPT_TIMEOUT => 10,
                 CURLOPT_CONNECTTIMEOUT => 5,
             ]);
-            curl_exec($ch);
+            $responseBody = curl_exec($ch);
             $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
 
             // 404/410 means the browser revoked this subscription (uninstalled, permission
-            // withdrawn, etc.) - stop sending to it.
+            // withdrawn, etc.) - stop sending to it. Anything else outside 2xx is a real
+            // delivery failure worth knowing about (401/403 almost always means the VAPID
+            // key/JWT the push service received doesn't match what the browser subscribed
+            // with - e.g. the key was regenerated after some subscriptions were already
+            // saved against the old one).
             if (in_array($httpCode, [404, 410], true)) {
                 $del = $pdo->prepare('DELETE FROM push_subscriptions WHERE id = ?');
                 $del->execute([$subscription['id']]);
+            } elseif ($httpCode < 200 || $httpCode >= 300) {
+                error_log("Web push delivery to subscription {$subscription['id']} failed: httpCode=$httpCode curlError=" . ($curlError ?: 'none') . ' responseBody=' . substr((string) $responseBody, 0, 500));
             }
         }
     } catch (Throwable $e) {

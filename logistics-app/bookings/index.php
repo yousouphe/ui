@@ -3,6 +3,7 @@ require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/push.php';
+require_once __DIR__ . '/../config/mapbox.php';
 
 $user = current_user();
 $errors = [];
@@ -361,15 +362,6 @@ if ($blockingBookingId > 0 && ($forceWizard || !$selectedBooking)) {
 
 $showWizard = ($forceWizard || !$selectedBooking) && $blockingBookingId === 0;
 
-function haversine_distance($lat1, $lon1, $lat2, $lon2)
-{
-    $earthRadius = 6371;
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-    $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
-    return $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
-}
-
 function booking_exists_in_list(array $list, int $bookingId): bool
 {
     foreach ($list as $item) {
@@ -380,6 +372,9 @@ function booking_exists_in_list(array $list, int $bookingId): bool
     return false;
 }
 
+// Road distance, not straight-line - this is the same figure the price is actually based
+// on, so what's shown next to "Distance" always matches what was billed for. Nullable
+// (rather than throwing) since this is just an informational label, not a charge.
 $selectedDistanceKm = null;
 if (
     $selectedBooking &&
@@ -388,7 +383,7 @@ if (
     $selectedBooking['delivery_latitude'] !== null &&
     $selectedBooking['delivery_longitude'] !== null
 ) {
-    $selectedDistanceKm = haversine_distance(
+    $selectedDistanceKm = road_distance_km(
         (float) $selectedBooking['pickup_latitude'],
         (float) $selectedBooking['pickup_longitude'],
         (float) $selectedBooking['delivery_latitude'],
@@ -1902,7 +1897,7 @@ function initSenderWorkspace() {
         const url = this.dataset.trackingUrl;
         const shareData = {
             title: 'Track my delivery',
-            text: 'Track your delivery in real time on SwiftDrop:',
+            text: 'Track your delivery in real time on Aike:',
             url
         };
         if (navigator.share) {

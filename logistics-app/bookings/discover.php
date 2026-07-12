@@ -38,7 +38,7 @@ $success = flash('success');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
-    <title>Discover Riders | SwiftDrop</title>
+    <title>Discover Riders | Aike</title>
     <base href="<?= e(base_url() . '/') ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -71,7 +71,7 @@ $success = flash('success');
 
 <nav class="navbar navbar-expand-lg navbar-dark navx">
   <div class="container">
-    <a class="navbar-brand fw-bold" href="dashboard.php">SwiftDrop</a>
+    <a class="navbar-brand fw-bold" href="dashboard.php">Aike</a>
   </div>
 </nav>
 

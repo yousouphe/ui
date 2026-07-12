@@ -6,7 +6,7 @@ return [
     'db_name' => 'REDACTED_DB_NAME',
     'db_user' => 'REDACTED_DB_USER',
     'db_pass' => 'REDACTED_DB_PASSWORD',
-    'app_name' => 'SwiftDrop Logistics',
+    'app_name' => 'Aike Logistics',
     'base_url' => '',
     'app_url' => 'https://entrepoints.ng',
     'paystack_public_key' => 'REDACTED_PAYSTACK_PUBLIC_KEY',
@@ -27,7 +27,7 @@ return [
     'smtp_user' => 'REDACTED_SMTP_USER',
     'smtp_pass' => 'REDACTED_SMTP_PASSWORD',
     'smtp_from_email' => 'REDACTED_SMTP_FROM_EMAIL',
-    'smtp_from_name' => 'SwiftDrop Logistics',
+    'smtp_from_name' => 'Aike Logistics',
     // Google OAuth 2.0 (sign in / sign up with Google). Create credentials at
     // https://console.cloud.google.com/apis/credentials with the redirect URI
     // set to {app_url}/auth/google_callback.php

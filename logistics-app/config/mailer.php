@@ -53,7 +53,7 @@ function mailer_send(string $toEmail, string $toName, string $subject, string $h
     $user = trim((string)($config['smtp_user'] ?? ''));
     $pass = (string)($config['smtp_pass'] ?? '');
     $fromEmail = trim((string)($config['smtp_from_email'] ?? ''));
-    $fromName = trim((string)($config['smtp_from_name'] ?? ($config['app_name'] ?? 'SwiftDrop')));
+    $fromName = trim((string)($config['smtp_from_name'] ?? ($config['app_name'] ?? 'Aike')));
     $secure = strtolower(trim((string)($config['smtp_secure'] ?? 'tls')));
 
     $isConfigured = $host !== '' && $fromEmail !== '' && !str_starts_with($host, 'REDACTED') && !str_starts_with($fromEmail, 'REDACTED');
@@ -168,7 +168,7 @@ function mailer_encode_header(string $text): string {
 }
 
 function mailer_layout(string $title, string $bodyHtml): string {
-    $appName = e((string)(config_app()['app_name'] ?? 'SwiftDrop'));
+    $appName = e((string)(config_app()['app_name'] ?? 'Aike'));
     return '<!doctype html><html><body style="margin:0;padding:0;background:#eef8ff;font-family:Segoe UI,Arial,sans-serif;color:#0f2c44;">'
         . '<div style="max-width:560px;margin:0 auto;padding:32px 24px;">'
         . '<div style="text-align:center;margin-bottom:24px;"><span style="font-size:20px;font-weight:800;color:#0284c7;">' . $appName . '</span></div>'

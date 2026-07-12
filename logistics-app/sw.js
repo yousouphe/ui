@@ -1,4 +1,4 @@
-// SwiftDrop Logistics service worker. Every push we receive is an empty "wake up" signal
+// Aike Logistics service worker. Every push we receive is an empty "wake up" signal
 // (see config/push.php for why) - the actual notification content is fetched from the
 // server over an authenticated same-origin request.
 self.addEventListener('install', function (event) {

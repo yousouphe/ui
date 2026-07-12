@@ -36,7 +36,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title><?= e(t('track.live_tracking')) ?>: <?= e($booking['booking_code']) ?> | SwiftDrop</title>
+    <title><?= e(t('track.live_tracking')) ?>: <?= e($booking['booking_code']) ?> | Aike</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <?php if ($hasRider && $hasRouteCoords): ?>

@@ -50,11 +50,20 @@ $priceChanged = false;
 if (!empty($booking['selected_rider_user_id']) && $booking['pickup_latitude'] !== null && $booking['pickup_longitude'] !== null) {
     $pickupLat = (float) $booking['pickup_latitude'];
     $pickupLng = (float) $booking['pickup_longitude'];
-    $newDistance = pricing_distance_km($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
 
-    $oldDistance = null;
-    if ($booking['delivery_latitude'] !== null && $booking['delivery_longitude'] !== null) {
-        $oldDistance = pricing_distance_km($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
+    // No haversine fallback: if road distance can't be determined, reject the whole address
+    // change rather than risk storing a price based on an approximate distance.
+    try {
+        $newDistance = pricing_distance_km($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
+
+        $oldDistance = null;
+        if ($booking['delivery_latitude'] !== null && $booking['delivery_longitude'] !== null) {
+            $oldDistance = pricing_distance_km($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
+        }
+    } catch (RuntimeException $e) {
+        http_response_code(503);
+        echo json_encode(['success' => false, 'message' => 'Unable to calculate route distance right now. Please try again shortly.']);
+        exit;
     }
 
     // Only reprice when the new destination is farther away. A closer destination keeps

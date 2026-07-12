@@ -46,10 +46,17 @@ $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
 
 $riders = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
-// Real road distance where available (falls back to haversine if Mapbox is unreachable/
-// unconfigured) - this is what the per-rider suggested fare is based on, not the straight-
-// line distance used just above for sorting nearby riders by proximity.
-$delDist = pricing_distance_km($pickupLat, $pickupLng, (float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']);
+// Real road distance - this is what the per-rider suggested fare is based on, not the
+// straight-line distance used just above for sorting nearby riders by proximity. No
+// haversine fallback here: an approximate distance would mean an approximate (and
+// potentially wrong) fare, so a routing failure is surfaced as an error instead.
+try {
+    $delDist = pricing_distance_km($pickupLat, $pickupLng, (float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']);
+} catch (RuntimeException $e) {
+    http_response_code(503);
+    echo json_encode(['error' => 'Unable to calculate route distance right now. Please try again shortly.']);
+    exit;
+}
 
 foreach($riders as &$r) {
     $r['suggested_fee'] = calculate_delivery_price($pdo, $delDist, (string) $r['vehicle_type'])['total'];

@@ -9,7 +9,7 @@ return [
     'common.save' => 'Ajiye',
     'common.loading' => 'Ana lodawa...',
     'common.logout' => 'Fita',
-    'common.brand' => 'SwiftDrop',
+    'common.brand' => 'Aike',
     'common.or' => 'ko',
 
     // Nav
@@ -39,7 +39,7 @@ return [
     'status.resolved' => 'An Warware',
 
     // Dashboard (My Orders)
-    'dashboard.title' => 'Kayan Da Na Tura | SwiftDrop',
+    'dashboard.title' => 'Kayan Da Na Tura | Aike',
     'dashboard.heading' => 'Kayan Da Na Tura',
     'dashboard.sender_hub' => 'Cibiyar Mai Turawa',
     'dashboard.stat.active' => 'Masu Gudana',
@@ -97,12 +97,12 @@ return [
     'register.confirm_password_label' => 'Tabbatar da kalmar sirri',
     'register.submit' => 'Ƙirƙiri Asusu',
     'register.have_account' => 'Kana da asusu daman?',
-    'register.features_heading_sender' => 'Me yasa masu tura kaya ke zaɓar SwiftDrop',
+    'register.features_heading_sender' => 'Me yasa masu tura kaya ke zaɓar Aike',
     'register.sender_feature.1' => 'Bin diddigin kaya kai tsaye (live tracking) daga lokacin ɗauka har zuwa gida',
     'register.sender_feature.2' => 'Biyan kuɗi cikin aminci a cikin app, babu buƙatar tsabar kuɗi',
     'register.sender_feature.3' => 'Yi hira ko kira ga rider dinki kai tsaye don samun update',
     'register.sender_feature.4' => 'Kimanta kowane delivery don taimakawa wajen samar da amintattun riders',
-    'register.features_heading_rider' => 'Me yasa riders ke zaɓar SwiftDrop',
+    'register.features_heading_rider' => 'Me yasa riders ke zaɓar Aike',
     'register.rider_feature.1' => 'Sami kuɗi a lokacin da kake so - karɓi deliveries ɗin da kake buƙata kawai',
     'register.rider_feature.2' => 'Saurin tura kuɗi (payout) kai tsaye zuwa asusun bankinka',
     'register.rider_feature.3' => 'Gudanar da abubuwan da ka samu da tarihin cire kuɗi a wuri ɗaya',
@@ -185,7 +185,7 @@ return [
     'wizard.send_package' => 'Aika Kaya (Send Parcel)',
 
     // Sender booking detail page
-    'sender.page_title' => 'Cibiyar Mai Turawa | SwiftDrop',
+    'sender.page_title' => 'Cibiyar Mai Turawa | Aike',
     'booking.sending_from' => 'Ana tura kaya daga',
     'booking.edit_details' => 'Gyara Bayanai',
     'booking.change_delivery_address' => 'Canja Adireshin Kaiwa',
@@ -458,7 +458,7 @@ return [
     'track.no_rider_assigned' => 'Ba a ba da rider ba tukuna. Wannan shafi zai sabunta kansa da zaran an samu rider.',
     'track.distance_eta_label' => 'Nisa / Lokacin Zuwa (ETA):',
     'track.proof_alt' => 'Hujja',
-    'track.sent_via' => 'An aika ta SwiftDrop Logistics',
+    'track.sent_via' => 'An aika ta Aike Logistics',
     'track.calculating' => 'Ana lissafi...',
 
     // Rider wallet
@@ -657,13 +657,13 @@ return [
     'training.heading' => 'Horo da Shirye-shiryen Direba',
     'training.subheading' => 'Jagora mai sauri don bayar da kyakkyawar dabi\'a ga kowane mai turawa da mai karɓa.',
     'training.section.professionalism_title' => 'Ƙwarewa',
-    'training.section.professionalism_items' => 'Ka kasance mai ladabi da kirki ga masu turawa da masu karɓa|Sa tufafi masu tsabta da kyau yayin isarwa|Kai kanka a kan lokaci don karɓar kaya kuma ka kasance abin dogaro da lokutan da ka bayar|Wakilci SwiftDrop yadda ya kamata a kowane lokaci, ko da a wajen app',
+    'training.section.professionalism_items' => 'Ka kasance mai ladabi da kirki ga masu turawa da masu karɓa|Sa tufafi masu tsabta da kyau yayin isarwa|Kai kanka a kan lokaci don karɓar kaya kuma ka kasance abin dogaro da lokutan da ka bayar|Wakilci Aike yadda ya kamata a kowane lokaci, ko da a wajen app',
     'training.section.communication_title' => 'Sadarwa',
     'training.section.communication_items' => 'Ka amsa saƙonnin hira da kiran waya daga masu turawa cikin sauri|Ka sanar da masu turawa idan kana makara ko kana fuskantar matsala|Yi amfani da hirar cikin app don duk sadarwar da ta shafi isarwa|Ka kasance mai bayyanawa da ladabi a kowace tattaunawa, ko da lokacin sabani',
     'training.section.handling_title' => 'Kula da Kaya',
     'training.section.handling_items' => 'Ka kula da kowane kaya kamar naka ne|Tabbatar da cewa kayan ya dace da bayanin da aka bayar kafin karɓa|Kada ka buɗe, ka canza, ko ka duba kaya da aka rufe|Ka tabbatar da kaya yana da tsaro kuma yana da kariya daga yanayin sararin sama yayin tafiya',
     'training.section.safety_title' => 'Aminci',
-    'training.section.safety_items' => 'Ka sanya hular kwano koyaushe kuma ka bi dokokin zirga-zirga|Kada ka yi amfani da wayarka yayin tuƙi - ka tsaya a gefe tukuna|Tabbatar da shaidar mai karɓa kafin ka miƙa kaya|Ka bayar da rahoton duk wata hatsari ko matsalar aminci ga SwiftDrop nan take',
+    'training.section.safety_items' => 'Ka sanya hular kwano koyaushe kuma ka bi dokokin zirga-zirga|Kada ka yi amfani da wayarka yayin tuƙi - ka tsaya a gefe tukuna|Tabbatar da shaidar mai karɓa kafin ka miƙa kaya|Ka bayar da rahoton duk wata hatsari ko matsalar aminci ga Aike nan take',
     'training.section.rating_title' => 'Kimantawa da Ci Gaba',
     'training.section.rating_items' => 'Kimantawarka na shafar buƙatun isarwa da kake samu|Kimantawa mai kyau akai-akai na buɗe ƙarin ayyuka da fifiko|Rashin kyawun hali ko koke-koke akai-akai na iya kai ga dakatarwa|Ka roƙi masu turawa da suka gamsu su bar kimantawa da sharhi mai kyau',
     'training.section.conduct_title' => 'Ƙa\'idodin Hali',
@@ -747,4 +747,6 @@ return [
 
     // Push notifications
     'push.enable_button' => 'Kunna sanarwa',
+    'push.blocked_button' => 'An toshe sanarwa',
+    'push.blocked_hint' => 'An toshe sanarwa a burauzarku don wannan shafin. Danna alamar kulle ko bayani kusa da adireshin, ku ba da izinin Sanarwa (Notifications), sannan ku sake loda wannan shafin.',
 ];

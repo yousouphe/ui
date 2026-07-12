@@ -8,7 +8,7 @@ return [
     'common.save' => 'Save',
     'common.loading' => 'Loading...',
     'common.logout' => 'Logout',
-    'common.brand' => 'SwiftDrop',
+    'common.brand' => 'Aike',
     'common.or' => 'or',
 
     // Nav
@@ -38,7 +38,7 @@ return [
     'status.resolved' => 'Resolved',
 
     // Dashboard (My Orders)
-    'dashboard.title' => 'My Orders | SwiftDrop',
+    'dashboard.title' => 'My Orders | Aike',
     'dashboard.heading' => 'My Orders',
     'dashboard.sender_hub' => 'Sender Hub',
     'dashboard.stat.active' => 'Active',
@@ -96,12 +96,12 @@ return [
     'register.confirm_password_label' => 'Confirm password',
     'register.submit' => 'Create Account',
     'register.have_account' => 'Already have an account?',
-    'register.features_heading_sender' => 'Why senders choose SwiftDrop',
+    'register.features_heading_sender' => 'Why senders choose Aike',
     'register.sender_feature.1' => 'Real-time tracking from pickup to your doorstep',
     'register.sender_feature.2' => 'Secure in-app payments, no cash needed',
     'register.sender_feature.3' => 'Chat or call your rider directly for updates',
     'register.sender_feature.4' => 'Rate every delivery and build a trusted rider network',
-    'register.features_heading_rider' => 'Why riders choose SwiftDrop',
+    'register.features_heading_rider' => 'Why riders choose Aike',
     'register.rider_feature.1' => 'Earn on your own schedule - accept the jobs you want',
     'register.rider_feature.2' => 'Fast payouts straight to your bank account',
     'register.rider_feature.3' => 'Track your earnings and withdrawal history in one place',
@@ -184,7 +184,7 @@ return [
     'wizard.send_package' => 'Send Package',
 
     // Sender booking detail page
-    'sender.page_title' => 'Sender Hub | SwiftDrop',
+    'sender.page_title' => 'Sender Hub | Aike',
     'booking.sending_from' => 'Sending from',
     'booking.edit_details' => 'Edit Details',
     'booking.change_delivery_address' => 'Change Delivery Address',
@@ -457,7 +457,7 @@ return [
     'track.no_rider_assigned' => "A rider hasn't been assigned yet. This page will update automatically once one is on the way.",
     'track.distance_eta_label' => 'Distance / ETA:',
     'track.proof_alt' => 'Proof',
-    'track.sent_via' => 'Sent via SwiftDrop Logistics',
+    'track.sent_via' => 'Sent via Aike Logistics',
     'track.calculating' => 'Calculating...',
 
     // Rider wallet
@@ -656,13 +656,13 @@ return [
     'training.heading' => 'Rider Training & Onboarding',
     'training.subheading' => 'A quick guide to delivering a great experience for every sender and recipient.',
     'training.section.professionalism_title' => 'Professionalism',
-    'training.section.professionalism_items' => 'Always be polite and courteous with senders and recipients|Wear clean, presentable attire while on active deliveries|Arrive on time for pickups and be reliable with your ETAs|Represent SwiftDrop professionally at all times, even off-app',
+    'training.section.professionalism_items' => 'Always be polite and courteous with senders and recipients|Wear clean, presentable attire while on active deliveries|Arrive on time for pickups and be reliable with your ETAs|Represent Aike professionally at all times, even off-app',
     'training.section.communication_title' => 'Communication',
     'training.section.communication_items' => "Respond promptly to chat messages and calls from senders|Keep senders updated if you're running late or facing an issue|Use the in-app chat for all delivery-related communication|Be clear and polite in every conversation, even during disputes",
     'training.section.handling_title' => 'Handling Packages',
     'training.section.handling_items' => 'Handle every package with care, as if it were your own|Confirm the item matches the description before pickup|Never open, tamper with, or inspect sealed packages|Keep packages secure and protected from weather during transit',
     'training.section.safety_title' => 'Safety',
-    'training.section.safety_items' => "Always wear a helmet and follow traffic laws|Never use your phone while riding - pull over first|Verify the recipient's identity before handing over a package|Report any accident or safety incident to SwiftDrop immediately",
+    'training.section.safety_items' => "Always wear a helmet and follow traffic laws|Never use your phone while riding - pull over first|Verify the recipient's identity before handing over a package|Report any accident or safety incident to Aike immediately",
     'training.section.rating_title' => 'Ratings & Growth',
     'training.section.rating_items' => 'Your rating affects the delivery requests you receive|Consistently high ratings unlock more jobs and priority access|Poor conduct or repeated complaints can lead to suspension|Ask satisfied senders to leave a positive rating and review',
     'training.section.conduct_title' => 'Code of Conduct',
@@ -746,4 +746,6 @@ return [
 
     // Push notifications
     'push.enable_button' => 'Enable notifications',
+    'push.blocked_button' => 'Notifications blocked',
+    'push.blocked_hint' => 'Notifications are blocked in your browser for this site. Click the lock or info icon next to the address bar, allow Notifications, then reload this page.',
 ];

@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>SwiftDrop</title>
+    <title>Aike</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:100vh;color:#0f2c44;display:flex;align-items:center;justify-content:center}
@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 <div class="cardx p-4 p-md-5 mx-3">
-    <h1 class="h4 fw-bold mb-1 text-center">SwiftDrop</h1>
+    <h1 class="h4 fw-bold mb-1 text-center">Aike</h1>
     <p class="text-center text-soft mb-4">Choose your language / Zaɓi harshenku</p>
     <form method="post">
         <input type="hidden" name="redirect" value="<?= e($redirect) ?>">

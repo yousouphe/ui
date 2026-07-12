@@ -741,7 +741,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <?= csrf_meta_tag() ?>
     <?= vapid_public_key_meta_tag() ?>
-    <title><?= e(t('rider.dashboard_heading')) ?> | SwiftDrop</title>
+    <title><?= e(t('rider.dashboard_heading')) ?> | Aike</title>
     <base href="<?= e((base_url() === '' ? '/' : base_url() . '/')) ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -1244,6 +1244,8 @@ const I18N = <?= json_encode([
     'callSenderOfflineNoPhone' => t('call.sender_offline_no_phone'),
     'callConnecting' => t('call.connecting'),
     'callRinging' => t('call.ringing'),
+    'notifBlockedButton' => t('push.blocked_button'),
+    'notifBlockedHint' => t('push.blocked_hint'),
     'presenceOnline' => t('chat.presence_online'),
     'presenceOffline' => t('chat.presence_offline'),
     'recordVoice' => t('chat.record_voice_label'),
@@ -2812,7 +2814,7 @@ document.body.addEventListener('click', function (e) {
     if (btn) runConfirmPaymentAction(btn);
 });
 
-initPage();
+try { initPage(); } catch (err) { console.error('initPage failed:', err); }
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -2823,10 +2825,38 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
+function showNotifBlockedState(btn) {
+    btn.classList.remove('d-none', 'btn-outline-primary');
+    btn.classList.add('btn-outline-secondary');
+    btn.innerHTML = '<i class="fa-solid fa-bell-slash me-1"></i>' + I18N.notifBlockedButton;
+    btn.title = I18N.notifBlockedHint;
+    btn.onclick = function (e) {
+        e.preventDefault();
+        alert(I18N.notifBlockedHint);
+    };
+}
+
 function initPushNotifications() {
-    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
     const btn = document.getElementById('notif-enable-btn');
-    if (!vapidKey || !btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!btn) return;
+
+    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
+    if (!vapidKey) {
+        // Server hasn't generated/configured a VAPID key yet (see scripts/generate_vapid_keys.php) -
+        // nothing to subscribe to, so there's no useful button state to show.
+        console.info('Push notifications: no VAPID key configured on the server.');
+        return;
+    }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    // A browser that already denied the permission (e.g. from an earlier visit) will never
+    // show the native prompt again without the user manually resetting it in their browser's
+    // site settings - surface that explicitly instead of just leaving the button hidden with
+    // no explanation of why notifications "aren't working".
+    if (Notification.permission === 'denied') {
+        showNotifBlockedState(btn);
+        return;
+    }
 
     navigator.serviceWorker.register('<?= e(url_path('sw.js')) ?>').then(function (registration) {
         if (Notification.permission === 'granted') {
@@ -2838,6 +2868,8 @@ function initPushNotifications() {
                     if (permission === 'granted') {
                         subscribeToPush(registration, vapidKey.content);
                         btn.classList.add('d-none');
+                    } else if (permission === 'denied') {
+                        showNotifBlockedState(btn);
                     }
                 });
             });

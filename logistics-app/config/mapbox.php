@@ -14,8 +14,9 @@ function mapbox_road_routing_configured(): bool {
     return $token !== '' && !str_starts_with($token, 'REDACTED');
 }
 
-// Returns null (rather than throwing) on any failure - callers must fall back to haversine
-// so a Mapbox outage or missing token never blocks booking creation or repricing.
+// Returns null (rather than throwing) on any failure - pricing_distance_km() below is the
+// one that turns that into a hard error, so this stays a low-level "couldn't get it" signal
+// that other, non-pricing callers could use permissively if they ever need to.
 function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?float {
     if (!mapbox_road_routing_configured()) {
         return null;
@@ -44,20 +45,15 @@ function road_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): ?
     return is_numeric($meters) ? ((float) $meters) / 1000 : null;
 }
 
-// Used only when Mapbox is unavailable - a same-purpose fallback to the haversine helper
-// already in config/functions.php (haversine_sql is SQL-side; this is the plain-PHP form
-// used at pricing call sites).
-function haversine_km(float $lat1, float $lon1, float $lat2, float $lon2): float {
-    $earthRadius = 6371;
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-    $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
-    return $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
-}
-
-// The one call site every pricing-relevant distance calculation should go through -
-// real road distance when Mapbox is configured and reachable, straight-line as a fallback
-// that keeps the app working rather than blocking bookings entirely.
+// The one call site every pricing-relevant distance calculation must go through. Deliberately
+// has no straight-line fallback - a haversine guess can be significantly shorter than the
+// real road route (bridges, one-ways, river crossings), which would under- or over-charge
+// against the distance actually driven. Callers must catch this and surface a retry rather
+// than ever price off an approximation.
 function pricing_distance_km(float $lat1, float $lng1, float $lat2, float $lng2): float {
-    return road_distance_km($lat1, $lng1, $lat2, $lng2) ?? haversine_km($lat1, $lng1, $lat2, $lng2);
+    $km = road_distance_km($lat1, $lng1, $lat2, $lng2);
+    if ($km === null) {
+        throw new RuntimeException('Unable to determine road distance for pricing.');
+    }
+    return $km;
 }

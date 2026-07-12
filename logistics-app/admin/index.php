@@ -109,40 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $transferStatus = (string) $transferResult['status'];
 
         if ($transferStatus === 'success') {
-            try {
-                $pdo->beginTransaction();
-
-                $stmt = $pdo->prepare('
-                    UPDATE withdrawal_requests
-                    SET status = "paid", admin_user_id = ?, processed_at = NOW(), paystack_transfer_code = ?, paystack_transfer_reference = ?
-                    WHERE id = ? AND status IN ("pending", "processing")
-                ');
-                $stmt->execute([$user['id'], $transferResult['transfer_code'], $reference, $requestId]);
-                if ($stmt->rowCount() === 0) {
-                    throw new RuntimeException('Withdrawal request was already processed.');
-                }
-
-                $stmt = $pdo->prepare('
-                    INSERT INTO wallet_transactions (rider_user_id, withdrawal_request_id, type, amount, description)
-                    VALUES (?, ?, "withdrawal", ?, ?)
-                ');
-                $stmt->execute([
-                    (int) $withdrawal['rider_user_id'],
-                    $requestId,
-                    -1 * (float) $withdrawal['amount'],
-                    sprintf('Withdrawal to %s (%s) via Paystack', $withdrawal['bank_name'], $withdrawal['account_number']),
-                ]);
-
-                $pdo->commit();
+            $finalizeResult = finalize_withdrawal_paid($pdo, $requestId, (int) $user['id'], $transferResult['transfer_code'], $reference);
+            if ($finalizeResult['ok']) {
                 flash('success', t('admin.marked_paid'));
-                send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
-                send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal paid', '₦' . number_format((float) $withdrawal['amount'], 2) . ' has been sent to your bank account.', url_path('rider/wallet'));
-                log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' paid via Paystack (' . $transferResult['transfer_code'] . ')', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'transfer_code' => $transferResult['transfer_code'], 'reference' => $reference]);
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                flash('error', t('admin.withdrawal_process_failed') . ' ' . $e->getMessage());
+            } else {
+                flash('error', t('admin.withdrawal_process_failed') . ' ' . $finalizeResult['message']);
             }
         } elseif (in_array($transferStatus, ['otp', 'pending'], true)) {
             // Paystack accepted the transfer but it still needs finalization (OTP) or is
@@ -173,41 +144,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('admin/index.php');
         }
 
-        try {
-            $pdo->beginTransaction();
-
-            $stmt = $pdo->prepare('
-                UPDATE withdrawal_requests
-                SET status = "paid", admin_user_id = ?, processed_at = NOW()
-                WHERE id = ? AND status IN ("pending", "processing")
-            ');
-            $stmt->execute([$user['id'], $requestId]);
-
-            if ($stmt->rowCount() === 0) {
-                throw new RuntimeException('Withdrawal request was already processed.');
-            }
-
-            $stmt = $pdo->prepare('
-                INSERT INTO wallet_transactions (rider_user_id, withdrawal_request_id, type, amount, description)
-                VALUES (?, ?, "withdrawal", ?, ?)
-            ');
-            $stmt->execute([
-                (int) $withdrawal['rider_user_id'],
-                $requestId,
-                -1 * (float) $withdrawal['amount'],
-                sprintf('Withdrawal to %s (%s)', $withdrawal['bank_name'], $withdrawal['account_number']),
-            ]);
-
-            $pdo->commit();
+        $finalizeResult = finalize_withdrawal_paid($pdo, $requestId, (int) $user['id'], null, null);
+        if ($finalizeResult['ok']) {
             flash('success', t('admin.marked_paid'));
-            send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
-            send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal paid', '₦' . number_format((float) $withdrawal['amount'], 2) . ' has been sent to your bank account.', url_path('rider/wallet'));
-            log_event($pdo, 'withdrawal_paid', 'Withdrawal #' . $requestId . ' marked paid manually', (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['amount' => (float) $withdrawal['amount'], 'manual' => true]);
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            flash('error', t('admin.withdrawal_process_failed') . ' ' . $e->getMessage());
+        } else {
+            flash('error', t('admin.withdrawal_process_failed') . ' ' . $finalizeResult['message']);
         }
         redirect_to('admin/index.php');
     }

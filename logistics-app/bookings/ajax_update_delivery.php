@@ -35,7 +35,10 @@ if (!$booking) {
     exit;
 }
 
-if (in_array($booking['booking_status'], ['delivered', 'cancelled'], true) || ($booking['payment_status'] ?? 'unpaid') === 'paid') {
+// Pickup/delivery address can only change before a rider has accepted the job - 'matched'
+// means a request is pending with a rider but they haven't accepted yet, so it's still fair
+// game to move the destination on them.
+if (!in_array($booking['booking_status'], ['draft', 'submitted', 'matched'], true)) {
     http_response_code(422);
     echo json_encode(['success' => false, 'message' => 'This booking can no longer be edited.']);
     exit;

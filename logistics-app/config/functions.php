@@ -545,7 +545,7 @@ function pricing_settings(PDO $pdo): array {
         'per_km_rate' => 600.00,
         'bike_multiplier' => 1.00,
         'car_multiplier' => 1.50,
-        'van_multiplier' => 1.80,
+        'van_multiplier' => 2.50,
         'tax_percent' => 0.00,
     ];
 }

@@ -222,10 +222,9 @@ if ($selectedBookingId > 0) {
     }
 }
 
-// Candidate riders for manual assignment - same eligibility rules as the sender-facing
-// rider list (bookings/ajax_fetch_riders.php), minus the "recently seen online" window
-// since an admin overriding the automatic flow may know a rider is available even if their
-// last location ping is stale.
+// Candidate riders for manual assignment - purely a manual pick, not automatic matching, so
+// rider location is deliberately not considered (no distance filter/sort): the admin decides
+// who's right for the job, the same way the automatic flow decides eligibility minus location.
 $eligibleRiders = [];
 $pricingUnavailable = false;
 if (
@@ -236,21 +235,19 @@ if (
 ) {
     $pickupLat = (float) $selectedBooking['pickup_latitude'];
     $pickupLng = (float) $selectedBooking['pickup_longitude'];
-    $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
 
     $stmt = $pdo->prepare("
-        SELECT u.id, u.full_name, rp.vehicle_type, rp.rating, $distanceSql AS distance_km
+        SELECT u.id, u.full_name, rp.vehicle_type, rp.rating
         FROM users u
         INNER JOIN rider_profiles rp ON rp.user_id = u.id
         WHERE u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
-          AND rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM bookings b
               WHERE b.selected_rider_user_id = u.id AND b.id <> ?
               AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
           )
-        ORDER BY distance_km ASC
-        LIMIT 30
+        ORDER BY rp.rating DESC, u.full_name ASC
+        LIMIT 100
     ");
     $stmt->execute([$selectedBookingId]);
     $eligibleRiders = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -497,7 +494,9 @@ function admin_payment_status_badge_class(string $status): string {
                                     <?php foreach ($eligibleRiders as $candidate): ?>
                                         <option value="<?= (int) $candidate['id'] ?>">
                                             <?= e((string) $candidate['full_name']) ?> &middot; <?= e(t('vehicle.' . (string) $candidate['vehicle_type'])) ?>
-                                            &middot; <?= number_format((float) $candidate['distance_km'], 1) ?> km <?= e(t('admin.from_pickup_suffix')) ?>
+                                            <?php if ($candidate['rating'] !== null): ?>
+                                                &middot; <?= number_format((float) $candidate['rating'], 1) ?> &#9733;
+                                            <?php endif; ?>
                                             <?php if (isset($candidate['suggested_fee'])): ?>
                                                 &middot; ₦<?= number_format((float) $candidate['suggested_fee'], 2) ?>
                                             <?php endif; ?>

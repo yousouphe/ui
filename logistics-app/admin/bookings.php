@@ -114,21 +114,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Re-validate server-side rather than trusting the submitted rider id - the same
-        // eligibility rules as the sender-facing rider list (active, KYC-approved) plus a
-        // check that this rider isn't already committed to another active delivery.
+        // eligibility rules as the sender-facing rider list (active, KYC-approved), matching
+        // the booking's chosen vehicle type when one was recorded, plus room for one more
+        // active delivery (RIDER_MAX_CONCURRENT_ORDERS).
+        $bookingVehicleType = $targetBooking['vehicle_type'] ?? null;
+        $vehicleTypeSql = $bookingVehicleType !== null ? 'AND rp.vehicle_type = ?' : '';
         $stmt = $pdo->prepare("
             SELECT u.id, u.full_name, u.email, rp.vehicle_type
             FROM users u
             INNER JOIN rider_profiles rp ON rp.user_id = u.id
             WHERE u.id = ? AND u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
-              AND NOT EXISTS (
-                  SELECT 1 FROM bookings b
+              $vehicleTypeSql
+              AND (
+                  SELECT COUNT(*) FROM bookings b
                   WHERE b.selected_rider_user_id = u.id AND b.id <> ?
-                  AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
-              )
+                  AND b.booking_status IN ('" . implode("','", RIDER_ACTIVE_BOOKING_STATUSES) . "')
+              ) < " . RIDER_MAX_CONCURRENT_ORDERS . "
             LIMIT 1
         ");
-        $stmt->execute([$riderUserId, $bookingId]);
+        $stmt->execute($bookingVehicleType !== null ? [$riderUserId, $bookingVehicleType, $bookingId] : [$riderUserId, $bookingId]);
         $rider = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$rider) {
@@ -136,10 +140,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('admin/bookings.php?booking_id=' . $bookingId);
         }
 
-        // Fresh assignment gets a freshly computed fare. Reassigning a booking that already
-        // has an agreed cost (the sender may have already paid against it) keeps that price
-        // unchanged - only the rider changes - so pricing only needs to be looked up when
-        // there isn't already a price to preserve.
+        // Bookings created since transport type was moved up front (see bookings/index.php's
+        // wizard) already carry a locked-in agreed_cost from submission - only bookings from
+        // before that change can still have a null price here, needing one computed now.
         if ($targetBooking['agreed_cost'] !== null) {
             $newCost = (float) $targetBooking['agreed_cost'];
         } else {
@@ -162,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $previousRiderId = $targetBooking['selected_rider_user_id'] !== null ? (int) $targetBooking['selected_rider_user_id'] : null;
 
         $stmt = $pdo->prepare('
-            UPDATE bookings SET selected_rider_user_id = ?, agreed_cost = ?, booking_status = ? WHERE id = ?
+            UPDATE bookings SET selected_rider_user_id = ?, agreed_cost = ?, booking_status = ?, matched_at = COALESCE(matched_at, NOW()) WHERE id = ?
         ');
         $stmt->execute([$riderUserId, $newCost, $newStatus, $bookingId]);
 
@@ -225,6 +228,8 @@ if ($selectedBookingId > 0) {
 // Candidate riders for manual assignment - purely a manual pick, not automatic matching, so
 // rider location is deliberately not considered (no distance filter/sort): the admin decides
 // who's right for the job, the same way the automatic flow decides eligibility minus location.
+// Matches the booking's chosen vehicle type when one was recorded (bookings created before
+// transport type was moved up front won't have one, so those show every vehicle type).
 $eligibleRiders = [];
 $pricingUnavailable = false;
 if (
@@ -235,26 +240,31 @@ if (
 ) {
     $pickupLat = (float) $selectedBooking['pickup_latitude'];
     $pickupLng = (float) $selectedBooking['pickup_longitude'];
+    $bookingVehicleType = $selectedBooking['vehicle_type'] ?? null;
+    $vehicleTypeSql = $bookingVehicleType !== null ? 'AND rp.vehicle_type = ?' : '';
 
     $stmt = $pdo->prepare("
-        SELECT u.id, u.full_name, rp.vehicle_type, rp.rating
+        SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
+               (
+                   SELECT COUNT(*) FROM bookings b
+                   WHERE b.selected_rider_user_id = u.id AND b.id <> ?
+                   AND b.booking_status IN ('" . implode("','", RIDER_ACTIVE_BOOKING_STATUSES) . "')
+               ) AS active_order_count
         FROM users u
         INNER JOIN rider_profiles rp ON rp.user_id = u.id
         WHERE u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
-          AND NOT EXISTS (
-              SELECT 1 FROM bookings b
-              WHERE b.selected_rider_user_id = u.id AND b.id <> ?
-              AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
-          )
+          $vehicleTypeSql
+        HAVING active_order_count < " . RIDER_MAX_CONCURRENT_ORDERS . "
         ORDER BY rp.rating DESC, u.full_name ASC
         LIMIT 100
     ");
-    $stmt->execute([$selectedBookingId]);
+    $stmt->execute($bookingVehicleType !== null ? [$selectedBookingId, $bookingVehicleType] : [$selectedBookingId]);
     $eligibleRiders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // A booking that already has an agreed cost keeps that price no matter which rider is
     // picked (see the assign_rider handler above), so there's nothing to look up here - a
-    // per-rider "suggested fee" would be misleading busywork for a reassignment.
+    // per-rider "suggested fee" would be misleading busywork for a reassignment. Only
+    // bookings from before transport type was moved up front can still be unpriced here.
     if ($eligibleRiders && $selectedBooking['agreed_cost'] === null) {
         try {
             $deliveryDistanceKm = pricing_distance_km(
@@ -497,6 +507,7 @@ function admin_payment_status_badge_class(string $status): string {
                                             <?php if ($candidate['rating'] !== null): ?>
                                                 &middot; <?= number_format((float) $candidate['rating'], 1) ?> &#9733;
                                             <?php endif; ?>
+                                            &middot; <?= (int) $candidate['active_order_count'] ?>/<?= RIDER_MAX_CONCURRENT_ORDERS ?> <?= e(t('admin.active_orders_suffix')) ?>
                                             <?php if (isset($candidate['suggested_fee'])): ?>
                                                 &middot; ₦<?= number_format((float) $candidate['suggested_fee'], 2) ?>
                                             <?php endif; ?>

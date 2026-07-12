@@ -2,12 +2,11 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
-require_once __DIR__ . '/../config/mapbox.php';
 
 header('Content-Type: application/json');
 
 $bookingId = (int)($_GET['booking_id'] ?? 0);
-$stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude, updated_at FROM bookings WHERE id = ? LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude, vehicle_type, agreed_cost, updated_at FROM bookings WHERE id = ? LIMIT 1');
 $stmt->execute([$bookingId]);
 $booking = $stmt->fetch();
 $user = current_user();
@@ -26,40 +25,37 @@ if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0)) {
 
 $pickupLat = (float)$booking['pickup_latitude'];
 $pickupLng = (float)$booking['pickup_longitude'];
+$vehicleType = (string) ($booking['vehicle_type'] ?? '');
 $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
 
-$sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating, 
+// Only riders of the vehicle type the sender already chose and priced against, with room
+// for one more job (RIDER_MAX_CONCURRENT_ORDERS, currently 3 - not zero other active jobs).
+$sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
                rp.last_latitude, rp.last_longitude, $distanceSql AS distance_km
         FROM users u
         INNER JOIN rider_profiles rp ON rp.user_id = u.id
-        WHERE u.role = 'rider' 
+        WHERE u.role = 'rider'
           AND u.status = 'active'
+          AND rp.vehicle_type = ?
           AND rp.availability_status = 'available'
           AND rp.kyc_status = 'approved'
           AND rp.last_location_updated_at > NOW() - INTERVAL 90 MINUTE
-          AND NOT EXISTS (
-              SELECT 1 FROM bookings b 
-              WHERE b.selected_rider_user_id = u.id 
-              AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
-          )
+          AND (
+              SELECT COUNT(*) FROM bookings b
+              WHERE b.selected_rider_user_id = u.id
+              AND b.booking_status IN ('" . implode("','", RIDER_ACTIVE_BOOKING_STATUSES) . "')
+          ) < " . RIDER_MAX_CONCURRENT_ORDERS . "
         ORDER BY distance_km ASC LIMIT 20";
 
-$riders = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+$stmt = $pdo->prepare($sql);
+$stmt->execute([$vehicleType]);
+$riders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Real road distance - this is what the per-rider suggested fare is based on, not the
-// straight-line distance used just above for sorting nearby riders by proximity. No
-// haversine fallback here: an approximate distance would mean an approximate (and
-// potentially wrong) fare, so a routing failure is surfaced as an error instead.
-try {
-    $delDist = pricing_distance_km($pickupLat, $pickupLng, (float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']);
-} catch (RuntimeException $e) {
-    http_response_code(503);
-    echo json_encode(['error' => 'Unable to calculate route distance right now. Please try again shortly.']);
-    exit;
-}
-
-foreach($riders as &$r) {
-    $r['suggested_fee'] = calculate_delivery_price($pdo, $delDist, (string) $r['vehicle_type'])['total'];
+// Price is already locked in on the booking (set once, at creation, from the sender's
+// chosen vehicle type) - every matching rider is offered that same fixed fee, so there's
+// nothing left to compute here.
+foreach ($riders as &$r) {
+    $r['suggested_fee'] = $booking['agreed_cost'];
 }
 unset($r);
 

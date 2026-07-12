@@ -255,6 +255,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ], $_POST);
 
     $saveAsDraft = isset($_POST['save_draft']);
+    $vehicleType = trim((string) ($_POST['vehicle_type'] ?? ''));
+
+    // A draft can be saved with nothing priced yet - it isn't real until submitted. A real
+    // submission, though, must carry a vehicle type and a price computed against it right
+    // now: that's what lets a booking be manually assigned later (by the sender's own
+    // rider search or by an admin) without ever needing a live pricing lookup at that point.
+    if (!$saveAsDraft && !in_array($vehicleType, ['bike', 'car', 'van'], true)) {
+        // 'general' (not a per-field key) because the wizard always resets to step 1 on
+        // reload - there's no per-step error slot to jump straight back to step 4 with.
+        $errors['general'] = 'Please choose a vehicle type.';
+    }
 
     $trackingToken = bin2hex(random_bytes(16));
 
@@ -276,7 +287,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'special_instructions'  => trim($_POST['special_instructions'] ?? ''),
         'booking_status'        => $saveAsDraft ? 'draft' : 'submitted',
         'sender_tracking_token' => $trackingToken,
+        'vehicle_type'          => $saveAsDraft ? null : $vehicleType,
+        'agreed_cost'           => null,
+        'planned_duration_minutes' => null,
     ];
+
+    if (!$errors && !$saveAsDraft) {
+        // Recompute server-side rather than trusting whatever price the sender's browser
+        // showed on the vehicle-selection step - the estimate endpoint is unauthenticated
+        // against price manipulation the same way every other pricing call site is.
+        try {
+            $metrics = pricing_route_metrics(
+                (float) $payload['pickup_latitude'],
+                (float) $payload['pickup_longitude'],
+                (float) $payload['delivery_latitude'],
+                (float) $payload['delivery_longitude']
+            );
+            $payload['agreed_cost'] = calculate_delivery_price($pdo, $metrics['distance_km'], $vehicleType)['total'];
+            $payload['planned_duration_minutes'] = (int) round($metrics['duration_min']);
+        } catch (RuntimeException $e) {
+            $errors['general'] = 'Unable to calculate pricing right now. Please try again shortly.';
+        }
+    }
 
     if (!$errors) {
         try {
@@ -288,13 +320,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     pickup_address, pickup_latitude, pickup_longitude,
                     delivery_address, delivery_latitude, delivery_longitude,
                     item_name, item_category, item_description, item_image_path,
-                    estimated_value, special_instructions, booking_status, sender_tracking_token
+                    estimated_value, special_instructions, booking_status, sender_tracking_token,
+                    vehicle_type, agreed_cost, planned_duration_minutes
                 ) VALUES (
                     :sender_user_id, :booking_code, :recipient_name, :recipient_phone,
                     :pickup_address, :pickup_latitude, :pickup_longitude,
                     :delivery_address, :delivery_latitude, :delivery_longitude,
                     :item_name, :item_category, :item_description, :item_image_path,
-                    :estimated_value, :special_instructions, :booking_status, :sender_tracking_token
+                    :estimated_value, :special_instructions, :booking_status, :sender_tracking_token,
+                    :vehicle_type, :agreed_cost, :planned_duration_minutes
                 )
             ');
             $stmt->execute($payload);
@@ -548,6 +582,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         .vehicle-option-card{display:flex;align-items:center;gap:12px;padding:.75rem;border-radius:.9rem;border:1px solid rgba(15,42,68,.10);background:#ffffff;cursor:pointer;transition:.15s ease;margin-bottom:.5rem}
         .vehicle-option-card:last-child{margin-bottom:0}
         .vehicle-option-card:hover{border-color:#38bdf8;box-shadow:0 6px 16px rgba(56,189,248,.18);transform:translateY(-1px)}
+        .vehicle-option-card.selected{border-color:#0ea5e9;background:rgba(56,189,248,.1);box-shadow:0 6px 16px rgba(56,189,248,.22)}
         .vehicle-option-icon{width:44px;height:44px;border-radius:50%;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.3);color:#0ea5e9;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
         .vehicle-option-info{flex:1;min-width:0}
         .vehicle-option-price{font-weight:700;color:#0369a1;white-space:nowrap}
@@ -620,6 +655,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                 <div class="wizard-step-dot" data-step-dot="2"><span class="num">2</span> <?= e(t('wizard.step2.label')) ?></div>
                 <div class="wizard-step-sep"></div>
                 <div class="wizard-step-dot" data-step-dot="3"><span class="num">3</span> <?= e(t('wizard.step3.label')) ?></div>
+                <div class="wizard-step-sep"></div>
+                <div class="wizard-step-dot" data-step-dot="4"><span class="num">4</span> <?= e(t('wizard.step4.label')) ?></div>
             </div>
 
             <form method="post" enctype="multipart/form-data" id="booking-form">
@@ -740,10 +777,27 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
                     <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mt-4">
                         <button class="btn btn-outline-secondary" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i><?= e(t('wizard.back')) ?></button>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft"><?= e(t('wizard.save_draft')) ?></button>
-                            <button class="btn btn-primary flex-fill" type="submit" name="submit_booking"><?= e(t('wizard.send_package')) ?></button>
+                        <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft"><?= e(t('wizard.save_draft')) ?></button>
+                        <button class="btn btn-primary" type="button" data-wizard-next="4"><?= e(t('wizard.next')) ?><i class="fa-solid fa-arrow-right ms-2"></i></button>
+                    </div>
+                </div>
+
+                <div class="wizard-pane" data-step="4">
+                    <h2 class="h4 fw-bold mb-1"><?= e(t('wizard.step4.heading')) ?></h2>
+                    <p class="text-soft mb-4"><?= e(t('wizard.step4.subheading')) ?></p>
+
+                    <input type="hidden" name="vehicle_type" id="selected_vehicle_type" value="">
+                    <div id="vehicle_options_container">
+                        <div class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                            <span class="ms-2 text-soft small"><?= e(t('wizard.vehicle.estimating')) ?></span>
                         </div>
+                    </div>
+                    <div class="small text-danger mt-2 d-none" id="step4-error"><?= e(t('wizard.vehicle.required')) ?></div>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button class="btn btn-outline-secondary" type="button" data-wizard-back="3"><i class="fa-solid fa-arrow-left me-2"></i><?= e(t('wizard.back')) ?></button>
+                        <button class="btn btn-primary flex-fill ms-3" type="submit" name="submit_booking" id="submit-booking-btn" disabled><?= e(t('wizard.send_package')) ?></button>
                     </div>
                 </div>
             </form>
@@ -1288,6 +1342,16 @@ const I18N = <?= json_encode([
     'deliveryPin' => t('map.delivery_pin'),
     'riderPin' => t('map.rider_pin'),
     'locatingAddress' => t('map.locating_address'),
+    'vehicleEstimating' => t('wizard.vehicle.estimating'),
+    'vehicleUnavailable' => t('wizard.vehicle.unavailable'),
+    'vehicleRetry' => t('wizard.vehicle.retry'),
+    'fallbackAllRiders' => t('match.fallback_all_riders'),
+    'fallbackNoRiders' => t('match.fallback_no_riders'),
+    'fallbackOrderCount' => t('match.fallback_order_count'),
+    'fallbackLocationUnknown' => t('match.fallback_location_unknown'),
+    'fallbackNoPerformanceData' => t('match.fallback_no_performance_data'),
+    'fallbackPerformanceSuffix' => t('match.fallback_performance_suffix'),
+    'requestSent' => t('match.request_sent'),
 ], JSON_UNESCAPED_UNICODE) ?>;
 
 // STUN alone only works when both sides can find a direct path (same network, lenient
@@ -1586,7 +1650,11 @@ function initSenderWorkspace() {
                     }
                     step1Error?.classList.add('d-none');
                 }
-                goToStep(parseInt(this.dataset.wizardNext, 10));
+                const targetStep = parseInt(this.dataset.wizardNext, 10);
+                goToStep(targetStep);
+                if (targetStep === 4) {
+                    loadVehicleOptions();
+                }
             });
         });
 
@@ -1595,6 +1663,83 @@ function initSenderWorkspace() {
                 goToStep(parseInt(this.dataset.wizardBack, 10));
             });
         });
+
+        // Local, not the shouldSearchRiders-scoped vehicleIcon/vehicleLabel further below -
+        // those only get defined when there's already a submitted booking to match riders
+        // for, which isn't the case while still in the creation wizard.
+        function wizardVehicleLabel(type) {
+            return type === 'car' ? 'Car' : (type === 'van' ? 'Van' : 'Bike');
+        }
+        function wizardVehicleIcon(type) {
+            return type === 'car' ? 'fa-car-side' : (type === 'van' ? 'fa-truck-pickup' : 'fa-motorcycle');
+        }
+        function wizardEscapeHtml(str) {
+            return String(str)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;');
+        }
+
+        // Price is locked in at submission based on whichever vehicle type the sender picks
+        // here - fetched fresh every time this step is entered so a rider request/admin
+        // assignment can never happen without a real, already-agreed price on the booking.
+        async function loadVehicleOptions() {
+            const container = root.querySelector('#vehicle_options_container');
+            const submitBtn = root.querySelector('#submit-booking-btn');
+            const selectedInput = root.querySelector('#selected_vehicle_type');
+            if (!container) return;
+
+            submitBtn.disabled = true;
+            selectedInput.value = '';
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                    <span class="ms-2 text-soft small">${I18N.vehicleEstimating}</span>
+                </div>`;
+
+            const params = new URLSearchParams({
+                pickup_latitude: wizardForm.querySelector('#pickup_latitude')?.value || '',
+                pickup_longitude: wizardForm.querySelector('#pickup_longitude')?.value || '',
+                delivery_latitude: wizardForm.querySelector('#delivery_latitude')?.value || '',
+                delivery_longitude: wizardForm.querySelector('#delivery_longitude')?.value || '',
+            });
+
+            try {
+                const response = await fetch(`<?= e(url_path('bookings/ajax_estimate_pricing.php')) ?>?${params.toString()}`);
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || I18N.vehicleUnavailable);
+                }
+
+                container.innerHTML = result.options.map(opt => `
+                    <div class="vehicle-option-card" data-vehicle-type="${opt.vehicle_type}">
+                        <div class="vehicle-option-icon"><i class="fa-solid ${wizardVehicleIcon(opt.vehicle_type)}"></i></div>
+                        <div class="vehicle-option-info">
+                            <div class="fw-bold">${wizardVehicleLabel(opt.vehicle_type)}</div>
+                            <div class="text-soft small">${opt.distance_km}km &middot; ~${opt.planned_duration_minutes} min</div>
+                        </div>
+                        <div class="vehicle-option-price">₦${Number(opt.total).toLocaleString()}</div>
+                    </div>
+                `).join('');
+
+                container.querySelectorAll('.vehicle-option-card').forEach(card => {
+                    card.addEventListener('click', function () {
+                        container.querySelectorAll('.vehicle-option-card').forEach(c => c.classList.remove('selected'));
+                        this.classList.add('selected');
+                        selectedInput.value = this.dataset.vehicleType;
+                        submitBtn.disabled = false;
+                    });
+                });
+            } catch (err) {
+                container.innerHTML = `
+                    <div class="text-center text-danger small py-3">
+                        ${wizardEscapeHtml(err.message || I18N.vehicleUnavailable)}
+                        <div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary" id="retry-vehicle-options">${I18N.vehicleRetry}</button></div>
+                    </div>`;
+                root.querySelector('#retry-vehicle-options')?.addEventListener('click', loadVehicleOptions);
+            }
+        }
     }
 
     const pickupAddress = root.querySelector('#pickup_address');
@@ -1970,7 +2115,7 @@ function initSenderWorkspace() {
         })();
 
         function vehicleIconClass(type) {
-            return type === 'car' ? 'fa-car-side' : 'fa-motorcycle';
+            return type === 'car' ? 'fa-car-side' : (type === 'van' ? 'fa-truck-pickup' : 'fa-motorcycle');
         }
 
         if (canTrack) {
@@ -2079,6 +2224,13 @@ function initSenderWorkspace() {
             workspaceState.pingSound = new Audio('assets/sounds/notification.mp3');
             workspaceState.matchExcludedRiderIds = workspaceState.matchExcludedRiderIds || new Set();
             workspaceState.matchPhase = workspaceState.matchPhase || 'searching';
+            // Once this has been ticking for FALLBACK_AFTER_MS with nobody found via live
+            // geolocation-based matching, switch to the manual picker instead of spinning
+            // forever - riders whose location updates aren't reaching us shouldn't mean the
+            // sender never sees anyone.
+            const FALLBACK_AFTER_MS = 30000;
+            workspaceState.scanStartedAt = workspaceState.scanStartedAt || Date.now();
+            workspaceState.fallbackMode = workspaceState.fallbackMode || false;
 
             const floatTitle = root.querySelector('#rider-float-title');
             const floatSubtitle = root.querySelector('#rider-float-subtitle');
@@ -2092,11 +2244,11 @@ function initSenderWorkspace() {
             }
 
             function vehicleLabel(type) {
-                return type === 'car' ? 'Car' : 'Bike';
+                return type === 'car' ? 'Car' : (type === 'van' ? 'Van' : 'Bike');
             }
 
             function vehicleIcon(type) {
-                return type === 'car' ? 'fa-car-side' : 'fa-motorcycle';
+                return type === 'car' ? 'fa-car-side' : (type === 'van' ? 'fa-truck-pickup' : 'fa-motorcycle');
             }
 
             function renderRiderMarkers(riders) {
@@ -2215,32 +2367,78 @@ function initSenderWorkspace() {
                 }
             }
 
-            function renderGroupPicker(groups) {
-                if (floatTitle) floatTitle.textContent = groups.length > 1 ? I18N.chooseVehicleType : I18N.riderFound;
-                if (floatSubtitle) floatSubtitle.textContent = groups.length > 1 ? I18N.pickOneToMatch : I18N.matchingYouNow;
+            function performanceRatioText(ratio) {
+                if (ratio === null || ratio === undefined) return I18N.fallbackNoPerformanceData;
+                return `~${Number(ratio).toFixed(1)}x ${I18N.fallbackPerformanceSuffix}`;
+            }
 
+            function renderFallbackList(riders, maxOrders) {
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
 
-                listContainer.innerHTML = groups.map(g => `
-                    <div class="vehicle-option-card" data-vehicle-type="${g.vehicle_type}">
-                        <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(g.vehicle_type)}"></i></div>
-                        <div class="vehicle-option-info">
-                            <div class="fw-bold">${vehicleLabel(g.vehicle_type)}</div>
-                            <div class="text-soft small">${parseFloat(g.nearestRider.distance_km).toFixed(1)}km away &middot; ${g.count} available</div>
-                        </div>
-                        <div class="vehicle-option-price">₦${Number(g.nearestRider.suggested_fee).toLocaleString()}</div>
-                    </div>
-                `).join('');
+                if (floatTitle) floatTitle.textContent = I18N.findingRider;
+                if (floatSubtitle) floatSubtitle.textContent = I18N.fallbackAllRiders;
 
-                listContainer.querySelectorAll('.vehicle-option-card').forEach(card => {
+                if (riders.length === 0) {
+                    listContainer.innerHTML = `
+                        <div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>
+                        <div class="text-center"><button type="button" class="btn btn-sm btn-outline-secondary" id="resume-auto-scan">${I18N.vehicleRetry}</button></div>`;
+                } else {
+                    listContainer.innerHTML = `
+                        <div class="text-center mb-2"><button type="button" class="btn btn-sm btn-link p-0" id="resume-auto-scan">${escapeForRiderCard(I18N.fallbackAllRiders)}</button></div>
+                    ` + riders.map(r => `
+                        <div class="vehicle-option-card" data-rider-id="${r.id}">
+                            <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(r.vehicle_type)}"></i></div>
+                            <div class="vehicle-option-info">
+                                <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
+                                <div class="text-soft small">${r.active_order_count}/${maxOrders} ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown} &middot; ${performanceRatioText(r.performance_ratio)}</div>
+                            </div>
+                            <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
+                        </div>
+                    `).join('');
+                }
+
+                listContainer.querySelectorAll('.vehicle-option-card[data-rider-id]').forEach(card => {
                     card.addEventListener('click', function () {
-                        const type = this.dataset.vehicleType;
-                        const group = groups.find(g => g.vehicle_type === type);
-                        if (!group) return;
-                        sendRiderRequest(group.nearestRider);
+                        const rider = riders.find(r => String(r.id) === this.dataset.riderId);
+                        if (rider) sendRiderRequest(rider);
                     });
                 });
+
+                root.querySelector('#resume-auto-scan')?.addEventListener('click', function () {
+                    workspaceState.fallbackMode = false;
+                    workspaceState.scanStartedAt = Date.now();
+                    if (!workspaceState.ridersInterval) {
+                        workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
+                    }
+                    updateRiders();
+                });
+            }
+
+            async function loadFallbackRiders() {
+                if (workspaceState.fallbackMode) return;
+                workspaceState.fallbackMode = true;
+                if (workspaceState.ridersInterval) { clearInterval(workspaceState.ridersInterval); workspaceState.ridersInterval = null; }
+                if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
+
+                const listContainer = root.querySelector('#rider-list-container');
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                            <span class="ms-2 text-soft small">${I18N.scanningForRiders}</span>
+                        </div>`;
+                }
+
+                try {
+                    const response = await fetch(`bookings/ajax_fetch_riders_fallback.php?booking_id=${selectedBookingId}`);
+                    const result = await response.json();
+                    if (!response.ok || !result.success) throw new Error('fallback fetch failed');
+                    renderFallbackList(result.riders, result.max_orders);
+                } catch (err) {
+                    console.error('Fallback rider fetch failed:', err);
+                    workspaceState.fallbackMode = false;
+                }
             }
 
             async function updateRiders() {
@@ -2248,7 +2446,7 @@ function initSenderWorkspace() {
                     stopRiderSearch();
                     return;
                 }
-                if (workspaceState.matchPhase === 'waiting' || workspaceState.matchPhase === 'matching') {
+                if (workspaceState.matchPhase === 'waiting' || workspaceState.matchPhase === 'matching' || workspaceState.fallbackMode) {
                     return;
                 }
 
@@ -2272,6 +2470,12 @@ function initSenderWorkspace() {
 
                     if (availableRiders.length === 0) {
                         if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
+
+                        if (Date.now() - workspaceState.scanStartedAt >= FALLBACK_AFTER_MS) {
+                            loadFallbackRiders();
+                            return;
+                        }
+
                         if (riders.length > 0 && workspaceState.matchExcludedRiderIds.size > 0) {
                             if (floatTitle) floatTitle.textContent = I18N.findingRider;
                             if (floatSubtitle) floatSubtitle.textContent = I18N.noMoreNearbyShort;
@@ -2289,41 +2493,27 @@ function initSenderWorkspace() {
                         return;
                     }
 
-                    const groups = [];
-                    const seenTypes = new Set();
-                    availableRiders.forEach(r => {
-                        if (seenTypes.has(r.vehicle_type)) return;
-                        seenTypes.add(r.vehicle_type);
-                        groups.push({
-                            vehicle_type: r.vehicle_type,
-                            nearestRider: r,
-                            count: availableRiders.filter(x => x.vehicle_type === r.vehicle_type).length
-                        });
-                    });
-
-                    if (groups.length === 1) {
-                        const group = groups[0];
-                        if (floatTitle) floatTitle.textContent = I18N.riderFound;
-                        if (floatSubtitle) floatSubtitle.textContent = I18N.matchingYouNow;
-                        if (!workspaceState.autoMatchTimer) {
-                            listContainer.innerHTML = `
-                                <div class="text-center py-4">
-                                    <div class="vehicle-option-icon mx-auto mb-2"><i class="fa-solid ${vehicleIcon(group.vehicle_type)}"></i></div>
-                                    <div class="fw-bold">${vehicleLabel(group.vehicle_type)} &middot; ₦${Number(group.nearestRider.suggested_fee).toLocaleString()}</div>
-                                    <div class="text-soft small">${group.count} available nearby</div>
-                                </div>`;
-                            workspaceState.autoMatchTimer = setTimeout(() => {
-                                workspaceState.autoMatchTimer = null;
-                                if (workspaceState.matchPhase === 'searching') {
-                                    sendRiderRequest(group.nearestRider);
-                                }
-                            }, 1400);
-                        }
-                        return;
+                    // Server already filtered to the sender's chosen vehicle type and sorted
+                    // by proximity, and every rider offers the same locked-in price, so the
+                    // nearest one is simply auto-matched - no vehicle-type picker needed here
+                    // anymore now that the type was chosen up front in the wizard.
+                    const nearest = availableRiders[0];
+                    if (floatTitle) floatTitle.textContent = I18N.riderFound;
+                    if (floatSubtitle) floatSubtitle.textContent = I18N.matchingYouNow;
+                    if (!workspaceState.autoMatchTimer) {
+                        listContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="vehicle-option-icon mx-auto mb-2"><i class="fa-solid ${vehicleIcon(nearest.vehicle_type)}"></i></div>
+                                <div class="fw-bold">${escapeForRiderCard(nearest.full_name)} &middot; ₦${Number(nearest.suggested_fee).toLocaleString()}</div>
+                                <div class="text-soft small">${availableRiders.length} available nearby</div>
+                            </div>`;
+                        workspaceState.autoMatchTimer = setTimeout(() => {
+                            workspaceState.autoMatchTimer = null;
+                            if (workspaceState.matchPhase === 'searching') {
+                                sendRiderRequest(nearest);
+                            }
+                        }, 1400);
                     }
-
-                    if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
-                    renderGroupPicker(groups);
                 } catch (err) {
                     console.error('Update Error:', err);
                 }

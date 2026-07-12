@@ -52,7 +52,19 @@ if (!in_array($booking['booking_status'], $map[$action], true)) {
     exit;
 }
 
-$stmt = $pdo->prepare('UPDATE bookings SET booking_status = ?, updated_at = NOW() WHERE id = ?');
+if ($action === 'delivered') {
+    // matched_at may be null for bookings created before this feature (or if a booking was
+    // somehow force-delivered without ever going through a matching path) - the duration is
+    // left null rather than guessed in that case, same as planned_duration_minutes already is.
+    $stmt = $pdo->prepare('
+        UPDATE bookings
+        SET booking_status = ?, updated_at = NOW(),
+            actual_duration_minutes = CASE WHEN matched_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, matched_at, NOW()) ELSE actual_duration_minutes END
+        WHERE id = ?
+    ');
+} else {
+    $stmt = $pdo->prepare('UPDATE bookings SET booking_status = ?, updated_at = NOW() WHERE id = ?');
+}
 $stmt->execute([$action, $bookingId]);
 
 switch ($action) {

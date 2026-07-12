@@ -339,6 +339,48 @@ function booking_status_label(string $status): string {
     return $label !== $key ? $label : ucwords(str_replace('_', ' ', $status));
 }
 
+// Booking statuses that count as a rider "currently handling" that delivery - shared by
+// every eligibility/capacity check (auto-match, manual admin/sender assignment, rider
+// request acceptance) so the definition of "active" can't drift between them.
+const RIDER_ACTIVE_BOOKING_STATUSES = ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit'];
+const RIDER_MAX_CONCURRENT_ORDERS = 3;
+
+function rider_active_order_count(PDO $pdo, int $riderUserId, ?int $excludeBookingId = null): int {
+    $placeholders = implode(',', array_fill(0, count(RIDER_ACTIVE_BOOKING_STATUSES), '?'));
+    $sql = "SELECT COUNT(*) FROM bookings WHERE selected_rider_user_id = ? AND booking_status IN ($placeholders)";
+    $params = [$riderUserId, ...RIDER_ACTIVE_BOOKING_STATUSES];
+    if ($excludeBookingId !== null) {
+        $sql .= ' AND id <> ?';
+        $params[] = $excludeBookingId;
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return (int) $stmt->fetchColumn();
+}
+
+// A rider's average actual delivery time divided by their average planned (Mapbox-estimated)
+// delivery time across their completed orders - below 1.0 means they typically finish faster
+// than planned, above 1.0 means slower. Null until they have at least one delivered order
+// with both figures recorded (bookings created before this feature won't have either).
+function rider_performance_ratio(PDO $pdo, int $riderUserId): ?float {
+    $stmt = $pdo->prepare('
+        SELECT AVG(actual_duration_minutes) AS avg_actual, AVG(planned_duration_minutes) AS avg_planned
+        FROM bookings
+        WHERE selected_rider_user_id = ?
+          AND booking_status = "delivered"
+          AND actual_duration_minutes IS NOT NULL
+          AND planned_duration_minutes IS NOT NULL
+    ');
+    $stmt->execute([$riderUserId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $avgPlanned = $row['avg_planned'] !== null ? (float) $row['avg_planned'] : null;
+    $avgActual = $row['avg_actual'] !== null ? (float) $row['avg_actual'] : null;
+    if ($avgPlanned === null || $avgActual === null || $avgPlanned <= 0.0) {
+        return null;
+    }
+    return $avgActual / $avgPlanned;
+}
+
 const RIDER_PAYOUT_SHARE = 0.85;
 
 function rider_payout_amount(float $agreedCost): float {

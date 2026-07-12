@@ -182,6 +182,13 @@ return [
     'wizard.item_image_label' => 'Item image (optional)',
     'wizard.save_draft' => 'Save as Draft',
     'wizard.send_package' => 'Send Package',
+    'wizard.step4.label' => 'Vehicle',
+    'wizard.step4.heading' => 'Choose your delivery vehicle',
+    'wizard.step4.subheading' => 'Price is locked in once you pick a vehicle type - it will not change no matter which rider takes the job.',
+    'wizard.vehicle.estimating' => 'Estimating prices...',
+    'wizard.vehicle.unavailable' => 'Unable to calculate pricing right now. Please try again shortly.',
+    'wizard.vehicle.retry' => 'Retry',
+    'wizard.vehicle.required' => 'Please choose a vehicle type.',
 
     // Sender booking detail page
     'sender.page_title' => 'Sender Hub | Aike',
@@ -313,6 +320,13 @@ return [
     'match.matching_you_now' => 'Matching you now...',
     'match.no_more_nearby_short' => 'No more nearby riders right now',
     'match.waiting_for_them' => 'Waiting for them to respond...',
+    'match.fallback_all_riders' => 'No riders responded yet - here are all matching riders',
+    'match.fallback_no_riders' => 'No riders are available for this vehicle type right now. We will keep scanning.',
+    'match.fallback_order_count' => 'orders',
+    'match.fallback_location_unknown' => 'Location unknown',
+    'match.fallback_no_performance_data' => 'No completed orders yet',
+    'match.fallback_performance_suffix' => 'of planned time',
+    'match.request_sent' => 'Request sent',
 
     // Map
     'map.tap_to_set' => 'Tap the map to set',
@@ -745,6 +759,7 @@ return [
     'admin.assign_rider_button' => 'Assign Rider',
     'admin.reassign_rider_button' => 'Reassign Rider',
     'admin.select_rider_placeholder' => 'Select a rider...',
+    'admin.active_orders_suffix' => 'active orders',
     'admin.no_eligible_riders' => 'No eligible riders found right now.',
     'admin.booking_not_assignable' => 'A rider can no longer be assigned to this booking.',
     'admin.booking_missing_coordinates' => 'This booking is missing pickup/delivery coordinates.',

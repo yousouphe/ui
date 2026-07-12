@@ -11,8 +11,8 @@ return [
     'app_url' => 'https://entrepoints.ng',
     'paystack_public_key' => 'REDACTED_PAYSTACK_PUBLIC_KEY',
     'paystack_secret_key' => 'REDACTED_PAYSTACK_SECRET_KEY',
-    // Public Mapbox token (pk.*) - safe to expose client-side by design. Used only for the
-    // live-tracking route/rider-position map now that address entry uses Google Maps.
+    // Public Mapbox token (pk.*) - safe to expose client-side by design. Used for address
+    // autocomplete, the location picker, and the live-tracking route/rider-position map.
     // Restrict it to your domain(s) in the Mapbox account dashboard for defense in depth.
     'mapbox_token' => 'REDACTED_MAPBOX_PUBLIC_TOKEN',
     // SECRET Mapbox token (sk.*) - server-side use only, never send this to the browser.
@@ -37,11 +37,4 @@ return [
     // `php scripts/generate_vapid_keys.php` and paste the PEM below - the public key is
     // derived from it automatically, there is nothing else to configure.
     'vapid_private_key_pem' => 'REDACTED_VAPID_PRIVATE_KEY_PEM',
-    // Google Maps JavaScript API key (Maps JavaScript API + Places API enabled) used for
-    // pickup/delivery address autocomplete and the map location picker in the booking
-    // wizard and the change-delivery-address modal. This key is designed to be used
-    // client-side - restrict it to your domain(s) under "Application restrictions" in the
-    // Google Cloud Console credential settings for defense in depth. Create one at
-    // https://console.cloud.google.com/google/maps-apis/credentials
-    'google_maps_api_key' => 'REDACTED_GOOGLE_MAPS_API_KEY',
 ];

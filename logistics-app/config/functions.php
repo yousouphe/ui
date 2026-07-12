@@ -35,15 +35,6 @@ function mapbox_token(): string {
     return trim((string)(config_app()['mapbox_token'] ?? ''));
 }
 
-function google_maps_api_key(): string {
-    return trim((string)(config_app()['google_maps_api_key'] ?? ''));
-}
-
-function google_maps_configured(): bool {
-    $key = google_maps_api_key();
-    return $key !== '' && !str_starts_with($key, 'REDACTED');
-}
-
 function base_url(): string {
     $configured = trim((string)(config_app()['base_url'] ?? ''));
     if ($configured !== '') {

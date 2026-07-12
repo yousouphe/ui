@@ -33,6 +33,11 @@ if ($eventType === 'charge.success' && $reference !== '') {
     // finalize_booking_payment() re-verifies with Paystack directly rather than trusting
     // this payload, and is a safe no-op if payments/callback.php already confirmed it.
     finalize_booking_payment($pdo, $reference);
+} elseif (in_array($eventType, ['transfer.success', 'transfer.failed', 'transfer.reversed'], true) && $reference !== '') {
+    // Rider withdrawal payouts - without this, a withdrawal an admin approved never leaves
+    // "Awaiting Paystack confirmation" until someone manually checks the Paystack dashboard
+    // and clicks "Mark as Paid".
+    finalize_withdrawal_transfer_event($pdo, $eventType, $reference);
 }
 
 // Always 200 once the signature checks out - Paystack retries on non-2xx, and there's

@@ -249,3 +249,138 @@ function paystack_initiate_refund(string $reference, ?int $amountKobo = null): a
     }
     return ['ok' => true, 'status' => (string)($result['data']['status'] ?? 'pending'), 'message' => $result['message']];
 }
+
+// Shared by admin/index.php's "Approve & Pay" success path, its manual "Mark as Paid"
+// fallback, and the transfer.success webhook below, so a withdrawal only ever gets marked
+// paid and ledgered once no matter which of those three finds out about it first.
+// $adminUserId is null when this is called from the webhook (no admin session involved).
+function finalize_withdrawal_paid(PDO $pdo, int $requestId, ?int $adminUserId, ?string $transferCode, ?string $reference): array {
+    $stmt = $pdo->prepare('
+        SELECT wr.*, u.full_name AS rider_full_name, u.email AS rider_email
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.id = ?
+        LIMIT 1
+    ');
+    $stmt->execute([$requestId]);
+    $withdrawal = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$withdrawal) {
+        return ['ok' => false, 'already_paid' => false, 'message' => 'Withdrawal request not found.'];
+    }
+    if ($withdrawal['status'] === 'paid') {
+        return ['ok' => true, 'already_paid' => true, 'message' => 'Withdrawal was already paid.'];
+    }
+    if (!in_array($withdrawal['status'], ['pending', 'processing'], true)) {
+        return ['ok' => false, 'already_paid' => false, 'message' => 'Withdrawal is not pending or processing.'];
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare('
+            UPDATE withdrawal_requests
+            SET status = "paid", admin_user_id = COALESCE(?, admin_user_id), processed_at = NOW(),
+                paystack_transfer_code = COALESCE(?, paystack_transfer_code),
+                paystack_transfer_reference = COALESCE(?, paystack_transfer_reference)
+            WHERE id = ? AND status IN ("pending", "processing")
+        ');
+        $stmt->execute([$adminUserId, $transferCode, $reference, $requestId]);
+        if ($stmt->rowCount() === 0) {
+            // Lost a race with another path finalizing this same request - not an error.
+            $pdo->rollBack();
+            return ['ok' => true, 'already_paid' => true, 'message' => 'Withdrawal was already processed.'];
+        }
+
+        $stmt = $pdo->prepare('
+            INSERT INTO wallet_transactions (rider_user_id, withdrawal_request_id, type, amount, description)
+            VALUES (?, ?, "withdrawal", ?, ?)
+        ');
+        $description = $transferCode
+            ? sprintf('Withdrawal to %s (%s) via Paystack', $withdrawal['bank_name'], $withdrawal['account_number'])
+            : sprintf('Withdrawal to %s (%s)', $withdrawal['bank_name'], $withdrawal['account_number']);
+        $stmt->execute([
+            (int) $withdrawal['rider_user_id'],
+            $requestId,
+            -1 * (float) $withdrawal['amount'],
+            $description,
+        ]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'already_paid' => false, 'message' => 'Database update failed: ' . $e->getMessage()];
+    }
+
+    require_once __DIR__ . '/emails.php';
+    require_once __DIR__ . '/push.php';
+    send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'paid');
+    send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal paid', '₦' . number_format((float) $withdrawal['amount'], 2) . ' has been sent to your bank account.', url_path('rider/wallet'));
+    log_event(
+        $pdo,
+        'withdrawal_paid',
+        'Withdrawal #' . $requestId . ' paid' . ($transferCode ? ' via Paystack (' . $transferCode . ')' : ' (manual)'),
+        $adminUserId,
+        $adminUserId ? 'admin' : 'system',
+        'withdrawal',
+        $requestId,
+        ['amount' => (float) $withdrawal['amount'], 'transfer_code' => $transferCode, 'reference' => $reference]
+    );
+
+    return ['ok' => true, 'already_paid' => false, 'message' => 'Withdrawal marked paid.'];
+}
+
+// Handles transfer.success / transfer.failed / transfer.reversed webhook events for rider
+// withdrawal payouts (as opposed to finalize_booking_payment(), which handles charge.success
+// for sender payments). Matches purely on the Paystack transfer reference we generated and
+// stored when the transfer was initiated, so it's a safe no-op for references we don't
+// recognize (e.g. transfers made directly from the Paystack dashboard, outside this app).
+function finalize_withdrawal_transfer_event(PDO $pdo, string $eventType, string $reference): array {
+    if ($reference === '') {
+        return ['ok' => false, 'message' => 'No reference in event.'];
+    }
+
+    $stmt = $pdo->prepare('
+        SELECT wr.*, u.full_name AS rider_full_name, u.email AS rider_email
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.paystack_transfer_reference = ?
+        LIMIT 1
+    ');
+    $stmt->execute([$reference]);
+    $withdrawal = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$withdrawal) {
+        return ['ok' => true, 'message' => 'No withdrawal matches this reference - ignoring.'];
+    }
+
+    if ($eventType === 'transfer.success') {
+        $transferCode = trim((string) ($withdrawal['paystack_transfer_code'] ?? ''));
+        return finalize_withdrawal_paid($pdo, (int) $withdrawal['id'], null, $transferCode !== '' ? $transferCode : 'webhook', $reference);
+    }
+
+    if (in_array($eventType, ['transfer.failed', 'transfer.reversed'], true)) {
+        if ($withdrawal['status'] !== 'processing') {
+            // Already resolved (paid/rejected) or never left pending - nothing to revert.
+            return ['ok' => true, 'message' => 'Withdrawal not in processing state - ignoring.'];
+        }
+
+        $reason = $eventType === 'transfer.failed' ? 'Paystack transfer failed.' : 'Paystack transfer was reversed.';
+        $stmt = $pdo->prepare('
+            UPDATE withdrawal_requests
+            SET status = "pending", admin_note = ?, paystack_transfer_attempted_at = NULL
+            WHERE id = ? AND status = "processing"
+        ');
+        $stmt->execute([$reason, (int) $withdrawal['id']]);
+
+        if ($stmt->rowCount() > 0) {
+            require_once __DIR__ . '/emails.php';
+            notify_admins($pdo, 'Rider withdrawal transfer failed', '<p>' . e($reason) . ' Withdrawal #' . (int) $withdrawal['id'] . ' for ' . e((string) $withdrawal['rider_full_name']) . ' (₦' . number_format((float) $withdrawal['amount'], 2) . ') has been reset to pending and needs to be retried.</p>');
+            log_event($pdo, 'withdrawal_transfer_failed', $reason . ' Withdrawal #' . (int) $withdrawal['id'] . ' reset to pending.', null, 'system', 'withdrawal', (int) $withdrawal['id'], ['reference' => $reference, 'event' => $eventType]);
+        }
+
+        return ['ok' => true, 'message' => $reason];
+    }
+
+    return ['ok' => true, 'message' => 'Unhandled transfer event type: ' . $eventType];
+}

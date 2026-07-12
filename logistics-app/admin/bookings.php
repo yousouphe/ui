@@ -5,6 +5,12 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/paystack.php';
 require_once __DIR__ . '/../config/emails.php';
 require_once __DIR__ . '/../config/push.php';
+require_once __DIR__ . '/../config/mapbox.php';
+
+// Booking statuses where the parcel hasn't physically changed hands yet - an admin can
+// still (re)assign a rider up to this point. Once a rider has arrived at pickup or later,
+// swapping riders doesn't make sense since a different rider isn't holding the parcel.
+const ADMIN_ASSIGNABLE_BOOKING_STATUSES = ['draft', 'submitted', 'matched', 'accepted'];
 
 $user = current_user();
 $success = flash('success');
@@ -94,6 +100,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('success', t('admin.refund_issued'));
         redirect_to('admin/bookings.php?booking_id=' . $bookingId);
     }
+
+    if ($formAction === 'assign_rider') {
+        $riderUserId = (int) ($_POST['rider_user_id'] ?? 0);
+
+        if (!in_array($targetBooking['booking_status'], ADMIN_ASSIGNABLE_BOOKING_STATUSES, true)) {
+            flash('error', t('admin.booking_not_assignable'));
+            redirect_to('admin/bookings.php?booking_id=' . $bookingId);
+        }
+        if ($targetBooking['pickup_latitude'] === null || $targetBooking['delivery_latitude'] === null) {
+            flash('error', t('admin.booking_missing_coordinates'));
+            redirect_to('admin/bookings.php?booking_id=' . $bookingId);
+        }
+
+        // Re-validate server-side rather than trusting the submitted rider id - the same
+        // eligibility rules as the sender-facing rider list (active, KYC-approved) plus a
+        // check that this rider isn't already committed to another active delivery.
+        $stmt = $pdo->prepare("
+            SELECT u.id, u.full_name, u.email, rp.vehicle_type
+            FROM users u
+            INNER JOIN rider_profiles rp ON rp.user_id = u.id
+            WHERE u.id = ? AND u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
+              AND NOT EXISTS (
+                  SELECT 1 FROM bookings b
+                  WHERE b.selected_rider_user_id = u.id AND b.id <> ?
+                  AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
+              )
+            LIMIT 1
+        ");
+        $stmt->execute([$riderUserId, $bookingId]);
+        $rider = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$rider) {
+            flash('error', t('admin.rider_not_eligible'));
+            redirect_to('admin/bookings.php?booking_id=' . $bookingId);
+        }
+
+        // Fresh assignment gets a freshly computed fare. Reassigning a booking that already
+        // has an agreed cost (the sender may have already paid against it) keeps that price
+        // unchanged - only the rider changes - so pricing only needs to be looked up when
+        // there isn't already a price to preserve.
+        if ($targetBooking['agreed_cost'] !== null) {
+            $newCost = (float) $targetBooking['agreed_cost'];
+        } else {
+            try {
+                $distanceKm = pricing_distance_km(
+                    (float) $targetBooking['pickup_latitude'],
+                    (float) $targetBooking['pickup_longitude'],
+                    (float) $targetBooking['delivery_latitude'],
+                    (float) $targetBooking['delivery_longitude']
+                );
+            } catch (RuntimeException $e) {
+                flash('error', t('admin.pricing_unavailable'));
+                redirect_to('admin/bookings.php?booking_id=' . $bookingId);
+            }
+            $newCost = calculate_delivery_price($pdo, $distanceKm, (string) $rider['vehicle_type'])['total'];
+        }
+        $newStatus = in_array($targetBooking['booking_status'], ['draft', 'submitted'], true)
+            ? 'matched'
+            : $targetBooking['booking_status'];
+        $previousRiderId = $targetBooking['selected_rider_user_id'] !== null ? (int) $targetBooking['selected_rider_user_id'] : null;
+
+        $stmt = $pdo->prepare('
+            UPDATE bookings SET selected_rider_user_id = ?, agreed_cost = ?, booking_status = ? WHERE id = ?
+        ');
+        $stmt->execute([$riderUserId, $newCost, $newStatus, $bookingId]);
+
+        $stmt = $pdo->prepare("UPDATE rider_requests SET request_status = 'cancelled' WHERE booking_id = ? AND request_status = 'pending'");
+        $stmt->execute([$bookingId]);
+
+        send_rider_matched_email((string) $targetBooking['sender_email'], (string) $targetBooking['sender_full_name'], (string) $rider['full_name'], (string) $targetBooking['booking_code']);
+        send_web_push($pdo, (int) $targetBooking['sender_user_id'], 'Rider assigned', (string) $rider['full_name'] . ' has been assigned to your delivery ' . $targetBooking['booking_code'] . '.', url_path('bookings/index.php?booking_id=' . $bookingId));
+        send_web_push($pdo, $riderUserId, 'New delivery assigned', 'You have been assigned to booking ' . $targetBooking['booking_code'] . '.', url_path('rider/'));
+        if ($previousRiderId !== null && $previousRiderId !== $riderUserId) {
+            send_web_push($pdo, $previousRiderId, 'Booking reassigned', 'Booking ' . $targetBooking['booking_code'] . ' has been reassigned to another rider.', url_path('rider/'));
+        }
+        log_event(
+            $pdo,
+            'booking_rider_assigned_by_admin',
+            'Booking ' . $targetBooking['booking_code'] . ' assigned to rider ' . $rider['full_name'] . ' by admin',
+            (int) $user['id'],
+            (string) $user['role'],
+            'booking',
+            $bookingId,
+            ['rider_user_id' => $riderUserId, 'previous_rider_user_id' => $previousRiderId, 'amount' => $newCost]
+        );
+
+        flash('success', t('admin.rider_assigned'));
+        redirect_to('admin/bookings.php?booking_id=' . $bookingId);
+    }
 }
 
 $selectedBookingId = isset($_GET['booking_id']) ? (int) $_GET['booking_id'] : 0;
@@ -124,6 +219,60 @@ if ($selectedBookingId > 0) {
         ");
         $stmt->execute([$selectedBookingId]);
         $timeline = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
+// Candidate riders for manual assignment - same eligibility rules as the sender-facing
+// rider list (bookings/ajax_fetch_riders.php), minus the "recently seen online" window
+// since an admin overriding the automatic flow may know a rider is available even if their
+// last location ping is stale.
+$eligibleRiders = [];
+$pricingUnavailable = false;
+if (
+    $selectedBooking
+    && in_array($selectedBooking['booking_status'], ADMIN_ASSIGNABLE_BOOKING_STATUSES, true)
+    && $selectedBooking['pickup_latitude'] !== null
+    && $selectedBooking['delivery_latitude'] !== null
+) {
+    $pickupLat = (float) $selectedBooking['pickup_latitude'];
+    $pickupLng = (float) $selectedBooking['pickup_longitude'];
+    $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
+
+    $stmt = $pdo->prepare("
+        SELECT u.id, u.full_name, rp.vehicle_type, rp.rating, $distanceSql AS distance_km
+        FROM users u
+        INNER JOIN rider_profiles rp ON rp.user_id = u.id
+        WHERE u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
+          AND rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM bookings b
+              WHERE b.selected_rider_user_id = u.id AND b.id <> ?
+              AND b.booking_status IN ('matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit')
+          )
+        ORDER BY distance_km ASC
+        LIMIT 30
+    ");
+    $stmt->execute([$selectedBookingId]);
+    $eligibleRiders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // A booking that already has an agreed cost keeps that price no matter which rider is
+    // picked (see the assign_rider handler above), so there's nothing to look up here - a
+    // per-rider "suggested fee" would be misleading busywork for a reassignment.
+    if ($eligibleRiders && $selectedBooking['agreed_cost'] === null) {
+        try {
+            $deliveryDistanceKm = pricing_distance_km(
+                $pickupLat,
+                $pickupLng,
+                (float) $selectedBooking['delivery_latitude'],
+                (float) $selectedBooking['delivery_longitude']
+            );
+            foreach ($eligibleRiders as &$candidate) {
+                $candidate['suggested_fee'] = calculate_delivery_price($pdo, $deliveryDistanceKm, (string) $candidate['vehicle_type'])['total'];
+            }
+            unset($candidate);
+        } catch (RuntimeException $e) {
+            $pricingUnavailable = true;
+        }
     }
 }
 
@@ -324,6 +473,45 @@ function admin_payment_status_badge_class(string $status): string {
                     </form>
                 <?php endif; ?>
             </div>
+
+            <?php if (in_array($selectedBooking['booking_status'], ADMIN_ASSIGNABLE_BOOKING_STATUSES, true)): ?>
+                <div class="cardx p-3 mb-4">
+                    <h3 class="h6 fw-bold mb-2"><?= e(empty($selectedBooking['rider_full_name']) ? t('admin.assign_rider_heading') : t('admin.reassign_rider_heading')) ?></h3>
+                    <?php if ($selectedBooking['pickup_latitude'] === null || $selectedBooking['delivery_latitude'] === null): ?>
+                        <div class="text-soft small"><?= e(t('admin.booking_missing_coordinates')) ?></div>
+                    <?php elseif ($pricingUnavailable): ?>
+                        <div class="text-soft small"><?= e(t('admin.pricing_unavailable')) ?></div>
+                    <?php elseif (empty($eligibleRiders)): ?>
+                        <div class="text-soft small"><?= e(t('admin.no_eligible_riders')) ?></div>
+                    <?php else: ?>
+                        <?php if ($selectedBooking['agreed_cost'] !== null): ?>
+                            <div class="text-soft small mb-2"><?= e(t('admin.price_stays_note')) ?> ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?></div>
+                        <?php endif; ?>
+                        <form method="post" class="row g-2 align-items-end">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="form_action" value="assign_rider">
+                            <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
+                            <div class="col-md-8">
+                                <select class="form-select" name="rider_user_id" required>
+                                    <option value=""><?= e(t('admin.select_rider_placeholder')) ?></option>
+                                    <?php foreach ($eligibleRiders as $candidate): ?>
+                                        <option value="<?= (int) $candidate['id'] ?>">
+                                            <?= e((string) $candidate['full_name']) ?> &middot; <?= e(t('vehicle.' . (string) $candidate['vehicle_type'])) ?>
+                                            &middot; <?= number_format((float) $candidate['distance_km'], 1) ?> km <?= e(t('admin.from_pickup_suffix')) ?>
+                                            <?php if (isset($candidate['suggested_fee'])): ?>
+                                                &middot; ₦<?= number_format((float) $candidate['suggested_fee'], 2) ?>
+                                            <?php endif; ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-primary fw-bold w-100" type="submit"><?= e(empty($selectedBooking['rider_full_name']) ? t('admin.assign_rider_button') : t('admin.reassign_rider_button')) ?></button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
 
             <h3 class="h6 fw-bold mb-2"><?= e(t('admin.booking_timeline_heading')) ?></h3>
             <?php if (empty($timeline)): ?>

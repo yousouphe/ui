@@ -846,13 +846,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
             <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
-            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
-            <div class="small">
-                <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                &middot;
-                <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
+                <div class="small">
+                    <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+                    &middot;
+                    <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+                </div>
             </div>
         </div>
     </div>
@@ -1277,6 +1279,8 @@ const PEER_ICE_CONFIG = {
 
 let watchId = null;
 let lastKnownPosition = null;
+let watchAccuracyFailures = 0;
+let watchUsingHighAccuracy = true;
 let currentStatus = <?= json_encode($currentStatus) ?>;
 const bookingId = <?= $activeBooking ? (int)$activeBooking['id'] : 'null' ?>;
 let senderHandoverConfirmed = <?= json_encode($senderConfirmedHandover) ?>;
@@ -1795,13 +1799,29 @@ async function toggleStatus() {
             return;
         }
 
+        const onFix = () => {
+            if (onlineToggleLabel) onlineToggleLabel.innerText = I18N.youAreOnline;
+            startTracking();
+            updateServerStatus('available');
+        };
+
         navigator.geolocation.getCurrentPosition(
-            () => {
-                if (onlineToggleLabel) onlineToggleLabel.innerText = I18N.youAreOnline;
-                startTracking();
-                updateServerStatus('available');
-            },
+            onFix,
             (err) => {
+                // A high-accuracy (GPS chip) fix can fail indoors or with weak satellite
+                // visibility even where a coarser, network-based fix would succeed - retry
+                // once with relaxed accuracy before blocking the rider from going online.
+                if (err.code === err.POSITION_UNAVAILABLE || err.code === err.TIMEOUT) {
+                    navigator.geolocation.getCurrentPosition(
+                        onFix,
+                        (err2) => {
+                            onlineToggleInput.checked = false;
+                            if (geoMessage) geoMessage.textContent = explainGeoError(err2);
+                        },
+                        { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
+                    );
+                    return;
+                }
                 onlineToggleInput.checked = false;
                 if (geoMessage) geoMessage.textContent = explainGeoError(err);
             },
@@ -1827,10 +1847,13 @@ function startTracking() {
 
     watchId = navigator.geolocation.watchPosition(
         async (pos) => {
+            watchAccuracyFailures = 0;
             const { latitude, longitude } = pos.coords;
             lastKnownPosition = { lat: latitude, lng: longitude };
 
             updateMapAndTargetUI(latitude, longitude);
+            if (geoMessage) geoMessage.textContent = '';
+            if (syncStatus) syncStatus.innerText = I18N.syncLive;
 
             try {
                 await fetch(safeAbsoluteUrl(ajaxUpdateLocationUrl), {
@@ -1849,8 +1872,21 @@ function startTracking() {
             const fallbackLat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
             const fallbackLng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
             updateMapAndTargetUI(fallbackLat, fallbackLng);
+
+            // A GPS chip fix can keep failing indoors or with weak satellite visibility for
+            // the whole duration of a shift - after a couple of consecutive misses, drop to
+            // network-based positioning (less precise, but far more reliable in those
+            // conditions) instead of leaving the rider stuck with no live position at all.
+            if ((err.code === err.POSITION_UNAVAILABLE || err.code === err.TIMEOUT) && watchUsingHighAccuracy) {
+                watchAccuracyFailures++;
+                if (watchAccuracyFailures >= 2) {
+                    watchUsingHighAccuracy = false;
+                    watchAccuracyFailures = 0;
+                    startTracking();
+                }
+            }
         },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
+        { enableHighAccuracy: watchUsingHighAccuracy, timeout: 12000, maximumAge: 5000 }
     );
 }
 
@@ -1860,6 +1896,10 @@ function stopTracking() {
         watchId = null;
     }
     if (syncStatus) syncStatus.innerText = I18N.syncOffline;
+    // Give the next "go online" a fresh shot at a high-accuracy fix rather than staying
+    // downgraded because of a bad-GPS patch from an earlier shift.
+    watchUsingHighAccuracy = true;
+    watchAccuracyFailures = 0;
 }
 
 async function updateServerStatus(status) {

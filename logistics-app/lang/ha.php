@@ -190,6 +190,7 @@ return [
     'wizard.vehicle.unavailable' => 'An kasa lissafin farashi a yanzu. Da fatan a sake gwadawa ba da daɗewa ba.',
     'wizard.vehicle.retry' => 'Sake gwadawa',
     'wizard.vehicle.required' => 'Da fatan a zaɓi nau\'in abin hawa.',
+    'wizard.vehicle.select_anyway' => 'Zaɓi wannan abin hawa don ci gaba',
 
     // Sender booking detail page
     'sender.page_title' => 'Cibiyar Mai Turawa | Aike',
@@ -330,6 +331,9 @@ return [
     'match.fallback_performance_suffix' => 'na lokacin da aka tsara',
     'match.fallback_eta_suffix' => 'min ETA',
     'match.fallback_avg_delivery_suffix' => 'matsakaicin lokacin isarwa',
+    'match.last_seen_now' => 'Kan layi yanzu',
+    'match.last_seen_ago' => 'An gan shi :time da suka wuce',
+    'match.last_seen_never' => 'Ba a taɓa ganin shi kan layi ba',
     'match.resume_auto_scan' => 'Ci gaba da bincike kai tsaye',
     'match.sort_label' => 'Jera bisa',
     'match.sort_score' => 'Mafi dacewa',
@@ -779,6 +783,8 @@ return [
     'admin.rider_not_eligible' => 'Wannan rider ba ya cancanta ko yana kan wani aiki mai gudana a yanzu.',
     'admin.pricing_unavailable' => 'An kasa lissafta farashi a yanzu. Da fatan a sake gwadawa nan ba da jimawa ba.',
     'admin.no_route_found' => 'Ba a sami hanya tsakanin wurin ɗauka da wurin kaiwa ba. Da fatan a duba adireshin.',
+    'admin.manual_price_hint' => 'Har yanzu za ka iya naɗa rider ta hanyar shigar da farashi da hannu a ƙasa.',
+    'admin.manual_price_placeholder' => 'Farashi (₦)',
     'admin.rider_assigned' => 'An naɗa rider ga delivery.',
     'admin.price_stays_note' => 'Farashi zai ci gaba a tsaye a',
 

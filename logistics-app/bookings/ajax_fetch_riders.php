@@ -59,7 +59,7 @@ $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat
 // means "reachable" anyway - ranking by quality (rating_match_score()) and letting the
 // sender pick is more useful than silently hiding anyone who hasn't toggled a switch.
 $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
-               rp.last_latitude, rp.last_longitude,
+               rp.last_latitude, rp.last_longitude, rp.last_location_updated_at,
                CASE WHEN rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL THEN $distanceSql ELSE NULL END AS distance_km,
                (
                    SELECT COUNT(*) FROM bookings b
@@ -86,6 +86,12 @@ foreach ($riders as &$r) {
     $r['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
     $r['performance_ratio'] = $stats['ratio'];
     $r['score'] = rider_match_score($r['rating'] !== null ? (float) $r['rating'] : null, $stats['ratio']);
+    // Online status is no longer a filter, but "last seen" is still useful context for the
+    // sender to weigh alongside score/distance when picking manually.
+    $r['last_seen_seconds_ago'] = !empty($r['last_location_updated_at'])
+        ? max(0, time() - strtotime((string) $r['last_location_updated_at']))
+        : null;
+    unset($r['last_location_updated_at']);
 }
 unset($r);
 

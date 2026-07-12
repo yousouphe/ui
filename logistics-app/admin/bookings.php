@@ -142,9 +142,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Bookings created since transport type was moved up front (see bookings/index.php's
         // wizard) already carry a locked-in agreed_cost from submission - only bookings from
-        // before that change can still have a null price here, needing one computed now.
+        // before that change, or ones created while Mapbox was unreachable, can still have a
+        // null price here.
+        $manualPriceRaw = trim((string) ($_POST['manual_price'] ?? ''));
+        $manualPrice = $manualPriceRaw !== '' && is_numeric($manualPriceRaw) ? (float) $manualPriceRaw : null;
+
         if ($targetBooking['agreed_cost'] !== null) {
             $newCost = (float) $targetBooking['agreed_cost'];
+        } elseif ($manualPrice !== null && $manualPrice > 0) {
+            // Emergency override for when Mapbox is genuinely down and pricing can't be
+            // computed automatically - an admin typing in a considered price is a deliberate
+            // human decision, not the system silently guessing off an approximate distance,
+            // so this doesn't reopen the no-haversine-fallback guarantee.
+            $newCost = $manualPrice;
         } else {
             try {
                 $distanceKm = pricing_distance_km(
@@ -189,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string) $user['role'],
             'booking',
             $bookingId,
-            ['rider_user_id' => $riderUserId, 'previous_rider_user_id' => $previousRiderId, 'amount' => $newCost]
+            ['rider_user_id' => $riderUserId, 'previous_rider_user_id' => $previousRiderId, 'amount' => $newCost, 'manual_price' => $manualPrice !== null && $manualPrice > 0]
         );
 
         flash('success', t('admin.rider_assigned'));
@@ -492,21 +502,19 @@ function admin_payment_status_badge_class(string $status): string {
                     <h3 class="h6 fw-bold mb-2"><?= e(empty($selectedBooking['rider_full_name']) ? t('admin.assign_rider_heading') : t('admin.reassign_rider_heading')) ?></h3>
                     <?php if ($selectedBooking['pickup_latitude'] === null || $selectedBooking['delivery_latitude'] === null): ?>
                         <div class="text-soft small"><?= e(t('admin.booking_missing_coordinates')) ?></div>
-                    <?php elseif ($noRouteFound): ?>
-                        <div class="text-soft small"><?= e(t('admin.no_route_found')) ?></div>
-                    <?php elseif ($pricingUnavailable): ?>
-                        <div class="text-soft small"><?= e(t('admin.pricing_unavailable')) ?></div>
                     <?php elseif (empty($eligibleRiders)): ?>
                         <div class="text-soft small"><?= e(t('admin.no_eligible_riders')) ?></div>
                     <?php else: ?>
                         <?php if ($selectedBooking['agreed_cost'] !== null): ?>
                             <div class="text-soft small mb-2"><?= e(t('admin.price_stays_note')) ?> ₦<?= number_format((float) $selectedBooking['agreed_cost'], 2) ?></div>
+                        <?php elseif ($noRouteFound || $pricingUnavailable): ?>
+                            <div class="text-soft small mb-2"><?= e($noRouteFound ? t('admin.no_route_found') : t('admin.pricing_unavailable')) ?> <?= e(t('admin.manual_price_hint')) ?></div>
                         <?php endif; ?>
                         <form method="post" class="row g-2 align-items-end">
                             <?= csrf_field() ?>
                             <input type="hidden" name="form_action" value="assign_rider">
                             <input type="hidden" name="booking_id" value="<?= (int) $selectedBooking['id'] ?>">
-                            <div class="col-md-8">
+                            <div class="col-md-<?= ($noRouteFound || $pricingUnavailable) && $selectedBooking['agreed_cost'] === null ? '5' : '8' ?>">
                                 <select class="form-select" name="rider_user_id" required>
                                     <option value=""><?= e(t('admin.select_rider_placeholder')) ?></option>
                                     <?php foreach ($eligibleRiders as $candidate): ?>
@@ -523,6 +531,11 @@ function admin_payment_status_badge_class(string $status): string {
                                     <?php endforeach; ?>
                                 </select>
                             </div>
+                            <?php if (($noRouteFound || $pricingUnavailable) && $selectedBooking['agreed_cost'] === null): ?>
+                                <div class="col-md-3">
+                                    <input class="form-control" type="number" step="0.01" min="0.01" name="manual_price" placeholder="<?= e(t('admin.manual_price_placeholder')) ?>" required>
+                                </div>
+                            <?php endif; ?>
                             <div class="col-md-4">
                                 <button class="btn btn-primary fw-bold w-100" type="submit"><?= e(empty($selectedBooking['rider_full_name']) ? t('admin.assign_rider_button') : t('admin.reassign_rider_button')) ?></button>
                             </div>

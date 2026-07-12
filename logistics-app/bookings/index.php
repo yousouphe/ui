@@ -459,13 +459,17 @@ $canCancel = $selectedBooking
     && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 0
     && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
 
+// Order details, pickup and delivery address, and vehicle type can only be changed before a
+// rider has accepted the job - 'matched' means a request is pending with a rider but they
+// haven't accepted yet, so it's still fair game. Once 'accepted' or later, the rider has
+// already committed to the trip as booked.
 $canEditDetails = $selectedBooking
-    && !in_array($selectedBooking['booking_status'], ['delivered', 'cancelled'], true)
+    && in_array($selectedBooking['booking_status'], ['draft', 'submitted', 'matched'], true)
     && (int)($selectedBooking['sender_handover_confirmed'] ?? 0) === 0
     && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
 
 $canChangeDelivery = $selectedBooking
-    && !in_array($selectedBooking['booking_status'], ['delivered', 'cancelled'], true)
+    && in_array($selectedBooking['booking_status'], ['draft', 'submitted', 'matched'], true)
     && ($selectedBooking['payment_status'] ?? 'unpaid') !== 'paid';
 
 $canRebook = $selectedBooking
@@ -813,9 +817,19 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
                     <input type="hidden" name="vehicle_type" id="selected_vehicle_type" value="">
                     <div id="vehicle_options_container">
-                        <div class="text-center py-4">
-                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                            <span class="ms-2 text-soft small"><?= e(t('wizard.vehicle.estimating')) ?></span>
+                        <?php foreach (['bike', 'car', 'van'] as $type): ?>
+                            <?php $vehicleIcon = $type === 'car' ? 'fa-car-side' : ($type === 'van' ? 'fa-truck-pickup' : 'fa-motorcycle'); ?>
+                            <button type="button" class="vehicle-option-card" data-vehicle-type="<?= e($type) ?>" aria-pressed="false">
+                                <div class="vehicle-option-icon"><i class="fa-solid <?= e($vehicleIcon) ?>"></i></div>
+                                <div class="vehicle-option-info">
+                                    <div class="fw-bold"><?= e(t('vehicle.' . $type)) ?></div>
+                                    <div class="text-soft small vehicle-option-meta"><?= e(t('wizard.vehicle.estimating')) ?></div>
+                                </div>
+                                <div class="vehicle-option-price">&mdash;</div>
+                            </button>
+                        <?php endforeach; ?>
+                        <div class="small text-soft mt-2" id="vehicle-pricing-status">
+                            <span class="spinner-border spinner-border-sm text-info me-2" role="status"></span><?= e(t('wizard.vehicle.estimating')) ?>
                         </div>
                     </div>
                     <div class="small text-danger mt-2 d-none" id="step4-error"><?= e(t('wizard.vehicle.required')) ?></div>
@@ -1370,6 +1384,7 @@ const I18N = <?= json_encode([
     'vehicleEstimating' => t('wizard.vehicle.estimating'),
     'vehicleUnavailable' => t('wizard.vehicle.unavailable'),
     'vehicleRetry' => t('wizard.vehicle.retry'),
+    'vehicleSelectAnyway' => t('wizard.vehicle.select_anyway'),
     'fallbackAllRiders' => t('match.fallback_all_riders'),
     'fallbackNoRidersCloseBy' => t('match.fallback_no_riders_close_by'),
     'fallbackNoRiders' => t('match.fallback_no_riders'),
@@ -1379,6 +1394,9 @@ const I18N = <?= json_encode([
     'fallbackPerformanceSuffix' => t('match.fallback_performance_suffix'),
     'fallbackEtaSuffix' => t('match.fallback_eta_suffix'),
     'fallbackAvgDeliverySuffix' => t('match.fallback_avg_delivery_suffix'),
+    'lastSeenNow' => t('match.last_seen_now'),
+    'lastSeenAgo' => t('match.last_seen_ago'),
+    'lastSeenNever' => t('match.last_seen_never'),
     'resumeAutoScan' => t('match.resume_auto_scan'),
     'sortLabel' => t('match.sort_label'),
     'sortScore' => t('match.sort_score'),
@@ -1468,6 +1486,8 @@ const workspaceState = {
     bookingMap: null,
     detailMap: null,
     routingControl: null,
+    routeDistanceKm: null,
+    routeDurationMinutes: null,
     trackingMarker: null,
     riderMarkers: {},
     knownRiderIds: new Set(),
@@ -1533,6 +1553,8 @@ function cleanupWorkspace() {
         try { workspaceState.routingControl.remove(); } catch (e) {}
         workspaceState.routingControl = null;
     }
+    workspaceState.routeDistanceKm = null;
+    workspaceState.routeDurationMinutes = null;
     if (workspaceState.bookingMap) {
         try { workspaceState.bookingMap.remove(); } catch (e) {}
         workspaceState.bookingMap = null;
@@ -1718,28 +1740,56 @@ function initSenderWorkspace() {
                 .replaceAll('"', '&quot;');
         }
 
-        // Price is locked in at submission based on whichever vehicle type the sender picks
-        // here - fetched fresh every time this step is entered so a rider request/admin
-        // assignment can never happen without a real, already-agreed price on the booking.
-        async function loadVehicleOptions() {
+        // Cards are always present in the DOM (rendered server-side) so the sender can pick a
+        // vehicle type even if this pricing preview fails - loadVehicleOptions() only fills in
+        // the meta/price text on top of them, it never controls whether they're selectable.
+        function bindVehicleSelection() {
             const container = root.querySelector('#vehicle_options_container');
             const submitBtn = root.querySelector('#submit-booking-btn');
             const selectedInput = root.querySelector('#selected_vehicle_type');
+            const stepError = root.querySelector('#step4-error');
+            if (!container || !submitBtn || !selectedInput) return;
+
+            container.querySelectorAll('.vehicle-option-card').forEach(card => {
+                card.addEventListener('click', function () {
+                    container.querySelectorAll('.vehicle-option-card').forEach(item => {
+                        item.classList.remove('selected');
+                        item.setAttribute('aria-pressed', 'false');
+                    });
+                    this.classList.add('selected');
+                    this.setAttribute('aria-pressed', 'true');
+                    selectedInput.value = this.dataset.vehicleType || '';
+                    stepError?.classList.add('d-none');
+                    submitBtn.disabled = selectedInput.value === '';
+                });
+            });
+        }
+        bindVehicleSelection();
+
+        // Price is locked in at submission based on whichever vehicle type the sender picks
+        // here - fetched fresh every time this step is entered so a rider request/admin
+        // assignment can never happen without a real, already-agreed price on the booking.
+        // Reuses the route the wizard map already drew (workspaceState.routeDistanceKm/
+        // routeDurationMinutes) instead of forcing a second, independent Mapbox call here.
+        async function loadVehicleOptions() {
+            const container = root.querySelector('#vehicle_options_container');
+            const pricingStatus = root.querySelector('#vehicle-pricing-status');
             if (!container) return;
 
-            submitBtn.disabled = true;
-            selectedInput.value = '';
-            container.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                    <span class="ms-2 text-soft small">${I18N.vehicleEstimating}</span>
-                </div>`;
+            container.querySelectorAll('.vehicle-option-meta').forEach(el => { el.textContent = I18N.vehicleEstimating; });
+            container.querySelectorAll('.vehicle-option-price').forEach(el => { el.innerHTML = '&mdash;'; });
+            if (pricingStatus) {
+                pricingStatus.className = 'small text-soft mt-2';
+                pricingStatus.innerHTML = `<span class="spinner-border spinner-border-sm text-info me-2" role="status"></span>${I18N.vehicleEstimating}`;
+            }
 
             const params = new URLSearchParams({
                 pickup_latitude: wizardForm.querySelector('#pickup_latitude')?.value || '',
                 pickup_longitude: wizardForm.querySelector('#pickup_longitude')?.value || '',
                 delivery_latitude: wizardForm.querySelector('#delivery_latitude')?.value || '',
                 delivery_longitude: wizardForm.querySelector('#delivery_longitude')?.value || '',
+                distance_km: workspaceState.routeDistanceKm ?? '',
+                duration_minutes: workspaceState.routeDurationMinutes ?? '',
             });
 
             try {
@@ -1749,34 +1799,39 @@ function initSenderWorkspace() {
                     throw new Error(result.message || I18N.vehicleUnavailable);
                 }
 
-                container.innerHTML = result.options.map(opt => `
-                    <div class="vehicle-option-card" data-vehicle-type="${opt.vehicle_type}">
-                        <div class="vehicle-option-icon"><i class="fa-solid ${wizardVehicleIcon(opt.vehicle_type)}"></i></div>
-                        <div class="vehicle-option-info">
-                            <div class="fw-bold">${wizardVehicleLabel(opt.vehicle_type)}</div>
-                            <div class="text-soft small">${opt.distance_km}km &middot; ~${opt.planned_duration_minutes} min</div>
-                        </div>
-                        <div class="vehicle-option-price">₦${Number(opt.total).toLocaleString()}</div>
-                    </div>
-                `).join('');
-
-                container.querySelectorAll('.vehicle-option-card').forEach(card => {
-                    card.addEventListener('click', function () {
-                        container.querySelectorAll('.vehicle-option-card').forEach(c => c.classList.remove('selected'));
-                        this.classList.add('selected');
-                        selectedInput.value = this.dataset.vehicleType;
-                        submitBtn.disabled = false;
-                    });
+                result.options.forEach(opt => {
+                    const card = container.querySelector(`.vehicle-option-card[data-vehicle-type="${CSS.escape(opt.vehicle_type)}"]`);
+                    if (!card) return;
+                    const meta = card.querySelector('.vehicle-option-meta');
+                    const price = card.querySelector('.vehicle-option-price');
+                    if (meta) meta.innerHTML = `${Number(opt.distance_km).toFixed(1)}km &middot; ~${Number(opt.planned_duration_minutes)} min`;
+                    if (price) price.textContent = `₦${Number(opt.total).toLocaleString()}`;
                 });
+
+                if (pricingStatus) {
+                    pricingStatus.className = 'd-none';
+                    pricingStatus.textContent = '';
+                }
             } catch (err) {
-                container.innerHTML = `
-                    <div class="text-center text-danger small py-3">
-                        ${wizardEscapeHtml(err.message || I18N.vehicleUnavailable)}
-                        <div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary" id="retry-vehicle-options">${I18N.vehicleRetry}</button></div>
-                    </div>`;
+                container.querySelectorAll('.vehicle-option-meta').forEach(el => { el.textContent = I18N.vehicleSelectAnyway; });
+                if (pricingStatus) {
+                    pricingStatus.className = 'small text-warning mt-2';
+                    pricingStatus.innerHTML = `${wizardEscapeHtml(err.message || I18N.vehicleUnavailable)} <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="retry-vehicle-options">${I18N.vehicleRetry}</button>`;
+                }
                 root.querySelector('#retry-vehicle-options')?.addEventListener('click', loadVehicleOptions);
             }
         }
+
+        wizardForm.addEventListener('submit', function (event) {
+            if (event.submitter?.name === 'save_draft') return;
+            const selectedInput = root.querySelector('#selected_vehicle_type');
+            const stepError = root.querySelector('#step4-error');
+            if (!selectedInput?.value) {
+                event.preventDefault();
+                stepError?.classList.remove('d-none');
+                goToStep(4);
+            }
+        });
     }
 
     const pickupAddress = root.querySelector('#pickup_address');
@@ -2014,6 +2069,8 @@ function initSenderWorkspace() {
 
             const km = (route.distanceMeters / 1000).toFixed(1);
             const mins = Math.round(route.durationSec / 60);
+            workspaceState.routeDistanceKm = route.distanceMeters / 1000;
+            workspaceState.routeDurationMinutes = route.durationSec / 60;
             if (routeSummary) routeSummary.textContent = I18N.routeSummary.replace(':km', km).replace(':mins', mins);
         }
 
@@ -2402,6 +2459,20 @@ function initSenderWorkspace() {
                 return `~${Number(ratio).toFixed(1)}x ${I18N.fallbackPerformanceSuffix}`;
             }
 
+            // Online/offline is no longer a filter for matching, but seeing how fresh a
+            // rider's last known location is still helps the sender judge how reachable they
+            // probably are right now.
+            function lastSeenText(secondsAgo) {
+                if (secondsAgo === null || secondsAgo === undefined) return I18N.lastSeenNever;
+                if (secondsAgo < 120) return I18N.lastSeenNow;
+                const mins = Math.round(secondsAgo / 60);
+                if (mins < 60) return I18N.lastSeenAgo.replace(':time', `${mins}m`);
+                const hours = Math.round(mins / 60);
+                if (hours < 24) return I18N.lastSeenAgo.replace(':time', `${hours}h`);
+                const days = Math.round(hours / 24);
+                return I18N.lastSeenAgo.replace(':time', `${days}d`);
+            }
+
             const RIDER_SORTERS = {
                 score: (a, b) => Number(b.score || 0) - Number(a.score || 0),
                 distance: (a, b) => (a.distance_km === null) - (b.distance_km === null) || (a.distance_km ?? 0) - (b.distance_km ?? 0),
@@ -2421,6 +2492,7 @@ function initSenderWorkspace() {
                             <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
                             <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
                             <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
+                            <div class="text-soft small">${lastSeenText(r.last_seen_seconds_ago)}</div>
                         </div>
                         <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
                     </div>

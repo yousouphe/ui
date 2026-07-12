@@ -189,6 +189,7 @@ return [
     'wizard.vehicle.unavailable' => 'Unable to calculate pricing right now. Please try again shortly.',
     'wizard.vehicle.retry' => 'Retry',
     'wizard.vehicle.required' => 'Please choose a vehicle type.',
+    'wizard.vehicle.select_anyway' => 'Select this vehicle to continue',
 
     // Sender booking detail page
     'sender.page_title' => 'Sender Hub | Aike',
@@ -329,6 +330,9 @@ return [
     'match.fallback_performance_suffix' => 'of planned time',
     'match.fallback_eta_suffix' => 'min ETA',
     'match.fallback_avg_delivery_suffix' => 'avg. delivery time',
+    'match.last_seen_now' => 'Online now',
+    'match.last_seen_ago' => 'Last seen :time ago',
+    'match.last_seen_never' => 'Never seen online',
     'match.resume_auto_scan' => 'Keep scanning automatically',
     'match.sort_label' => 'Sort by',
     'match.sort_score' => 'Best match',
@@ -778,6 +782,8 @@ return [
     'admin.rider_not_eligible' => 'That rider is no longer eligible or is already on another active delivery.',
     'admin.pricing_unavailable' => 'Unable to calculate pricing right now. Please try again shortly.',
     'admin.no_route_found' => 'No route could be found between the pickup and delivery locations. Please check the addresses.',
+    'admin.manual_price_hint' => 'You can still assign a rider by entering a price manually below.',
+    'admin.manual_price_placeholder' => 'Price (₦)',
     'admin.rider_assigned' => 'Rider assigned to booking.',
     'admin.price_stays_note' => 'Price stays fixed at',
 

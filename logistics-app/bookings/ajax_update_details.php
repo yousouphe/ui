@@ -19,11 +19,9 @@ if (!$booking) {
     exit;
 }
 
-if (
-    in_array($booking['booking_status'], ['delivered', 'cancelled'], true)
-    || (int) ($booking['sender_handover_confirmed'] ?? 0) === 1
-    || ($booking['payment_status'] ?? 'unpaid') === 'paid'
-) {
+// Order details can only change before a rider has accepted the job - 'matched' means a
+// request is pending with a rider but they haven't accepted yet, so it's still editable.
+if (!in_array($booking['booking_status'], ['draft', 'submitted', 'matched'], true)) {
     http_response_code(422);
     echo json_encode(['success' => false, 'message' => 'This booking can no longer be edited.']);
     exit;

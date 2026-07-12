@@ -1268,6 +1268,8 @@ const I18N = <?= json_encode([
     'callRiderOfflineNoPhone' => t('call.rider_offline_no_phone'),
     'callConnecting' => t('call.connecting'),
     'callRinging' => t('call.ringing'),
+    'notifBlockedButton' => t('push.blocked_button'),
+    'notifBlockedHint' => t('push.blocked_hint'),
     'presenceOnline' => t('chat.presence_online'),
     'presenceOffline' => t('chat.presence_offline'),
     'recordVoice' => t('chat.record_voice_label'),
@@ -3395,10 +3397,38 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
+function showNotifBlockedState(btn) {
+    btn.classList.remove('d-none', 'btn-outline-primary');
+    btn.classList.add('btn-outline-secondary');
+    btn.innerHTML = '<i class="fa-solid fa-bell-slash me-1"></i>' + I18N.notifBlockedButton;
+    btn.title = I18N.notifBlockedHint;
+    btn.onclick = function (e) {
+        e.preventDefault();
+        alert(I18N.notifBlockedHint);
+    };
+}
+
 function initPushNotifications() {
-    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
     const btn = document.getElementById('notif-enable-btn');
-    if (!vapidKey || !btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!btn) return;
+
+    const vapidKey = document.querySelector('meta[name="vapid-public-key"]');
+    if (!vapidKey) {
+        // Server hasn't generated/configured a VAPID key yet (see scripts/generate_vapid_keys.php) -
+        // nothing to subscribe to, so there's no useful button state to show.
+        console.info('Push notifications: no VAPID key configured on the server.');
+        return;
+    }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    // A browser that already denied the permission (e.g. from an earlier visit) will never
+    // show the native prompt again without the user manually resetting it in their browser's
+    // site settings - surface that explicitly instead of just leaving the button hidden with
+    // no explanation of why notifications "aren't working".
+    if (Notification.permission === 'denied') {
+        showNotifBlockedState(btn);
+        return;
+    }
 
     navigator.serviceWorker.register('<?= e(url_path('sw.js')) ?>').then(function (registration) {
         if (Notification.permission === 'granted') {
@@ -3410,6 +3440,8 @@ function initPushNotifications() {
                     if (permission === 'granted') {
                         subscribeToPush(registration, vapidKey.content);
                         btn.classList.add('d-none');
+                    } else if (permission === 'denied') {
+                        showNotifBlockedState(btn);
                     }
                 });
             });
@@ -3435,8 +3467,11 @@ function subscribeToPush(registration, vapidKeyB64) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-    initSenderWorkspace();
-    initPushNotifications();
+    // Any one of these throwing shouldn't take the other two down with it - a map/CDN
+    // failure inside the workspace setup, in particular, must never silently disable push
+    // notifications or back/forward navigation for the rest of the page's life.
+    try { initSenderWorkspace(); } catch (err) { console.error('initSenderWorkspace failed:', err); }
+    try { initPushNotifications(); } catch (err) { console.error('initPushNotifications failed:', err); }
 
     window.addEventListener('popstate', function () {
         ajaxLoadWorkspace(window.location.href, false);

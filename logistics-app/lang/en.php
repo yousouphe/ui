@@ -746,4 +746,6 @@ return [
 
     // Push notifications
     'push.enable_button' => 'Enable notifications',
+    'push.blocked_button' => 'Notifications blocked',
+    'push.blocked_hint' => 'Notifications are blocked in your browser for this site. Click the lock or info icon next to the address bar, allow Notifications, then reload this page.',
 ];

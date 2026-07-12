@@ -747,4 +747,6 @@ return [
 
     // Push notifications
     'push.enable_button' => 'Kunna sanarwa',
+    'push.blocked_button' => 'An toshe sanarwa',
+    'push.blocked_hint' => 'An toshe sanarwa a burauzarku don wannan shafin. Danna alamar kulle ko bayani kusa da adireshin, ku ba da izinin Sanarwa (Notifications), sannan ku sake loda wannan shafin.',
 ];

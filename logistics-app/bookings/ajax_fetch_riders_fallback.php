@@ -2,11 +2,12 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/mapbox.php';
 
 header('Content-Type: application/json');
 
 $bookingId = (int) ($_GET['booking_id'] ?? 0);
-$stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, vehicle_type, agreed_cost FROM bookings WHERE id = ? LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude, vehicle_type, agreed_cost FROM bookings WHERE id = ? LIMIT 1');
 $stmt->execute([$bookingId]);
 $booking = $stmt->fetch();
 $user = current_user();
@@ -26,6 +27,24 @@ if ((int) ($booking['sender_user_id'] ?? 0) !== (int) ($user['id'] ?? 0)) {
 $pickupLat = (float) $booking['pickup_latitude'];
 $pickupLng = (float) $booking['pickup_longitude'];
 $vehicleType = (string) ($booking['vehicle_type'] ?? '');
+
+// Defense in depth: the frontend shouldn't reach this endpoint at all while pricing is still
+// pending (see bookings/ajax_fetch_riders.php), but retry here too rather than showing a
+// rider list with no price on it - suggested_fee would be null/broken for every card.
+if ($booking['agreed_cost'] === null && $vehicleType !== '') {
+    try {
+        $metrics = pricing_route_metrics($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
+        $newCost = calculate_delivery_price($pdo, $metrics['distance_km'], $vehicleType)['total'];
+        $newPlannedMinutes = (int) round($metrics['duration_min']);
+        $stmt = $pdo->prepare('UPDATE bookings SET agreed_cost = ?, planned_duration_minutes = ? WHERE id = ?');
+        $stmt->execute([$newCost, $newPlannedMinutes, $bookingId]);
+        $booking['agreed_cost'] = $newCost;
+    } catch (RuntimeException $e) {
+        echo json_encode(['success' => true, 'pricing_pending' => true, 'riders' => [], 'max_orders' => RIDER_MAX_CONCURRENT_ORDERS]);
+        exit;
+    }
+}
+
 $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
 
 // Deliberately no availability_status/recency filter here - this is the fallback shown once
@@ -62,4 +81,4 @@ foreach ($riders as &$r) {
 }
 unset($r);
 
-echo json_encode(['success' => true, 'riders' => $riders, 'max_orders' => RIDER_MAX_CONCURRENT_ORDERS]);
+echo json_encode(['success' => true, 'pricing_pending' => false, 'riders' => $riders, 'max_orders' => RIDER_MAX_CONCURRENT_ORDERS]);

@@ -4,11 +4,13 @@ require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/push.php';
 require_once __DIR__ . '/../config/mapbox.php';
+require_once __DIR__ . '/../config/emails.php';
 
 $user = current_user();
 $errors = [];
 $success = flash('success');
 $error = flash('error');
+$warning = flash('warning');
 
 $requestedBookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
 $selectedBookingId = $requestedBookingId;
@@ -292,6 +294,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'planned_duration_minutes' => null,
     ];
 
+    // Only a genuinely unroutable address pair (NoRouteFoundException) blocks submission -
+    // that's a problem with the input the sender can actually fix (typo'd address, a location
+    // Mapbox can't reach a road from). A transient/config failure (Mapbox unreachable, token
+    // misconfigured) is OUR problem, not theirs: the booking still gets created with no price
+    // yet, admins are notified to step in, and every rider-search poll retries pricing on its
+    // own until it succeeds - the sender is never simply stuck with no path forward.
+    $pricingPending = false;
     if (!$errors && !$saveAsDraft) {
         // Recompute server-side rather than trusting whatever price the sender's browser
         // showed on the vehicle-selection step - the estimate endpoint is unauthenticated
@@ -308,7 +317,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (NoRouteFoundException $e) {
             $errors['general'] = 'No route could be found between these locations. Please check the pickup and delivery addresses.';
         } catch (RuntimeException $e) {
-            $errors['general'] = 'Unable to calculate pricing right now. Please try again shortly.';
+            $pricingPending = true;
         }
     }
 
@@ -342,6 +351,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($saveAsDraft) {
                 flash('success', 'Booking saved as draft.');
                 redirect_to('bookings/index.php');
+            }
+
+            if ($pricingPending) {
+                notify_admins(
+                    $pdo,
+                    'Booking needs manual pricing - ' . $payload['booking_code'],
+                    '<p>Booking <strong>' . e($payload['booking_code']) . '</strong> was submitted but automatic pricing failed (Mapbox unreachable or misconfigured).</p>'
+                    . '<p>It has no rider match yet - please assign a rider from the admin bookings page once pricing can be computed, or check the Mapbox configuration.</p>'
+                );
+                flash('warning', "We're having trouble calculating your delivery price right now. Your booking has been submitted and our team has been notified - pricing and rider matching will continue automatically as soon as it's resolved.");
+                redirect_to('bookings/index.php?booking_id=' . $selectedBookingId);
             }
 
             flash('success', 'Booking submitted successfully. Choose a rider below.');
@@ -642,6 +662,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
         data-delivery-lng="<?= e((string) $selectedDeliveryLng) ?>"
     >
         <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
+        <?php if ($warning): ?><div class="alert alert-warning"><?= e($warning) ?></div><?php endif; ?>
         <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
         <?php if (!empty($errors['general'])): ?><div class="alert alert-danger"><?= e($errors['general']) ?></div><?php endif; ?>
         <?php if ($blockingBookingId > 0): ?>
@@ -779,8 +800,10 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
                     <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mt-4">
                         <button class="btn btn-outline-secondary" type="button" data-wizard-back="2"><i class="fa-solid fa-arrow-left me-2"></i><?= e(t('wizard.back')) ?></button>
-                        <button class="btn btn-outline-secondary flex-fill" type="submit" name="save_draft"><?= e(t('wizard.save_draft')) ?></button>
-                        <button class="btn btn-primary" type="button" data-wizard-next="4"><?= e(t('wizard.next')) ?><i class="fa-solid fa-arrow-right ms-2"></i></button>
+                        <div class="d-flex flex-column flex-sm-row gap-2">
+                            <button class="btn btn-outline-secondary" type="submit" name="save_draft"><?= e(t('wizard.save_draft')) ?></button>
+                            <button class="btn btn-primary" type="button" data-wizard-next="4"><?= e(t('wizard.next')) ?><i class="fa-solid fa-arrow-right ms-2"></i></button>
+                        </div>
                     </div>
                 </div>
 
@@ -1363,6 +1386,8 @@ const I18N = <?= json_encode([
     'sortRating' => t('match.sort_rating'),
     'sortAvgTime' => t('match.sort_avg_time'),
     'requestSent' => t('match.request_sent'),
+    'pricingPendingTitle' => t('match.pricing_pending_title'),
+    'pricingPendingSubtitle' => t('match.pricing_pending_subtitle'),
 ], JSON_UNESCAPED_UNICODE) ?>;
 
 // STUN alone only works when both sides can find a direct path (same network, lenient
@@ -2486,6 +2511,18 @@ function initSenderWorkspace() {
                     const response = await fetch(`bookings/ajax_fetch_riders_fallback.php?booking_id=${selectedBookingId}`);
                     const result = await response.json();
                     if (!response.ok || !result.success) throw new Error('fallback fetch failed');
+                    if (result.pricing_pending) {
+                        // Rare race: pricing resolved briefly then failed again between polls.
+                        // A rider list with no price would be broken - fall back to the normal
+                        // poll loop, which already knows how to show the pricing-pending state.
+                        workspaceState.fallbackMode = false;
+                        workspaceState.scanStartedAt = Date.now();
+                        if (!workspaceState.ridersInterval) {
+                            workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
+                        }
+                        updateRiders();
+                        return;
+                    }
                     renderFallbackList(result.riders, result.max_orders);
                 } catch (err) {
                     console.error('Fallback rider fetch failed:', err);
@@ -2504,11 +2541,30 @@ function initSenderWorkspace() {
 
                 try {
                     const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`);
-                    const riders = await response.json();
+                    const result = await response.json();
+                    const riders = result.riders || [];
 
                     const listContainer = root.querySelector('#rider-list-container');
                     if (!listContainer) {
                         stopRiderSearch();
+                        return;
+                    }
+
+                    // Pricing failed at booking creation (Mapbox was unreachable) and every
+                    // poll here has been retrying it since - it's still not resolved. This is
+                    // distinct from "no riders yet": there's no price to match a rider against,
+                    // so the fallback picker (which needs a price on every card) would be
+                    // broken here. Admins were already notified when the booking was created;
+                    // just keep waiting and let the next poll try again.
+                    if (result.pricing_pending) {
+                        if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
+                        if (floatTitle) floatTitle.textContent = I18N.pricingPendingTitle;
+                        if (floatSubtitle) floatSubtitle.textContent = I18N.pricingPendingSubtitle;
+                        listContainer.innerHTML = `
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                                <span class="ms-2 text-soft small">${I18N.pricingPendingSubtitle}</span>
+                            </div>`;
                         return;
                     }
 

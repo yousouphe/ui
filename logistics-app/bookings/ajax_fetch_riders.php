@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/mapbox.php';
 
 header('Content-Type: application/json');
 
@@ -26,6 +27,28 @@ if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0)) {
 $pickupLat = (float)$booking['pickup_latitude'];
 $pickupLng = (float)$booking['pickup_longitude'];
 $vehicleType = (string) ($booking['vehicle_type'] ?? '');
+
+// A booking created while Mapbox was unreachable has no price yet (see bookings/index.php's
+// $pricingPending path) - every poll retries pricing here rather than leaving the sender
+// stuck, so the moment Mapbox recovers, matching picks up automatically with no action
+// needed from the sender or an admin. A genuinely unroutable address pair (NoRouteFoundException)
+// is left alone here too - deliberately not surfaced as a hard error on every single poll,
+// since that would flood the sender with retries of a call that will never succeed; an admin
+// can already see the awaiting-price state and step in.
+if ($booking['agreed_cost'] === null && $vehicleType !== '') {
+    try {
+        $metrics = pricing_route_metrics($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
+        $newCost = calculate_delivery_price($pdo, $metrics['distance_km'], $vehicleType)['total'];
+        $newPlannedMinutes = (int) round($metrics['duration_min']);
+        $stmt = $pdo->prepare('UPDATE bookings SET agreed_cost = ?, planned_duration_minutes = ? WHERE id = ?');
+        $stmt->execute([$newCost, $newPlannedMinutes, $bookingId]);
+        $booking['agreed_cost'] = $newCost;
+    } catch (RuntimeException $e) {
+        echo json_encode(['pricing_pending' => true, 'riders' => []]);
+        exit;
+    }
+}
+
 $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
 
 // Only riders of the vehicle type the sender already chose and priced against, with room
@@ -65,4 +88,4 @@ unset($r);
 $etag = sha1(json_encode(array_map(fn($r) => [$r['id'], $r['last_latitude'], $r['last_longitude']], $riders)));
 response_cache_headers($etag, 5);
 
-echo json_encode($riders);
+echo json_encode(['pricing_pending' => false, 'riders' => $riders]);

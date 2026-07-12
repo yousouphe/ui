@@ -337,6 +337,8 @@ return [
     'match.sort_rating' => 'Kimantawa',
     'match.sort_avg_time' => 'Matsakaicin lokacin isarwa',
     'match.request_sent' => 'An aika buƙata',
+    'match.pricing_pending_title' => 'Ana ƙarasa farashin delivery',
+    'match.pricing_pending_subtitle' => 'Muna fuskantar matsala wajen lissafin farashi a yanzu - an sanar da tawagarmu kuma wannan zai ci gaba kai tsaye da zarar an warware matsalar.',
 
     // Map
     'map.tap_to_set' => 'Danna kan taswira don saita',

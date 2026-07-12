@@ -336,6 +336,8 @@ return [
     'match.sort_rating' => 'Rating',
     'match.sort_avg_time' => 'Avg. delivery time',
     'match.request_sent' => 'Request sent',
+    'match.pricing_pending_title' => 'Finalizing your delivery price',
+    'match.pricing_pending_subtitle' => "We're having trouble calculating pricing right now - our team has been notified and this will continue automatically once it's resolved.",
 
     // Map
     'map.tap_to_set' => 'Tap the map to set',

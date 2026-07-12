@@ -31,7 +31,10 @@ This package extends the flow after booking creation.
 
 ## Setup
 1. Import `sql/module2_schema.sql`
-2. Update `config/env.php`
+2. Copy `config/env.example.php` to `config/env.php` and fill in real credentials.
+   `config/env.php` is gitignored - it will never be committed, and a `git pull` will
+   never overwrite whatever real values you set there, so you only need to fill it in once
+   per environment.
 3. Serve with PHP
 
 ## Notes

@@ -16,9 +16,10 @@ return [
     // Restrict it to your domain(s) in the Mapbox account dashboard for defense in depth.
     'mapbox_token' => 'REDACTED_MAPBOX_PUBLIC_TOKEN',
     // SECRET Mapbox token (sk.*) - server-side use only, never send this to the browser.
-    // Wired into config/mapbox.php's road_distance_km() for pricing (see
-    // sql/module13_pricing_settings_migration.sql) - falls back to straight-line distance
-    // if this is left REDACTED or the Directions API is unreachable.
+    // Wired into config/mapbox.php's pricing_distance_km() for pricing (see
+    // sql/module13_pricing_settings_migration.sql) - required for pricing to work at all;
+    // if this is left REDACTED or the Directions API is unreachable, pricing throws instead
+    // of falling back to a straight-line guess (no haversine fallback in the billing path).
     'mapbox_secret_token' => 'REDACTED_MAPBOX_SECRET_TOKEN',
     // SMTP credentials for transactional email (registration, receipts, password reset).
     'smtp_host' => 'REDACTED_SMTP_HOST',

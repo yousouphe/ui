@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/mapbox.php';
 
 header('Content-Type: application/json');
 
@@ -45,20 +46,13 @@ $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
 
 $riders = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
-function haversine_php($lat1, $lon1, $lat2, $lon2) {
-    $earthRadius = 6371;
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-    $a = sin($dLat/2)**2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon/2)**2;
-    return $earthRadius * (2 * atan2(sqrt($a), sqrt(1-$a)));
-}
-
-$delDist = haversine_php($pickupLat, $pickupLng, (float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']);
+// Real road distance where available (falls back to haversine if Mapbox is unreachable/
+// unconfigured) - this is what the per-rider suggested fare is based on, not the straight-
+// line distance used just above for sorting nearby riders by proximity.
+$delDist = pricing_distance_km($pickupLat, $pickupLng, (float)$booking['delivery_latitude'], (float)$booking['delivery_longitude']);
 
 foreach($riders as &$r) {
-    $base = ($delDist * 400) + 1500;
-    if ($r['vehicle_type'] === 'car') $base *= 1.5;
-    $r['suggested_fee'] = max(1500, round($base, -2));
+    $r['suggested_fee'] = calculate_delivery_price($pdo, $delDist, (string) $r['vehicle_type'])['total'];
 }
 unset($r);
 

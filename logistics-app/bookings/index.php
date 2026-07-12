@@ -461,6 +461,9 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <?php if (google_maps_configured()): ?>
+        <script src="https://maps.googleapis.com/maps/api/js?key=<?= e(google_maps_api_key()) ?>&libraries=places" defer></script>
+    <?php endif; ?>
     <style>
         body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:100vh;color:#0f2c44}
         .navx{background:rgba(255,255,255,.85);border-bottom:1px solid rgba(15,42,68,.10)}
@@ -577,7 +580,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
-            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-secondary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell"></i></button>
+            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
             <div class="small">
@@ -640,7 +643,6 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                 <input class="form-control" id="pickup_address" name="pickup_address" value="<?= e(old('pickup_address')) ?>" autocomplete="off" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
                                 <button class="btn btn-outline-secondary" type="button" id="use_current_pickup" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
-                            <div class="address-suggestions" id="pickup_suggestions"></div>
                         </div>
                         <div class="small mt-2">
                             <a href="#" class="link-info text-decoration-none map-pick-link" data-target="pickup"><i class="fa-solid fa-map-location-dot me-1"></i><?= e(t('wizard.pick_on_map')) ?></a>
@@ -657,7 +659,6 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                 <input class="form-control" id="delivery_address" name="delivery_address" value="<?= e(old('delivery_address')) ?>" autocomplete="off" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
                                 <button class="btn btn-outline-secondary" type="button" id="use_current_delivery" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                             </div>
-                            <div class="address-suggestions" id="delivery_suggestions"></div>
                         </div>
                         <div class="small mt-2">
                             <a href="#" class="link-info text-decoration-none map-pick-link" data-target="delivery"><i class="fa-solid fa-map-location-dot me-1"></i><?= e(t('wizard.pick_on_map')) ?></a>
@@ -1108,8 +1109,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
                                     <input class="form-control" id="edit_delivery_address" name="delivery_address" autocomplete="off" value="<?= e($selectedBooking['delivery_address']) ?>" placeholder="<?= e(t('wizard.address_placeholder')) ?>">
                                     <button class="btn btn-outline-secondary" type="button" id="use_current_edit_delivery" title="<?= e(t('wizard.use_current_location')) ?>"><i class="fa-solid fa-location-crosshairs"></i></button>
                                 </div>
-                                <div class="address-suggestions" id="edit_delivery_suggestions"></div>
                             </div>
+                            <a href="#" class="link-info text-decoration-none small map-pick-link" id="edit_delivery_map_pick"><i class="fa-solid fa-map-location-dot me-1"></i><?= e(t('wizard.pick_on_map')) ?></a>
                             <input type="hidden" id="edit_delivery_latitude" name="delivery_latitude" value="<?= e((string) $selectedDeliveryLat) ?>">
                             <input type="hidden" id="edit_delivery_longitude" name="delivery_longitude" value="<?= e((string) $selectedDeliveryLng) ?>">
                             <div class="small text-danger mt-2 d-none" id="change-delivery-error"></div>
@@ -1123,6 +1124,26 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
             </div>
         </div>
         <?php endif; ?>
+        <?php endif; ?>
+
+        <?php if (google_maps_configured()): ?>
+        <div class="modal fade" id="mapPickerModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content bg-white text-dark border-0 shadow-lg">
+                    <div class="modal-header border-bottom">
+                        <h5 class="modal-title"><?= e(t('wizard.pick_on_map')) ?></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-0">
+                        <div id="google-map-picker" style="height:420px;width:100%"></div>
+                    </div>
+                    <div class="modal-footer border-top">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= e(t('common.cancel')) ?></button>
+                        <button type="button" class="btn btn-primary fw-bold" id="map-picker-confirm-btn"><?= e(t('wizard.use_this_location')) ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <?php endif; ?>
 
         <?php if ($canChat): ?>
@@ -1193,6 +1214,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <script>
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
+const GOOGLE_MAPS_CONFIGURED = <?= google_maps_configured() ? 'true' : 'false' ?>;
 
 const STATUS_LABELS = <?= json_encode([
     'draft' => t('status.draft'),
@@ -1306,44 +1328,6 @@ async function fetchMapboxRoute(points) {
     }
 }
 
-const NIGERIA_BBOX = '2.6,4.2,14.7,14.0';
-const ADDRESS_SEARCH_RADIUS_KM = 30;
-let cachedSearchOrigin;
-
-function getSearchOrigin() {
-    if (cachedSearchOrigin !== undefined) return Promise.resolve(cachedSearchOrigin);
-    if (!navigator.geolocation) {
-        cachedSearchOrigin = null;
-        return Promise.resolve(null);
-    }
-    return new Promise((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                cachedSearchOrigin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                resolve(cachedSearchOrigin);
-            },
-            () => {
-                cachedSearchOrigin = null;
-                resolve(null);
-            },
-            { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
-        );
-    });
-}
-
-function bboxFromCenter(lat, lng, radiusKm) {
-    const latDelta = radiusKm / 111;
-    const lngDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
-    return `${(lng - lngDelta).toFixed(5)},${(lat - latDelta).toFixed(5)},${(lng + lngDelta).toFixed(5)},${(lat + latDelta).toFixed(5)}`;
-}
-
-async function buildGeocodeSearchUrl(query) {
-    const origin = await getSearchOrigin();
-    const bbox = origin ? bboxFromCenter(origin.lat, origin.lng, ADDRESS_SEARCH_RADIUS_KM) : NIGERIA_BBOX;
-    const proximityParam = origin ? `&proximity=${origin.lng},${origin.lat}` : '';
-    const types = 'address,place,poi,neighborhood,locality,district,region';
-    return `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_TOKEN}&country=ng&autocomplete=true&limit=10&language=en&types=${types}&bbox=${bbox}${proximityParam}`;
-}
 const workspaceState = {
     bookingMap: null,
     detailMap: null,
@@ -1468,12 +1452,52 @@ function initSenderWorkspace() {
     const root = document.getElementById('sender-workspace-content');
     if (!root) return;
 
-    // Kick off (and cache) the geolocation lookup used to scope address search results as soon
-    // as the workspace loads, rather than waiting for the user's first keystroke - avoids the
-    // search feeling laggy while the browser's permission prompt is pending.
-    if (root.querySelector('#pickup_address') || root.querySelector('#edit_delivery_address')) {
-        getSearchOrigin();
+    // Shared modal-based location picker (used by the change-delivery-address flow, which
+    // has no persistent in-page map of its own to pick a pin on). Re-bound on every
+    // workspace load since the modal markup itself is inside #sender-workspace-content and
+    // gets replaced along with everything else.
+    let mapPickerMap = null;
+    let mapPickerMarker = null;
+    let mapPickerResolve = null;
+
+    function openGoogleMapPicker(initialLat, initialLng) {
+        return new Promise((resolve) => {
+            const modalEl = root.querySelector('#mapPickerModal');
+            if (!modalEl || !window.bootstrap || !window.google?.maps) {
+                resolve(null);
+                return;
+            }
+            mapPickerResolve = resolve;
+            const onShown = function () {
+                modalEl.removeEventListener('shown.bs.modal', onShown);
+                const center = { lat: initialLat || 9.0820, lng: initialLng || 8.6753 };
+                const pickerEl = root.querySelector('#google-map-picker');
+                if (!mapPickerMap) {
+                    mapPickerMap = new google.maps.Map(pickerEl, { center, zoom: initialLat ? 15 : 6, streetViewControl: false, mapTypeControl: false });
+                    mapPickerMarker = new google.maps.Marker({ position: center, map: mapPickerMap, draggable: true });
+                    mapPickerMap.addListener('click', (e) => mapPickerMarker.setPosition(e.latLng));
+                } else {
+                    mapPickerMap.setCenter(center);
+                    mapPickerMap.setZoom(initialLat ? 15 : 6);
+                    mapPickerMarker.setPosition(center);
+                }
+                google.maps.event.trigger(mapPickerMap, 'resize');
+            };
+            modalEl.addEventListener('shown.bs.modal', onShown);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
     }
+
+    root.querySelector('#map-picker-confirm-btn')?.addEventListener('click', function () {
+        const modalEl = root.querySelector('#mapPickerModal');
+        if (mapPickerResolve && mapPickerMarker) {
+            const pos = mapPickerMarker.getPosition();
+            const resolve = mapPickerResolve;
+            mapPickerResolve = null;
+            resolve({ lat: pos.lat(), lng: pos.lng() });
+        }
+        if (modalEl && window.bootstrap) bootstrap.Modal.getInstance(modalEl)?.hide();
+    });
 
     const selectedBookingId = parseInt(root.dataset.selectedBookingId || '0', 10);
     const selectedBookingStatus = root.dataset.selectedBookingStatus || '';
@@ -1531,11 +1555,9 @@ function initSenderWorkspace() {
     const pickupAddress = root.querySelector('#pickup_address');
     const pickupLat = root.querySelector('#pickup_latitude');
     const pickupLng = root.querySelector('#pickup_longitude');
-    const pickupSuggestions = root.querySelector('#pickup_suggestions');
     const deliveryAddress = root.querySelector('#delivery_address');
     const deliveryLat = root.querySelector('#delivery_latitude');
     const deliveryLng = root.querySelector('#delivery_longitude');
-    const deliverySuggestions = root.querySelector('#delivery_suggestions');
     const modeLabel = root.querySelector('#map_mode_label');
     const bookingMapEl = root.querySelector('#booking_map');
     const routeMapCard = root.querySelector('#route_map_card');
@@ -1553,20 +1575,79 @@ function initSenderWorkspace() {
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
     });
 
-    if (bookingMapEl) {
+    // Shared with both the wizard's in-page map and the change-delivery-address modal's
+    // picker, so these live at the top level rather than inside the bookingMapEl-gated
+    // block below (the wizard's #booking_map and the change-delivery form never coexist
+    // in the DOM - only one of the two workspace views renders at a time).
+    function reverseGeocode(lat, lng, targetInput) {
+        if (!targetInput) return Promise.resolve();
+        targetInput.value = I18N.locatingAddress;
+        return new Promise((resolve) => {
+            if (!window.google?.maps) {
+                targetInput.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                targetInput.classList.add('location-confirmed');
+                resolve();
+                return;
+            }
+            new google.maps.Geocoder().geocode({ location: { lat, lng } }, (results, status) => {
+                targetInput.value = (status === 'OK' && results && results[0])
+                    ? results[0].formatted_address
+                    : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                targetInput.classList.add('location-confirmed');
+                resolve();
+            });
+        });
+    }
+
+    // Google's Autocomplete widget renders and manages its own suggestion dropdown, so
+    // unlike the old Mapbox-geocoding integration this needs no custom list-rendering,
+    // debouncing, or keyboard-navigation code of its own.
+    function attachAutocomplete(inputEl, latEl, lngEl, onSelected) {
+        if (!inputEl || !window.google?.maps?.places) return;
+        inputEl.addEventListener('input', function () {
+            inputEl.classList.remove('location-confirmed');
+            if (latEl) latEl.value = '';
+            if (lngEl) lngEl.value = '';
+        });
+        const autocomplete = new google.maps.places.Autocomplete(inputEl, {
+            componentRestrictions: { country: 'ng' },
+            fields: ['formatted_address', 'geometry', 'name'],
+        });
+        autocomplete.addListener('place_changed', function () {
+            const place = autocomplete.getPlace();
+            if (!place.geometry || !place.geometry.location) return;
+            const lat = place.geometry.location.lat();
+            const lng = place.geometry.location.lng();
+            inputEl.value = place.formatted_address || place.name || inputEl.value;
+            inputEl.classList.add('location-confirmed');
+            if (latEl) latEl.value = lat.toFixed(7);
+            if (lngEl) lngEl.value = lng.toFixed(7);
+            if (onSelected) onSelected(lat, lng);
+        });
+    }
+
+    if (bookingMapEl && GOOGLE_MAPS_CONFIGURED) {
         function ensureBookingMap() {
             if (workspaceState.bookingMap) return workspaceState.bookingMap;
-            workspaceState.bookingMap = L.map(bookingMapEl, { tap: false }).setView([
-                parseFloat(pickupLat?.value) || 9.0820,
-                parseFloat(pickupLng?.value) || 8.6753
-            ], 6);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '© OpenStreetMap'
-            }).addTo(workspaceState.bookingMap);
-            workspaceState.bookingMap.on('click', async function (e) {
+            workspaceState.bookingMap = new google.maps.Map(bookingMapEl, {
+                center: {
+                    lat: parseFloat(pickupLat?.value) || 9.0820,
+                    lng: parseFloat(pickupLng?.value) || 8.6753
+                },
+                zoom: 6,
+                streetViewControl: false,
+                mapTypeControl: false,
+            });
+            workspaceState.directionsService = new google.maps.DirectionsService();
+            workspaceState.routingControl = new google.maps.DirectionsRenderer({
+                map: workspaceState.bookingMap,
+                suppressMarkers: true,
+                polylineOptions: { strokeColor: '#38bdf8', strokeOpacity: 0.85, strokeWeight: 5 },
+            });
+            workspaceState.bookingMap.addListener('click', async function (e) {
                 if (!mapMode) return;
-                const { lat, lng } = e.latlng;
+                const lat = e.latLng.lat();
+                const lng = e.latLng.lng();
                 updateFormMarker(mapMode, lat, lng);
                 await reverseGeocode(lat, lng, mapMode === 'pickup' ? pickupAddress : deliveryAddress);
             });
@@ -1576,7 +1657,7 @@ function initSenderWorkspace() {
         function revealMap() {
             if (routeMapCard) routeMapCard.style.display = '';
             const map = ensureBookingMap();
-            setTimeout(() => map.invalidateSize(), 150);
+            setTimeout(() => google.maps.event.trigger(map, 'resize'), 150);
             return map;
         }
 
@@ -1591,20 +1672,6 @@ function initSenderWorkspace() {
             bookingMapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
-        async function reverseGeocode(lat, lng, targetInput) {
-            if (!targetInput) return;
-            targetInput.value = I18N.locatingAddress;
-            try {
-                const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
-                const data = await res.json();
-                const place = data.features && data.features[0];
-                targetInput.value = place ? place.place_name : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-            } catch (e) {
-                targetInput.value = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-            }
-            targetInput.classList.add('location-confirmed');
-        }
-
         function maybeRevealForBothPoints() {
             if (pickupLat?.value && pickupLng?.value && deliveryLat?.value && deliveryLng?.value) {
                 revealMap();
@@ -1615,155 +1682,57 @@ function initSenderWorkspace() {
         function updateFormMarker(type, lat, lng) {
             const map = ensureBookingMap();
             if (type === 'pickup') {
-                if (pickupMarker) map.removeLayer(pickupMarker);
-                pickupMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(I18N.pickupPin).openPopup();
+                if (pickupMarker) pickupMarker.setMap(null);
+                pickupMarker = new google.maps.Marker({ position: { lat, lng }, map, draggable: true, label: 'P', title: I18N.pickupPin });
                 if (pickupLat) pickupLat.value = lat.toFixed(7);
                 if (pickupLng) pickupLng.value = lng.toFixed(7);
-                pickupMarker.on('dragend', async (e) => {
-                    const p = e.target.getLatLng();
-                    updateFormMarker('pickup', p.lat, p.lng);
-                    await reverseGeocode(p.lat, p.lng, pickupAddress);
+                pickupMarker.addListener('dragend', async (e) => {
+                    const p = e.latLng;
+                    updateFormMarker('pickup', p.lat(), p.lng());
+                    await reverseGeocode(p.lat(), p.lng(), pickupAddress);
                 });
             } else {
-                if (deliveryMarker) map.removeLayer(deliveryMarker);
-                deliveryMarker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(I18N.deliveryPin).openPopup();
+                if (deliveryMarker) deliveryMarker.setMap(null);
+                deliveryMarker = new google.maps.Marker({ position: { lat, lng }, map, draggable: true, label: 'D', title: I18N.deliveryPin });
                 if (deliveryLat) deliveryLat.value = lat.toFixed(7);
                 if (deliveryLng) deliveryLng.value = lng.toFixed(7);
-                deliveryMarker.on('dragend', async (e) => {
-                    const p = e.target.getLatLng();
-                    updateFormMarker('delivery', p.lat, p.lng);
-                    await reverseGeocode(p.lat, p.lng, deliveryAddress);
+                deliveryMarker.addListener('dragend', async (e) => {
+                    const p = e.latLng;
+                    updateFormMarker('delivery', p.lat(), p.lng());
+                    await reverseGeocode(p.lat(), p.lng(), deliveryAddress);
                 });
             }
+            map.setCenter({ lat, lng });
+            if (map.getZoom() < 14) map.setZoom(14);
             maybeRevealForBothPoints();
         }
 
-        async function drawRoutePreview() {
+        function drawRoutePreview() {
             const map = workspaceState.bookingMap;
-            if (!map || !pickupLat?.value || !deliveryLat?.value) return;
-            const from = [parseFloat(pickupLat.value), parseFloat(pickupLng.value)];
-            const to = [parseFloat(deliveryLat.value), parseFloat(deliveryLng.value)];
-            if (bookingRoutingControl) {
-                bookingRoutingControl.remove();
-                bookingRoutingControl = null;
-            }
+            if (!map || !workspaceState.directionsService || !pickupLat?.value || !deliveryLat?.value) return;
             if (routeSummary) routeSummary.textContent = I18N.calculatingRoute;
 
-            const route = await fetchMapboxRoute([from, to]);
-            if (!route) {
-                if (routeSummary) routeSummary.textContent = '';
-                return;
-            }
-
-            bookingRoutingControl = L.polyline(route.latlngs, {
-                color: '#38bdf8', opacity: 0.85, weight: 5
-            }).addTo(map);
-            map.fitBounds(bookingRoutingControl.getBounds(), { padding: [40, 40] });
-
-            const km = (route.distanceMeters / 1000).toFixed(1);
-            const mins = Math.round(route.durationSec / 60);
-            if (routeSummary) routeSummary.textContent = I18N.routeSummary.replace(':km', km).replace(':mins', mins);
-        }
-
-        function renderSuggestions(container, items, onPick) {
-            if (!container) return;
-            if (!items.length) {
-                container.innerHTML = '<div class="address-suggestion-empty">' + I18N.noMatchingAddress + '</div>';
-                container.classList.add('show');
-                return;
-            }
-            container.innerHTML = items.map((item, idx) => `
-                <div class="address-suggestion-item" data-index="${idx}">
-                    <i class="fa-solid fa-location-dot"></i>
-                    <div>
-                        <div class="main-text">${item.text}</div>
-                        <div class="sub-text">${item.place_name}</div>
-                    </div>
-                </div>
-            `).join('');
-            container.classList.add('show');
-            container.querySelectorAll('.address-suggestion-item').forEach((el, idx) => {
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    onPick(items[idx]);
-                    container.classList.remove('show');
-                });
-            });
-        }
-
-        function attachAutocomplete(inputEl, suggestionsEl, targetType) {
-            if (!inputEl || !suggestionsEl) return;
-            let debounceTimer = null;
-            let abortController = null;
-
-            inputEl.addEventListener('input', function () {
-                inputEl.classList.remove('location-confirmed');
-                if (targetType === 'pickup') { if (pickupLat) pickupLat.value = ''; if (pickupLng) pickupLng.value = ''; }
-                else { if (deliveryLat) deliveryLat.value = ''; if (deliveryLng) deliveryLng.value = ''; }
-
-                const query = inputEl.value.trim();
-                if (debounceTimer) clearTimeout(debounceTimer);
-                if (query.length < 3) {
-                    suggestionsEl.classList.remove('show');
+            workspaceState.directionsService.route({
+                origin: { lat: parseFloat(pickupLat.value), lng: parseFloat(pickupLng.value) },
+                destination: { lat: parseFloat(deliveryLat.value), lng: parseFloat(deliveryLng.value) },
+                travelMode: google.maps.TravelMode.DRIVING,
+            }, (result, status) => {
+                if (status !== 'OK' || !result.routes[0]) {
+                    if (routeSummary) routeSummary.textContent = '';
                     return;
                 }
-                debounceTimer = setTimeout(async () => {
-                    if (abortController) abortController.abort();
-                    abortController = new AbortController();
-                    try {
-                        const url = await buildGeocodeSearchUrl(query);
-                        const res = await fetch(url, { signal: abortController.signal });
-                        const data = await res.json();
-                        const items = (data.features || []).map(f => ({
-                            text: f.text,
-                            place_name: f.place_name,
-                            lat: f.center[1],
-                            lng: f.center[0]
-                        }));
-                        renderSuggestions(suggestionsEl, items, (item) => {
-                            inputEl.value = item.place_name;
-                            inputEl.classList.add('location-confirmed');
-                            updateFormMarker(targetType, item.lat, item.lng);
-                        });
-                    } catch (e) {
-                        if (e.name !== 'AbortError') suggestionsEl.classList.remove('show');
-                    }
-                }, 300);
-            });
-
-            inputEl.addEventListener('blur', function () {
-                setTimeout(() => suggestionsEl.classList.remove('show'), 150);
-            });
-
-            inputEl.addEventListener('keydown', function (e) {
-                const items = Array.from(suggestionsEl.querySelectorAll('.address-suggestion-item'));
-                if (!items.length || !suggestionsEl.classList.contains('show')) return;
-                let activeIdx = items.findIndex(i => i.classList.contains('active'));
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    activeIdx = (activeIdx + 1) % items.length;
-                    items.forEach(i => i.classList.remove('active'));
-                    items[activeIdx].classList.add('active');
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    activeIdx = activeIdx <= 0 ? items.length - 1 : activeIdx - 1;
-                    items.forEach(i => i.classList.remove('active'));
-                    items[activeIdx].classList.add('active');
-                } else if (e.key === 'Enter') {
-                    if (activeIdx >= 0) {
-                        e.preventDefault();
-                        items[activeIdx].dispatchEvent(new Event('mousedown'));
-                    }
-                } else if (e.key === 'Escape') {
-                    suggestionsEl.classList.remove('show');
-                }
+                workspaceState.routingControl.setDirections(result);
+                const leg = result.routes[0].legs[0];
+                const km = (leg.distance.value / 1000).toFixed(1);
+                const mins = Math.round(leg.duration.value / 60);
+                if (routeSummary) routeSummary.textContent = I18N.routeSummary.replace(':km', km).replace(':mins', mins);
             });
         }
 
-        attachAutocomplete(pickupAddress, pickupSuggestions, 'pickup');
-        attachAutocomplete(deliveryAddress, deliverySuggestions, 'delivery');
+        attachAutocomplete(pickupAddress, pickupLat, pickupLng, (lat, lng) => updateFormMarker('pickup', lat, lng));
+        attachAutocomplete(deliveryAddress, deliveryLat, deliveryLng, (lat, lng) => updateFormMarker('delivery', lat, lng));
 
-        root.querySelectorAll('.map-pick-link').forEach(link => {
+        root.querySelectorAll('.map-pick-link[data-target]').forEach(link => {
             link.addEventListener('click', function (e) {
                 e.preventDefault();
                 setMode(this.dataset.target);
@@ -2612,68 +2581,21 @@ function initSenderWorkspace() {
         const editDeliveryAddress = root.querySelector('#edit_delivery_address');
         const editDeliveryLat = root.querySelector('#edit_delivery_latitude');
         const editDeliveryLng = root.querySelector('#edit_delivery_longitude');
-        const editDeliverySuggestions = root.querySelector('#edit_delivery_suggestions');
         const useCurrentEditDeliveryBtn = root.querySelector('#use_current_edit_delivery');
+        const editDeliveryMapPickLink = root.querySelector('#edit_delivery_map_pick');
 
-        function renderEditDeliverySuggestions(items, onPick) {
-            if (!items.length) {
-                editDeliverySuggestions.innerHTML = '<div class="address-suggestion-empty">' + I18N.noMatchingAddress + '</div>';
-                editDeliverySuggestions.classList.add('show');
-                return;
-            }
-            editDeliverySuggestions.innerHTML = items.map((item, idx) => `
-                <div class="address-suggestion-item" data-index="${idx}">
-                    <i class="fa-solid fa-location-dot"></i>
-                    <div>
-                        <div class="main-text">${item.text}</div>
-                        <div class="sub-text">${item.place_name}</div>
-                    </div>
-                </div>
-            `).join('');
-            editDeliverySuggestions.classList.add('show');
-            editDeliverySuggestions.querySelectorAll('.address-suggestion-item').forEach((el, idx) => {
-                el.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
-                    onPick(items[idx]);
-                    editDeliverySuggestions.classList.remove('show');
-                });
-            });
-        }
+        attachAutocomplete(editDeliveryAddress, editDeliveryLat, editDeliveryLng, null);
 
-        if (editDeliveryAddress && editDeliverySuggestions) {
-            let editDebounce = null;
-
-            editDeliveryAddress.addEventListener('input', function () {
-                if (editDeliveryLat) editDeliveryLat.value = '';
-                if (editDeliveryLng) editDeliveryLng.value = '';
-                const query = this.value.trim();
-                if (editDebounce) clearTimeout(editDebounce);
-                if (query.length < 3) {
-                    editDeliverySuggestions.classList.remove('show');
-                    return;
-                }
-                editDebounce = setTimeout(async () => {
-                    try {
-                        const url = await buildGeocodeSearchUrl(query);
-                        const res = await fetch(url);
-                        const data = await res.json();
-                        const items = (data.features || []).map(f => ({ text: f.text, place_name: f.place_name, lat: f.center[1], lng: f.center[0] }));
-                        renderEditDeliverySuggestions(items, (item) => {
-                            editDeliveryAddress.value = item.place_name;
-                            editDeliveryAddress.classList.add('location-confirmed');
-                            if (editDeliveryLat) editDeliveryLat.value = item.lat;
-                            if (editDeliveryLng) editDeliveryLng.value = item.lng;
-                        });
-                    } catch (err) {
-                        editDeliverySuggestions.classList.remove('show');
-                    }
-                }, 300);
-            });
-
-            editDeliveryAddress.addEventListener('blur', function () {
-                setTimeout(() => editDeliverySuggestions.classList.remove('show'), 150);
-            });
-        }
+        editDeliveryMapPickLink?.addEventListener('click', async function (e) {
+            e.preventDefault();
+            const initialLat = parseFloat(editDeliveryLat?.value) || null;
+            const initialLng = parseFloat(editDeliveryLng?.value) || null;
+            const picked = await openGoogleMapPicker(initialLat, initialLng);
+            if (!picked) return;
+            if (editDeliveryLat) editDeliveryLat.value = picked.lat.toFixed(7);
+            if (editDeliveryLng) editDeliveryLng.value = picked.lng.toFixed(7);
+            await reverseGeocode(picked.lat, picked.lng, editDeliveryAddress);
+        });
 
         if (useCurrentEditDeliveryBtn) {
             useCurrentEditDeliveryBtn.addEventListener('click', function () {
@@ -2688,20 +2610,9 @@ function initSenderWorkspace() {
                 navigator.geolocation.getCurrentPosition(
                     async (pos) => {
                         const { latitude, longitude } = pos.coords;
-                        if (editDeliveryAddress) editDeliveryAddress.value = I18N.locatingAddress;
-                        try {
-                            const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${MAPBOX_TOKEN}&country=ng&language=en`);
-                            const data = await res.json();
-                            const place = data.features && data.features[0];
-                            if (editDeliveryAddress) {
-                                editDeliveryAddress.value = place ? place.place_name : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-                                editDeliveryAddress.classList.add('location-confirmed');
-                            }
-                        } catch (err) {
-                            if (editDeliveryAddress) editDeliveryAddress.value = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-                        }
-                        if (editDeliveryLat) editDeliveryLat.value = latitude;
-                        if (editDeliveryLng) editDeliveryLng.value = longitude;
+                        if (editDeliveryLat) editDeliveryLat.value = latitude.toFixed(7);
+                        if (editDeliveryLng) editDeliveryLng.value = longitude.toFixed(7);
+                        await reverseGeocode(latitude, longitude, editDeliveryAddress);
                         useCurrentEditDeliveryBtn.innerHTML = originalHtml;
                         useCurrentEditDeliveryBtn.disabled = false;
                     },

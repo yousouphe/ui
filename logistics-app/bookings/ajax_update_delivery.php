@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../config/functions.php';
 require_role(['sender']);
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/mapbox.php';
 
 header('Content-Type: application/json');
 require_csrf();
@@ -40,41 +41,31 @@ if (in_array($booking['booking_status'], ['delivered', 'cancelled'], true) || ($
     exit;
 }
 
-function haversine_km(float $lat1, float $lon1, float $lat2, float $lon2): float {
-    $earthRadius = 6371;
-    $dLat = deg2rad($lat2 - $lat1);
-    $dLon = deg2rad($lon2 - $lon1);
-    $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
-    return $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
-}
-
 $newAgreedCost = $booking['agreed_cost'];
 $priceChanged = false;
 
+// Only repriced once a rider is already selected - before that, agreed_cost stays null
+// and each candidate rider's estimated fare is computed fresh from the current address by
+// ajax_fetch_riders.php, so there's nothing "agreed" yet to recalculate.
 if (!empty($booking['selected_rider_user_id']) && $booking['pickup_latitude'] !== null && $booking['pickup_longitude'] !== null) {
     $pickupLat = (float) $booking['pickup_latitude'];
     $pickupLng = (float) $booking['pickup_longitude'];
-    $newDistance = haversine_km($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
+    $newDistance = pricing_distance_km($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
 
     $oldDistance = null;
     if ($booking['delivery_latitude'] !== null && $booking['delivery_longitude'] !== null) {
-        $oldDistance = haversine_km($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
+        $oldDistance = pricing_distance_km($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
     }
 
-    if ($oldDistance && $oldDistance > 0.05 && $booking['agreed_cost'] !== null) {
-        // Only reprice when the new destination is farther away. A closer destination
-        // keeps the already-agreed price - the rider doesn't lose out on a shorter trip
-        // just because the sender changed their mind, and it avoids re-negotiating a
-        // price the rider already committed to.
-        if ($newDistance > $oldDistance) {
-            $newAgreedCost = round(((float) $booking['agreed_cost']) * ($newDistance / $oldDistance), 2);
-        }
-    } else {
-        $base = ($newDistance * 400) + 1500;
-        if (($booking['vehicle_type'] ?? '') === 'car') {
-            $base *= 1.5;
-        }
-        $newAgreedCost = max(1500, round($base, -2));
+    // Only reprice when the new destination is farther away. A closer destination keeps
+    // the already-agreed price - the rider doesn't lose out on a shorter trip just because
+    // the sender changed their mind, and it avoids re-negotiating a price the rider
+    // already committed to. Repricing always recomputes a fresh absolute fare from the
+    // shared pricing engine (never a multiplier applied to the old price - that's what
+    // caused prices to blow up when the original trip was short).
+    if ($booking['agreed_cost'] === null || $oldDistance === null || $newDistance > $oldDistance) {
+        $vehicleType = (string) ($booking['vehicle_type'] ?? 'bike');
+        $newAgreedCost = calculate_delivery_price($pdo, $newDistance, $vehicleType)['total'];
     }
     $priceChanged = (float) $newAgreedCost !== (float) $booking['agreed_cost'];
 }

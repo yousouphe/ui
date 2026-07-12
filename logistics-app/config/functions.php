@@ -35,6 +35,15 @@ function mapbox_token(): string {
     return trim((string)(config_app()['mapbox_token'] ?? ''));
 }
 
+function google_maps_api_key(): string {
+    return trim((string)(config_app()['google_maps_api_key'] ?? ''));
+}
+
+function google_maps_configured(): bool {
+    $key = google_maps_api_key();
+    return $key !== '' && !str_starts_with($key, 'REDACTED');
+}
+
 function base_url(): string {
     $configured = trim((string)(config_app()['base_url'] ?? ''));
     if ($configured !== '') {
@@ -460,4 +469,48 @@ function log_event(
     } catch (Throwable $e) {
         error_log('log_event failed for ' . $eventType . ': ' . $e->getMessage());
     }
+}
+
+// Admin-configurable pricing (admin/pricing.php). Cached per-request since it's read on
+// every fare calculation (booking creation's rider list, change-of-address recalc).
+function pricing_settings(PDO $pdo): array {
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $row = $pdo->query('SELECT * FROM pricing_settings WHERE id = 1')->fetch(PDO::FETCH_ASSOC);
+    return $cache = $row ?: [
+        'minimum_fee' => 1000.00,
+        'per_km_rate' => 600.00,
+        'bike_multiplier' => 1.00,
+        'car_multiplier' => 1.50,
+        'van_multiplier' => 1.80,
+        'tax_percent' => 0.00,
+    ];
+}
+
+// The one place a delivery fare is computed, so the rider-list estimate, the initial
+// booking price, and any change-of-address recalculation always agree with each other and
+// with whatever a super admin has configured. cost = max(minimum_fee, per_km_rate *
+// distance) - a flat minimum for short trips, per-km beyond that with no cliff at the
+// boundary - then a per-vehicle-type multiplier, then tax on top.
+function calculate_delivery_price(PDO $pdo, float $distanceKm, string $vehicleType): array {
+    $settings = pricing_settings($pdo);
+    $multiplier = match ($vehicleType) {
+        'car' => (float) $settings['car_multiplier'],
+        'van' => (float) $settings['van_multiplier'],
+        default => (float) $settings['bike_multiplier'],
+    };
+    $subtotal = max((float) $settings['minimum_fee'], (float) $settings['per_km_rate'] * $distanceKm) * $multiplier;
+    $taxPercent = (float) $settings['tax_percent'];
+    $taxAmount = round($subtotal * ($taxPercent / 100), 2);
+    $subtotal = round($subtotal, 2);
+
+    return [
+        'distance_km' => round($distanceKm, 2),
+        'subtotal' => $subtotal,
+        'tax_percent' => $taxPercent,
+        'tax_amount' => $taxAmount,
+        'total' => round($subtotal + $taxAmount, 2),
+    ];
 }

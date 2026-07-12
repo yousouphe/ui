@@ -568,17 +568,19 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row gap-3 align-items-lg-center">
+        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
             <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
             <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
-            <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
             <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
             <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-            <div class="small">
-                <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                &middot;
-                <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
+                <div class="small">
+                    <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
+                    &middot;
+                    <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
+                </div>
             </div>
         </div>
     </div>

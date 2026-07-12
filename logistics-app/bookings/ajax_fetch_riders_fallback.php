@@ -29,10 +29,10 @@ $vehicleType = (string) ($booking['vehicle_type'] ?? '');
 $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
 
 // Deliberately no availability_status/recency filter here - this is the fallback shown once
-// live geolocation-based matching hasn't found anyone in 30s, so it surfaces every rider who
+// live geolocation-based matching hasn't found anyone in 15s, so it surfaces every rider who
 // could still take the job (capacity permitting) even if they haven't toggled themselves
 // "available" or their last location ping is stale, and lets the sender pick manually using
-// the order-count/distance/performance numbers below instead.
+// the order-count/distance/ETA/performance numbers below instead.
 $stmt = $pdo->prepare("
     SELECT u.id, u.full_name, rp.vehicle_type, rp.rating, rp.last_latitude, rp.last_longitude,
            CASE WHEN rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL THEN $distanceSql ELSE NULL END AS distance_km,
@@ -53,7 +53,12 @@ $riders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($riders as &$r) {
     $r['suggested_fee'] = $booking['agreed_cost'];
-    $r['performance_ratio'] = rider_performance_ratio($pdo, (int) $r['id']);
+    // ETA is a rough distance/speed estimate from the rider's last known location, not a
+    // live route - there's no distance to estimate from once that's unknown.
+    $r['eta_minutes'] = $r['distance_km'] !== null ? estimated_eta_minutes((float) $r['distance_km'], (string) $r['vehicle_type']) : null;
+    $stats = rider_delivery_stats($pdo, (int) $r['id']);
+    $r['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
+    $r['performance_ratio'] = $stats['ratio'];
 }
 unset($r);
 

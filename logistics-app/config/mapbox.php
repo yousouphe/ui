@@ -14,13 +14,24 @@ function mapbox_road_routing_configured(): bool {
     return $token !== '' && !str_starts_with($token, 'REDACTED');
 }
 
-// Returns null (rather than throwing) on any failure - pricing_route_metrics() below is the
-// one that turns that into a hard error, so this stays a low-level "couldn't get it" signal
-// that other, non-pricing callers could use permissively if they ever need to. Returns both
-// distance and drive-time duration from the same Directions API call - the duration is the
-// "planned time" a rider's actual delivery time is later compared against.
+// Distinct from the generic RuntimeException pricing_route_metrics() throws for a transient
+// problem (network hiccup, misconfigured token) - this means Mapbox was reached successfully
+// and definitively found no drivable route between the two points, which a retry won't fix.
+// Callers should catch this separately and tell the user to check the addresses instead of
+// "try again shortly".
+class NoRouteFoundException extends RuntimeException {}
+
+// Returns null (rather than throwing) for a transient/config failure - pricing_route_metrics()
+// below turns that into a generic retryable error, so this stays a low-level "couldn't get
+// it" signal that other, non-pricing callers could use permissively if they ever need to.
+// Throws NoRouteFoundException (not returns null) when Mapbox responds successfully but
+// genuinely has no route - that's not transient, so it shouldn't look like one to a caller
+// deciding what to tell the user. Returns both distance and drive-time duration from the same
+// Directions call on success - the duration is the "planned time" a rider's actual delivery
+// time is later compared against.
 function road_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2): ?array {
     if (!mapbox_road_routing_configured()) {
+        error_log('Mapbox pricing: mapbox_secret_token is not configured (still REDACTED or blank).');
         return null;
     }
 
@@ -36,17 +47,26 @@ function road_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2):
     ]);
     $response = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
     curl_close($ch);
 
     if ($response === false || $httpCode !== 200) {
+        error_log("Mapbox Directions call failed: httpCode=$httpCode curlError=$curlError");
         return null;
     }
 
     $data = json_decode($response, true);
+    $apiCode = (string) ($data['code'] ?? '');
+    if ($apiCode !== '' && $apiCode !== 'Ok') {
+        // Mapbox's own status for "no route" is NoRoute; NoSegment/InvalidInput mean one of
+        // the coordinates isn't on/near a road it can route from - same user-facing outcome.
+        throw new NoRouteFoundException('No route could be found between these locations.');
+    }
+
     $meters = $data['routes'][0]['distance'] ?? null;
     $seconds = $data['routes'][0]['duration'] ?? null;
     if (!is_numeric($meters) || !is_numeric($seconds)) {
-        return null;
+        throw new NoRouteFoundException('No route could be found between these locations.');
     }
     return ['distance_km' => ((float) $meters) / 1000, 'duration_min' => ((float) $seconds) / 60];
 }
@@ -67,7 +87,9 @@ function pricing_distance_km(float $lat1, float $lng1, float $lat2, float $lng2)
 
 // Same contract as pricing_distance_km() (throws instead of an approximate fallback) but
 // also returns the route's planned drive time, so callers that need to record
-// bookings.planned_duration_minutes don't have to make a second Directions call.
+// bookings.planned_duration_minutes don't have to make a second Directions call. May throw
+// NoRouteFoundException (see road_route_metrics()) - callers that want to distinguish "no
+// route exists" from "transient failure, try again" should catch that first.
 function pricing_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2): array {
     $metrics = road_route_metrics($lat1, $lng1, $lat2, $lng2);
     if ($metrics === null) {

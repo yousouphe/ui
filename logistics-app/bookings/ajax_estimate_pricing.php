@@ -23,6 +23,10 @@ if ($pickupLat === null || $pickupLng === null || $deliveryLat === null || $deli
 // potentially wrong) locked-in price.
 try {
     $metrics = pricing_route_metrics($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
+} catch (NoRouteFoundException $e) {
+    http_response_code(422);
+    echo json_encode(['success' => false, 'message' => 'No route could be found between these locations. Please check the pickup and delivery addresses.']);
+    exit;
 } catch (RuntimeException $e) {
     http_response_code(503);
     echo json_encode(['success' => false, 'message' => 'Unable to calculate pricing right now. Please try again shortly.']);

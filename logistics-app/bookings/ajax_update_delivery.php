@@ -60,6 +60,10 @@ if (!empty($booking['selected_rider_user_id']) && $booking['pickup_latitude'] !=
         if ($booking['delivery_latitude'] !== null && $booking['delivery_longitude'] !== null) {
             $oldDistance = pricing_distance_km($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
         }
+    } catch (NoRouteFoundException $e) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'No route could be found between these locations. Please check the delivery address.']);
+        exit;
     } catch (RuntimeException $e) {
         http_response_code(503);
         echo json_encode(['success' => false, 'message' => 'Unable to calculate route distance right now. Please try again shortly.']);

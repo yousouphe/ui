@@ -358,11 +358,12 @@ function rider_active_order_count(PDO $pdo, int $riderUserId, ?int $excludeBooki
     return (int) $stmt->fetchColumn();
 }
 
-// A rider's average actual delivery time divided by their average planned (Mapbox-estimated)
-// delivery time across their completed orders - below 1.0 means they typically finish faster
-// than planned, above 1.0 means slower. Null until they have at least one delivered order
-// with both figures recorded (bookings created before this feature won't have either).
-function rider_performance_ratio(PDO $pdo, int $riderUserId): ?float {
+// A rider's average actual delivery time and their average actual ÷ average planned
+// (Mapbox-estimated) delivery time ratio across their completed orders, in one query - a
+// ratio below 1.0 means they typically finish faster than planned, above 1.0 means slower.
+// Both null until they have at least one delivered order with both figures recorded
+// (bookings created before this feature won't have either).
+function rider_delivery_stats(PDO $pdo, int $riderUserId): array {
     $stmt = $pdo->prepare('
         SELECT AVG(actual_duration_minutes) AS avg_actual, AVG(planned_duration_minutes) AS avg_planned
         FROM bookings
@@ -375,10 +376,18 @@ function rider_performance_ratio(PDO $pdo, int $riderUserId): ?float {
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     $avgPlanned = $row['avg_planned'] !== null ? (float) $row['avg_planned'] : null;
     $avgActual = $row['avg_actual'] !== null ? (float) $row['avg_actual'] : null;
-    if ($avgPlanned === null || $avgActual === null || $avgPlanned <= 0.0) {
-        return null;
-    }
-    return $avgActual / $avgPlanned;
+    $ratio = ($avgPlanned !== null && $avgActual !== null && $avgPlanned > 0.0) ? $avgActual / $avgPlanned : null;
+    return ['avg_actual_minutes' => $avgActual, 'ratio' => $ratio];
+}
+
+// Average speed assumptions (km/h) for a rough "how far away are they, time-wise" estimate
+// from a rider's last known location - not a live route, just enough to help a sender choose
+// between two candidates when live tracking/routing isn't available for every rider shown.
+const RIDER_ETA_AVG_SPEED_KMH = ['bike' => 22.0, 'car' => 28.0, 'van' => 24.0];
+
+function estimated_eta_minutes(float $distanceKm, string $vehicleType): int {
+    $speed = RIDER_ETA_AVG_SPEED_KMH[$vehicleType] ?? 22.0;
+    return (int) round(($distanceKm / $speed) * 60);
 }
 
 const RIDER_PAYOUT_SHARE = 0.85;

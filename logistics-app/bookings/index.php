@@ -305,6 +305,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             $payload['agreed_cost'] = calculate_delivery_price($pdo, $metrics['distance_km'], $vehicleType)['total'];
             $payload['planned_duration_minutes'] = (int) round($metrics['duration_min']);
+        } catch (NoRouteFoundException $e) {
+            $errors['general'] = 'No route could be found between these locations. Please check the pickup and delivery addresses.';
         } catch (RuntimeException $e) {
             $errors['general'] = 'Unable to calculate pricing right now. Please try again shortly.';
         }
@@ -1346,11 +1348,20 @@ const I18N = <?= json_encode([
     'vehicleUnavailable' => t('wizard.vehicle.unavailable'),
     'vehicleRetry' => t('wizard.vehicle.retry'),
     'fallbackAllRiders' => t('match.fallback_all_riders'),
+    'fallbackNoRidersCloseBy' => t('match.fallback_no_riders_close_by'),
     'fallbackNoRiders' => t('match.fallback_no_riders'),
     'fallbackOrderCount' => t('match.fallback_order_count'),
     'fallbackLocationUnknown' => t('match.fallback_location_unknown'),
     'fallbackNoPerformanceData' => t('match.fallback_no_performance_data'),
     'fallbackPerformanceSuffix' => t('match.fallback_performance_suffix'),
+    'fallbackEtaSuffix' => t('match.fallback_eta_suffix'),
+    'fallbackAvgDeliverySuffix' => t('match.fallback_avg_delivery_suffix'),
+    'resumeAutoScan' => t('match.resume_auto_scan'),
+    'sortLabel' => t('match.sort_label'),
+    'sortDistance' => t('match.sort_distance'),
+    'sortEta' => t('match.sort_eta'),
+    'sortRating' => t('match.sort_rating'),
+    'sortAvgTime' => t('match.sort_avg_time'),
     'requestSent' => t('match.request_sent'),
 ], JSON_UNESCAPED_UNICODE) ?>;
 
@@ -2228,7 +2239,7 @@ function initSenderWorkspace() {
             // geolocation-based matching, switch to the manual picker instead of spinning
             // forever - riders whose location updates aren't reaching us shouldn't mean the
             // sender never sees anyone.
-            const FALLBACK_AFTER_MS = 30000;
+            const FALLBACK_AFTER_MS = 15000;
             workspaceState.scanStartedAt = workspaceState.scanStartedAt || Date.now();
             workspaceState.fallbackMode = workspaceState.fallbackMode || false;
 
@@ -2372,37 +2383,77 @@ function initSenderWorkspace() {
                 return `~${Number(ratio).toFixed(1)}x ${I18N.fallbackPerformanceSuffix}`;
             }
 
+            const FALLBACK_SORTERS = {
+                distance: (a, b) => (a.distance_km === null) - (b.distance_km === null) || (a.distance_km ?? 0) - (b.distance_km ?? 0),
+                eta: (a, b) => (a.eta_minutes === null) - (b.eta_minutes === null) || (a.eta_minutes ?? 0) - (b.eta_minutes ?? 0),
+                rating: (a, b) => Number(b.rating || 0) - Number(a.rating || 0),
+                avg_time: (a, b) => (a.avg_delivery_minutes === null) - (b.avg_delivery_minutes === null) || (a.avg_delivery_minutes ?? 0) - (b.avg_delivery_minutes ?? 0),
+            };
+
+            function renderFallbackCards(riders, maxOrders) {
+                const cardsContainer = root.querySelector('#fallback-cards');
+                if (!cardsContainer) return;
+
+                if (riders.length === 0) {
+                    cardsContainer.innerHTML = `<div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>`;
+                    return;
+                }
+
+                cardsContainer.innerHTML = riders.map(r => `
+                    <div class="vehicle-option-card" data-rider-id="${r.id}">
+                        <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(r.vehicle_type)}"></i></div>
+                        <div class="vehicle-option-info">
+                            <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
+                            <div class="text-soft small">${r.active_order_count}/${maxOrders} ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
+                            <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
+                        </div>
+                        <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
+                    </div>
+                `).join('');
+
+                cardsContainer.querySelectorAll('.vehicle-option-card[data-rider-id]').forEach(card => {
+                    card.addEventListener('click', function () {
+                        const rider = riders.find(r => String(r.id) === this.dataset.riderId);
+                        if (rider) sendRiderRequest(rider);
+                    });
+                });
+            }
+
             function renderFallbackList(riders, maxOrders) {
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
 
-                if (floatTitle) floatTitle.textContent = I18N.findingRider;
+                if (floatTitle) floatTitle.textContent = I18N.fallbackNoRidersCloseBy;
                 if (floatSubtitle) floatSubtitle.textContent = I18N.fallbackAllRiders;
 
                 if (riders.length === 0) {
                     listContainer.innerHTML = `
                         <div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>
                         <div class="text-center"><button type="button" class="btn btn-sm btn-outline-secondary" id="resume-auto-scan">${I18N.vehicleRetry}</button></div>`;
-                } else {
-                    listContainer.innerHTML = `
-                        <div class="text-center mb-2"><button type="button" class="btn btn-sm btn-link p-0" id="resume-auto-scan">${escapeForRiderCard(I18N.fallbackAllRiders)}</button></div>
-                    ` + riders.map(r => `
-                        <div class="vehicle-option-card" data-rider-id="${r.id}">
-                            <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(r.vehicle_type)}"></i></div>
-                            <div class="vehicle-option-info">
-                                <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
-                                <div class="text-soft small">${r.active_order_count}/${maxOrders} ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown} &middot; ${performanceRatioText(r.performance_ratio)}</div>
-                            </div>
-                            <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
-                        </div>
-                    `).join('');
+                    return;
                 }
 
-                listContainer.querySelectorAll('.vehicle-option-card[data-rider-id]').forEach(card => {
-                    card.addEventListener('click', function () {
-                        const rider = riders.find(r => String(r.id) === this.dataset.riderId);
-                        if (rider) sendRiderRequest(rider);
-                    });
+                listContainer.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                        <button type="button" class="btn btn-sm btn-link p-0" id="resume-auto-scan">${escapeForRiderCard(I18N.resumeAutoScan)}</button>
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="small text-soft mb-0" for="fallback-sort">${escapeForRiderCard(I18N.sortLabel)}</label>
+                            <select class="form-select form-select-sm" id="fallback-sort" style="width:auto;">
+                                <option value="distance">${escapeForRiderCard(I18N.sortDistance)}</option>
+                                <option value="eta">${escapeForRiderCard(I18N.sortEta)}</option>
+                                <option value="rating">${escapeForRiderCard(I18N.sortRating)}</option>
+                                <option value="avg_time">${escapeForRiderCard(I18N.sortAvgTime)}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="fallback-cards"></div>
+                `;
+
+                renderFallbackCards(riders, maxOrders);
+
+                root.querySelector('#fallback-sort')?.addEventListener('change', function () {
+                    const sorter = FALLBACK_SORTERS[this.value] || FALLBACK_SORTERS.distance;
+                    renderFallbackCards([...riders].sort(sorter), maxOrders);
                 });
 
                 root.querySelector('#resume-auto-scan')?.addEventListener('click', function () {
@@ -2421,6 +2472,7 @@ function initSenderWorkspace() {
                 if (workspaceState.ridersInterval) { clearInterval(workspaceState.ridersInterval); workspaceState.ridersInterval = null; }
                 if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
 
+                if (floatTitle) floatTitle.textContent = I18N.fallbackNoRidersCloseBy;
                 const listContainer = root.querySelector('#rider-list-container');
                 if (listContainer) {
                     listContainer.innerHTML = `

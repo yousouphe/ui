@@ -153,6 +153,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (float) $targetBooking['delivery_latitude'],
                     (float) $targetBooking['delivery_longitude']
                 );
+            } catch (NoRouteFoundException $e) {
+                flash('error', t('admin.no_route_found'));
+                redirect_to('admin/bookings.php?booking_id=' . $bookingId);
             } catch (RuntimeException $e) {
                 flash('error', t('admin.pricing_unavailable'));
                 redirect_to('admin/bookings.php?booking_id=' . $bookingId);
@@ -232,6 +235,7 @@ if ($selectedBookingId > 0) {
 // transport type was moved up front won't have one, so those show every vehicle type).
 $eligibleRiders = [];
 $pricingUnavailable = false;
+$noRouteFound = false;
 if (
     $selectedBooking
     && in_array($selectedBooking['booking_status'], ADMIN_ASSIGNABLE_BOOKING_STATUSES, true)
@@ -277,6 +281,8 @@ if (
                 $candidate['suggested_fee'] = calculate_delivery_price($pdo, $deliveryDistanceKm, (string) $candidate['vehicle_type'])['total'];
             }
             unset($candidate);
+        } catch (NoRouteFoundException $e) {
+            $noRouteFound = true;
         } catch (RuntimeException $e) {
             $pricingUnavailable = true;
         }
@@ -486,6 +492,8 @@ function admin_payment_status_badge_class(string $status): string {
                     <h3 class="h6 fw-bold mb-2"><?= e(empty($selectedBooking['rider_full_name']) ? t('admin.assign_rider_heading') : t('admin.reassign_rider_heading')) ?></h3>
                     <?php if ($selectedBooking['pickup_latitude'] === null || $selectedBooking['delivery_latitude'] === null): ?>
                         <div class="text-soft small"><?= e(t('admin.booking_missing_coordinates')) ?></div>
+                    <?php elseif ($noRouteFound): ?>
+                        <div class="text-soft small"><?= e(t('admin.no_route_found')) ?></div>
                     <?php elseif ($pricingUnavailable): ?>
                         <div class="text-soft small"><?= e(t('admin.pricing_unavailable')) ?></div>
                     <?php elseif (empty($eligibleRiders)): ?>

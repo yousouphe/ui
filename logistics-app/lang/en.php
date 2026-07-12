@@ -331,6 +331,7 @@ return [
     'match.fallback_avg_delivery_suffix' => 'avg. delivery time',
     'match.resume_auto_scan' => 'Keep scanning automatically',
     'match.sort_label' => 'Sort by',
+    'match.sort_score' => 'Best match',
     'match.sort_distance' => 'Distance',
     'match.sort_eta' => 'ETA',
     'match.sort_rating' => 'Rating',

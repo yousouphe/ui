@@ -390,6 +390,25 @@ function estimated_eta_minutes(float $distanceKm, string $vehicleType): int {
     return (int) round(($distanceKm / $speed) * 60);
 }
 
+// Ranks riders by quality, not proximity or online status - a rider being reachable right
+// now is not the same signal as a rider being good at the job, and this app has no reliable
+// way to know "online" means "actually able to respond" anyway. Two components:
+//   - rating (0-5 stars) scaled to a 0-50 range, the primary signal
+//   - delivery performance (actual ÷ planned time on past completed orders) scaled to a
+//     0-20 bonus/penalty: exactly on-planned-time scores +10, twice as fast scores +20,
+//     twice as slow scores 0 - riders with no completed-order history yet get no
+//     bonus/penalty either way rather than being penalized for lacking data.
+// Total range is roughly 0-70; higher is better.
+function rider_match_score(?float $rating, ?float $performanceRatio): float {
+    $ratingComponent = ($rating ?? 3.0) * 10;
+    if ($performanceRatio === null) {
+        $performanceComponent = 0.0;
+    } else {
+        $performanceComponent = max(0.0, min(20.0, (2.0 - $performanceRatio) * 10));
+    }
+    return $ratingComponent + $performanceComponent;
+}
+
 const RIDER_PAYOUT_SHARE = 0.85;
 
 function rider_payout_amount(float $agreedCost): float {

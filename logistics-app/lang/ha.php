@@ -332,6 +332,7 @@ return [
     'match.fallback_avg_delivery_suffix' => 'matsakaicin lokacin isarwa',
     'match.resume_auto_scan' => 'Ci gaba da bincike kai tsaye',
     'match.sort_label' => 'Jera bisa',
+    'match.sort_score' => 'Mafi dacewa',
     'match.sort_distance' => 'Nisa',
     'match.sort_eta' => 'ETA',
     'match.sort_rating' => 'Kimantawa',

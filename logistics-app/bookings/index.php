@@ -1381,6 +1381,7 @@ const I18N = <?= json_encode([
     'fallbackAvgDeliverySuffix' => t('match.fallback_avg_delivery_suffix'),
     'resumeAutoScan' => t('match.resume_auto_scan'),
     'sortLabel' => t('match.sort_label'),
+    'sortScore' => t('match.sort_score'),
     'sortDistance' => t('match.sort_distance'),
     'sortEta' => t('match.sort_eta'),
     'sortRating' => t('match.sort_rating'),
@@ -2260,13 +2261,6 @@ function initSenderWorkspace() {
             workspaceState.pingSound = new Audio('assets/sounds/notification.mp3');
             workspaceState.matchExcludedRiderIds = workspaceState.matchExcludedRiderIds || new Set();
             workspaceState.matchPhase = workspaceState.matchPhase || 'searching';
-            // Once this has been ticking for FALLBACK_AFTER_MS with nobody found via live
-            // geolocation-based matching, switch to the manual picker instead of spinning
-            // forever - riders whose location updates aren't reaching us shouldn't mean the
-            // sender never sees anyone.
-            const FALLBACK_AFTER_MS = 15000;
-            workspaceState.scanStartedAt = workspaceState.scanStartedAt || Date.now();
-            workspaceState.fallbackMode = workspaceState.fallbackMode || false;
 
             const floatTitle = root.querySelector('#rider-float-title');
             const floatSubtitle = root.querySelector('#rider-float-subtitle');
@@ -2408,28 +2402,24 @@ function initSenderWorkspace() {
                 return `~${Number(ratio).toFixed(1)}x ${I18N.fallbackPerformanceSuffix}`;
             }
 
-            const FALLBACK_SORTERS = {
+            const RIDER_SORTERS = {
+                score: (a, b) => Number(b.score || 0) - Number(a.score || 0),
                 distance: (a, b) => (a.distance_km === null) - (b.distance_km === null) || (a.distance_km ?? 0) - (b.distance_km ?? 0),
                 eta: (a, b) => (a.eta_minutes === null) - (b.eta_minutes === null) || (a.eta_minutes ?? 0) - (b.eta_minutes ?? 0),
                 rating: (a, b) => Number(b.rating || 0) - Number(a.rating || 0),
                 avg_time: (a, b) => (a.avg_delivery_minutes === null) - (b.avg_delivery_minutes === null) || (a.avg_delivery_minutes ?? 0) - (b.avg_delivery_minutes ?? 0),
             };
 
-            function renderFallbackCards(riders, maxOrders) {
-                const cardsContainer = root.querySelector('#fallback-cards');
+            function renderRiderCards(riders) {
+                const cardsContainer = root.querySelector('#rider-cards');
                 if (!cardsContainer) return;
-
-                if (riders.length === 0) {
-                    cardsContainer.innerHTML = `<div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>`;
-                    return;
-                }
 
                 cardsContainer.innerHTML = riders.map(r => `
                     <div class="vehicle-option-card" data-rider-id="${r.id}">
                         <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(r.vehicle_type)}"></i></div>
                         <div class="vehicle-option-info">
                             <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
-                            <div class="text-soft small">${r.active_order_count}/${maxOrders} ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
+                            <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
                             <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
                         </div>
                         <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
@@ -2444,90 +2434,41 @@ function initSenderWorkspace() {
                 });
             }
 
-            function renderFallbackList(riders, maxOrders) {
+            // The one and only rider-matching UI - not gated on anyone being "online", since
+            // that says nothing about whether a rider is good at the job or would actually
+            // respond. Every eligible rider (right vehicle type, KYC-approved, under the
+            // 3-order cap) is ranked by rider_match_score() (rating + delivery performance)
+            // server-side; the sender can re-sort the same top-10 list client-side by
+            // whichever signal matters most to them for this particular delivery.
+            function renderRiderList(riders) {
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
 
-                if (floatTitle) floatTitle.textContent = I18N.fallbackNoRidersCloseBy;
-                if (floatSubtitle) floatSubtitle.textContent = I18N.fallbackAllRiders;
-
                 if (riders.length === 0) {
-                    listContainer.innerHTML = `
-                        <div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>
-                        <div class="text-center"><button type="button" class="btn btn-sm btn-outline-secondary" id="resume-auto-scan">${I18N.vehicleRetry}</button></div>`;
+                    listContainer.innerHTML = `<div class="text-center text-soft small py-3">${I18N.fallbackNoRiders}</div>`;
                     return;
                 }
 
                 listContainer.innerHTML = `
-                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                        <button type="button" class="btn btn-sm btn-link p-0" id="resume-auto-scan">${escapeForRiderCard(I18N.resumeAutoScan)}</button>
-                        <div class="d-flex align-items-center gap-2">
-                            <label class="small text-soft mb-0" for="fallback-sort">${escapeForRiderCard(I18N.sortLabel)}</label>
-                            <select class="form-select form-select-sm" id="fallback-sort" style="width:auto;">
-                                <option value="distance">${escapeForRiderCard(I18N.sortDistance)}</option>
-                                <option value="eta">${escapeForRiderCard(I18N.sortEta)}</option>
-                                <option value="rating">${escapeForRiderCard(I18N.sortRating)}</option>
-                                <option value="avg_time">${escapeForRiderCard(I18N.sortAvgTime)}</option>
-                            </select>
-                        </div>
+                    <div class="d-flex justify-content-end align-items-center mb-2 gap-2">
+                        <label class="small text-soft mb-0" for="rider-sort">${escapeForRiderCard(I18N.sortLabel)}</label>
+                        <select class="form-select form-select-sm" id="rider-sort" style="width:auto;">
+                            <option value="score">${escapeForRiderCard(I18N.sortScore)}</option>
+                            <option value="distance">${escapeForRiderCard(I18N.sortDistance)}</option>
+                            <option value="eta">${escapeForRiderCard(I18N.sortEta)}</option>
+                            <option value="rating">${escapeForRiderCard(I18N.sortRating)}</option>
+                            <option value="avg_time">${escapeForRiderCard(I18N.sortAvgTime)}</option>
+                        </select>
                     </div>
-                    <div id="fallback-cards"></div>
+                    <div id="rider-cards"></div>
                 `;
 
-                renderFallbackCards(riders, maxOrders);
+                renderRiderCards(riders);
 
-                root.querySelector('#fallback-sort')?.addEventListener('change', function () {
-                    const sorter = FALLBACK_SORTERS[this.value] || FALLBACK_SORTERS.distance;
-                    renderFallbackCards([...riders].sort(sorter), maxOrders);
+                root.querySelector('#rider-sort')?.addEventListener('change', function () {
+                    const sorter = RIDER_SORTERS[this.value] || RIDER_SORTERS.score;
+                    renderRiderCards([...riders].sort(sorter));
                 });
-
-                root.querySelector('#resume-auto-scan')?.addEventListener('click', function () {
-                    workspaceState.fallbackMode = false;
-                    workspaceState.scanStartedAt = Date.now();
-                    if (!workspaceState.ridersInterval) {
-                        workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
-                    }
-                    updateRiders();
-                });
-            }
-
-            async function loadFallbackRiders() {
-                if (workspaceState.fallbackMode) return;
-                workspaceState.fallbackMode = true;
-                if (workspaceState.ridersInterval) { clearInterval(workspaceState.ridersInterval); workspaceState.ridersInterval = null; }
-                if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
-
-                if (floatTitle) floatTitle.textContent = I18N.fallbackNoRidersCloseBy;
-                const listContainer = root.querySelector('#rider-list-container');
-                if (listContainer) {
-                    listContainer.innerHTML = `
-                        <div class="text-center py-3">
-                            <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                            <span class="ms-2 text-soft small">${I18N.scanningForRiders}</span>
-                        </div>`;
-                }
-
-                try {
-                    const response = await fetch(`bookings/ajax_fetch_riders_fallback.php?booking_id=${selectedBookingId}`);
-                    const result = await response.json();
-                    if (!response.ok || !result.success) throw new Error('fallback fetch failed');
-                    if (result.pricing_pending) {
-                        // Rare race: pricing resolved briefly then failed again between polls.
-                        // A rider list with no price would be broken - fall back to the normal
-                        // poll loop, which already knows how to show the pricing-pending state.
-                        workspaceState.fallbackMode = false;
-                        workspaceState.scanStartedAt = Date.now();
-                        if (!workspaceState.ridersInterval) {
-                            workspaceState.ridersInterval = setInterval(() => { if (!document.hidden) updateRiders(); }, 15000);
-                        }
-                        updateRiders();
-                        return;
-                    }
-                    renderFallbackList(result.riders, result.max_orders);
-                } catch (err) {
-                    console.error('Fallback rider fetch failed:', err);
-                    workspaceState.fallbackMode = false;
-                }
             }
 
             async function updateRiders() {
@@ -2535,7 +2476,7 @@ function initSenderWorkspace() {
                     stopRiderSearch();
                     return;
                 }
-                if (workspaceState.matchPhase === 'waiting' || workspaceState.matchPhase === 'matching' || workspaceState.fallbackMode) {
+                if (workspaceState.matchPhase === 'waiting' || workspaceState.matchPhase === 'matching') {
                     return;
                 }
 
@@ -2551,13 +2492,10 @@ function initSenderWorkspace() {
                     }
 
                     // Pricing failed at booking creation (Mapbox was unreachable) and every
-                    // poll here has been retrying it since - it's still not resolved. This is
-                    // distinct from "no riders yet": there's no price to match a rider against,
-                    // so the fallback picker (which needs a price on every card) would be
-                    // broken here. Admins were already notified when the booking was created;
-                    // just keep waiting and let the next poll try again.
+                    // poll here has been retrying it since - it's still not resolved. Admins
+                    // were already notified when the booking was created; just keep waiting
+                    // and let the next poll try again.
                     if (result.pricing_pending) {
-                        if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
                         if (floatTitle) floatTitle.textContent = I18N.pricingPendingTitle;
                         if (floatSubtitle) floatSubtitle.textContent = I18N.pricingPendingSubtitle;
                         listContainer.innerHTML = `
@@ -2574,54 +2512,10 @@ function initSenderWorkspace() {
                         workspaceState.pingSound.play().catch(() => {});
                     }
 
-                    const availableRiders = riders.filter(r => !workspaceState.matchExcludedRiderIds.has(r.id));
+                    if (floatTitle) floatTitle.textContent = riders.length > 0 ? I18N.riderFound : I18N.findingRider;
+                    if (floatSubtitle) floatSubtitle.textContent = riders.length > 0 ? I18N.pickOneToMatch : I18N.fallbackNoRiders;
 
-                    if (availableRiders.length === 0) {
-                        if (workspaceState.autoMatchTimer) { clearTimeout(workspaceState.autoMatchTimer); workspaceState.autoMatchTimer = null; }
-
-                        if (Date.now() - workspaceState.scanStartedAt >= FALLBACK_AFTER_MS) {
-                            loadFallbackRiders();
-                            return;
-                        }
-
-                        if (riders.length > 0 && workspaceState.matchExcludedRiderIds.size > 0) {
-                            if (floatTitle) floatTitle.textContent = I18N.findingRider;
-                            if (floatSubtitle) floatSubtitle.textContent = I18N.noMoreNearbyShort;
-                            listContainer.innerHTML = '<div class="text-center text-soft small py-3">No more nearby riders responded. We will keep scanning.</div>';
-                            workspaceState.matchExcludedRiderIds.clear();
-                        } else {
-                            if (floatTitle) floatTitle.textContent = I18N.findingRider;
-                            if (floatSubtitle) floatSubtitle.textContent = I18N.scanningNearby;
-                            listContainer.innerHTML = `
-                                <div class="text-center py-3">
-                                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
-                                    <span class="ms-2 text-soft small">${I18N.scanningForRiders}</span>
-                                </div>`;
-                        }
-                        return;
-                    }
-
-                    // Server already filtered to the sender's chosen vehicle type and sorted
-                    // by proximity, and every rider offers the same locked-in price, so the
-                    // nearest one is simply auto-matched - no vehicle-type picker needed here
-                    // anymore now that the type was chosen up front in the wizard.
-                    const nearest = availableRiders[0];
-                    if (floatTitle) floatTitle.textContent = I18N.riderFound;
-                    if (floatSubtitle) floatSubtitle.textContent = I18N.matchingYouNow;
-                    if (!workspaceState.autoMatchTimer) {
-                        listContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="vehicle-option-icon mx-auto mb-2"><i class="fa-solid ${vehicleIcon(nearest.vehicle_type)}"></i></div>
-                                <div class="fw-bold">${escapeForRiderCard(nearest.full_name)} &middot; ₦${Number(nearest.suggested_fee).toLocaleString()}</div>
-                                <div class="text-soft small">${availableRiders.length} available nearby</div>
-                            </div>`;
-                        workspaceState.autoMatchTimer = setTimeout(() => {
-                            workspaceState.autoMatchTimer = null;
-                            if (workspaceState.matchPhase === 'searching') {
-                                sendRiderRequest(nearest);
-                            }
-                        }, 1400);
-                    }
+                    renderRiderList(riders);
                 } catch (err) {
                     console.error('Update Error:', err);
                 }

@@ -12,6 +12,25 @@ $success = flash('success');
 $error = flash('error');
 $warning = flash('warning');
 
+// Detect whether the pricing haversine fallback was used recently (written by
+// config/mapbox.php when Mapbox was unreachable). This allows the UI to surface
+// a banner so senders/admins know pricing is approximate.
+$pricingFallback = false;
+$pricingFallbackData = null;
+try {
+    $flagFile = dirname(__DIR__) . '/assets/pricing_fallback.json';
+    if (is_file($flagFile)) {
+        $raw = @file_get_contents($flagFile);
+        $data = $raw ? json_decode($raw, true) : null;
+        if (is_array($data)) {
+            $pricingFallback = true;
+            $pricingFallbackData = $data;
+        }
+    }
+} catch (Throwable $e) {
+    // ignore
+}
+
 $requestedBookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
 $selectedBookingId = $requestedBookingId;
 $forceWizard = isset($_GET['new']) && $_GET['new'] === '1';
@@ -3835,6 +3854,25 @@ window.addEventListener('pagehide', function () {
         workspaceState.peer.destroy();
     }
 });
+</script>
+<script>
+// Show a small banner when the server fell back to haversine pricing recently.
+(async function () {
+    try {
+        const res = await fetch(`<?= e(url_path('assets/pricing_fallback.json')) ?>`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.ts) return;
+        const container = document.querySelector('.container') || document.body;
+        const d = new Date(data.ts * 1000);
+        const banner = document.createElement('div');
+        banner.className = 'alert alert-warning mb-3';
+        banner.innerHTML = `<strong>Pricing Approximation:</strong> We temporarily used a straight-line distance for pricing (approx). This happens when automatic routing is unavailable. Last fallback: ${d.toLocaleString()}.`;
+        container.insertBefore(banner, container.firstChild);
+    } catch (e) {
+        console.debug('No pricing fallback flag or failed to load it.');
+    }
+})();
 </script>
 </body>
 </html>

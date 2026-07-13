@@ -31,6 +31,16 @@ function haversine_distance($lat1, $lon1, $lat2, $lon2) {
 
 $deliveryDistanceKm = haversine_distance($pickupLat, $pickupLng, $deliveryLat, $deliveryLng);
 $success = flash('success');
+// Detect pricing fallback flag written by config/mapbox.php
+$pricingFallbackData = null;
+try {
+    $flagFile = dirname(__DIR__) . '/assets/pricing_fallback.json';
+    if (is_file($flagFile)) {
+        $raw = @file_get_contents($flagFile);
+        $data = $raw ? json_decode($raw, true) : null;
+        if (is_array($data)) $pricingFallbackData = $data;
+    }
+} catch (Throwable $e) {}
 ?>
 <!doctype html>
 <html lang="en">
@@ -78,6 +88,11 @@ $success = flash('success');
 <div class="container py-5">
     <div id="alert-container"></div>
     <?php if ($success): ?><div class="alert alert-success"><?= e($success) ?></div><?php endif; ?>
+    <?php if (!empty($pricingFallbackData)): ?>
+        <div class="alert alert-warning">
+            <strong>Pricing Approximation:</strong> Automatic routing was unavailable; prices are currently approximated using straight-line distance. Last fallback: <?= e(date('Y-m-d H:i:s', (int)($pricingFallbackData['ts'] ?? 0))) ?>.
+        </div>
+    <?php endif; ?>
 
     <div class="cardx p-4 mb-4">
         <div class="d-flex justify-content-between align-items-center">

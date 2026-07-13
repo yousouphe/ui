@@ -21,6 +21,9 @@ return [
     // if this is left REDACTED or the Directions API is unreachable, pricing throws instead
     // of falling back to a straight-line guess (no haversine fallback in the billing path).
     'mapbox_secret_token' => 'REDACTED_MAPBOX_SECRET_TOKEN',
+    // Optional: conservative average speed (km/h) used for the haversine fallback when
+    // Mapbox is unreachable. Set to 0 or omit to use the built-in default (25 km/h).
+    'mapbox_haversine_speed_kmh' => 25.0,
     // SMTP credentials for transactional email (registration, receipts, password reset).
     'smtp_host' => 'REDACTED_SMTP_HOST',
     'smtp_port' => 587,

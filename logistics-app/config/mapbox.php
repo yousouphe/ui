@@ -114,11 +114,33 @@ function pricing_route_metrics(float $lat1, float $lng1, float $lat2, float $lng
         $a = sin($dLat / 2)**2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2)**2;
         $distance_km = $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
 
-        // Estimate duration using a conservative average speed (km/h). Adjust if needed.
-        $average_speed_kmh = 25.0;
+        // Estimate duration using a configurable average speed (km/h). Adjust via
+        // config/env.php with the key 'mapbox_haversine_speed_kmh' (optional).
+        $configuredSpeed = (float) (config_app()['mapbox_haversine_speed_kmh'] ?? 0.0);
+        $average_speed_kmh = $configuredSpeed > 0 ? $configuredSpeed : 25.0;
         $duration_min = ($distance_km / $average_speed_kmh) * 60.0;
 
-        error_log(sprintf('Mapbox pricing: using haversine fallback (approx). distance_km=%.3f duration_min=%.1f', $distance_km, $duration_min));
+        error_log(sprintf('Mapbox pricing: using haversine fallback (approx). distance_km=%.3f duration_min=%.1f speed_kmh=%.1f', $distance_km, $duration_min, $average_speed_kmh));
+
+        // Persist a small flag file so the UI (and admins) can surface that pricing is
+        // currently approximate. Non-fatal if this fails.
+        try {
+            $appRoot = dirname(__DIR__);
+            $assetsDir = $appRoot . '/assets';
+            if (!is_dir($assetsDir)) {
+                @mkdir($assetsDir, 0775, true);
+            }
+            $flag = [
+                'ts' => time(),
+                'distance_km' => $distance_km,
+                'duration_min' => $duration_min,
+                'speed_kmh' => $average_speed_kmh,
+                'note' => 'haversine fallback used due to Mapbox transient failure'
+            ];
+            @file_put_contents($assetsDir . '/pricing_fallback.json', json_encode($flag, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        } catch (Throwable $e) {
+            // ignore
+        }
 
         return ['distance_km' => $distance_km, 'duration_min' => $duration_min];
     }

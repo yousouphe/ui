@@ -7,9 +7,24 @@ require_once __DIR__ . '/../config/mapbox.php';
 header('Content-Type: application/json');
 
 $bookingId = (int)($_GET['booking_id'] ?? 0);
-$stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude, vehicle_type, agreed_cost, updated_at FROM bookings WHERE id = ? LIMIT 1');
+
+$stmt = $pdo->prepare(
+    'SELECT id,
+            sender_user_id,
+            pickup_latitude,
+            pickup_longitude,
+            delivery_latitude,
+            delivery_longitude,
+            vehicle_type,
+            agreed_cost,
+            updated_at
+     FROM bookings
+     WHERE id = ?
+     LIMIT 1'
+);
+
 $stmt->execute([$bookingId]);
-$booking = $stmt->fetch();
+$booking = $stmt->fetch(PDO::FETCH_ASSOC);
 $user = current_user();
 
 if (!$booking) {
@@ -26,83 +41,261 @@ if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0)) {
 
 $pickupLat = (float)$booking['pickup_latitude'];
 $pickupLng = (float)$booking['pickup_longitude'];
-$vehicleType = (string) ($booking['vehicle_type'] ?? '');
+$deliveryLat = (float)$booking['delivery_latitude'];
+$deliveryLng = (float)$booking['delivery_longitude'];
+$bookingVehicleType = (string)($booking['vehicle_type'] ?? '');
 
-// A booking created while Mapbox was unreachable has no price yet (see bookings/index.php's
-// $pricingPending path) - every poll retries pricing here rather than leaving the sender
-// stuck, so the moment Mapbox recovers, matching picks up automatically with no action
-// needed from the sender or an admin. A genuinely unroutable address pair (NoRouteFoundException)
-// is left alone here too - deliberately not surfaced as a hard error on every single poll,
-// since that would flood the sender with retries of a call that will never succeed; an admin
-// can already see the awaiting-price state and step in.
-if ($booking['agreed_cost'] === null && $vehicleType !== '') {
+$routeDistanceKm = null;
+$routeDurationMinutes = null;
+
+/*
+ * Obtain route metrics once.
+ *
+ * These route metrics are shared by all riders because the delivery
+ * pickup and destination remain the same. Only pricing changes based
+ * on each rider's vehicle type.
+ */
+try {
+    $metrics = pricing_route_metrics(
+        $pickupLat,
+        $pickupLng,
+        $deliveryLat,
+        $deliveryLng
+    );
+
+    $routeDistanceKm = (float)$metrics['distance_km'];
+    $routeDurationMinutes = (float)$metrics['duration_min'];
+} catch (RuntimeException $e) {
+    echo json_encode([
+        'pricing_pending' => true,
+        'riders' => []
+    ]);
+    exit;
+}
+
+/*
+ * Preserve the booking's original agreed cost using the vehicle type
+ * selected by the sender when the booking was created.
+ *
+ * Rider-specific suggested fees will be calculated separately below.
+ */
+if ($booking['agreed_cost'] === null && $bookingVehicleType !== '') {
     try {
-        $metrics = pricing_route_metrics($pickupLat, $pickupLng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude']);
-        $newCost = calculate_delivery_price($pdo, $metrics['distance_km'], $vehicleType)['total'];
-        $newPlannedMinutes = (int) round($metrics['duration_min']);
-        $stmt = $pdo->prepare('UPDATE bookings SET agreed_cost = ?, planned_duration_minutes = ? WHERE id = ?');
-        $stmt->execute([$newCost, $newPlannedMinutes, $bookingId]);
-        $booking['agreed_cost'] = $newCost;
+        $bookingPrice = calculate_delivery_price(
+            $pdo,
+            $routeDistanceKm,
+            $bookingVehicleType
+        );
+
+        $bookingAgreedCost = (float)$bookingPrice['total'];
+        $plannedDurationMinutes = (int)round($routeDurationMinutes);
+
+        $stmt = $pdo->prepare(
+            'UPDATE bookings
+             SET agreed_cost = ?,
+                 planned_duration_minutes = ?
+             WHERE id = ?'
+        );
+
+        $stmt->execute([
+            $bookingAgreedCost,
+            $plannedDurationMinutes,
+            $bookingId
+        ]);
+
+        $booking['agreed_cost'] = $bookingAgreedCost;
     } catch (RuntimeException $e) {
-        echo json_encode(['pricing_pending' => true, 'riders' => []]);
+        echo json_encode([
+            'pricing_pending' => true,
+            'riders' => []
+        ]);
         exit;
     }
 }
 
-$distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $pickupLat, $pickupLng);
+$distanceSql = haversine_sql(
+    'rp.last_latitude',
+    'rp.last_longitude',
+    $pickupLat,
+    $pickupLng
+);
 
-// Every rider of the sender's chosen vehicle type who is KYC-approved, active, and has room
-// for one more job (RIDER_MAX_CONCURRENT_ORDERS, currently 3) is a candidate - deliberately
-// not filtered by "online"/availability_status or how recently their location last updated.
-// Whether a rider happens to be online right now says nothing about whether they're good at
-// the job or would actually respond, and this app has no reliable way to confirm "online"
-// means "reachable" anyway - ranking by quality (rating_match_score()) and letting the
-// sender pick is more useful than silently hiding anyone who hasn't toggled a switch.
-$sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating,
-               rp.last_latitude, rp.last_longitude, rp.last_location_updated_at,
-               CASE WHEN rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL THEN $distanceSql ELSE NULL END AS distance_km,
-               (
-                   SELECT COUNT(*) FROM bookings b
-                   WHERE b.selected_rider_user_id = u.id
-                   AND b.booking_status IN ('" . implode("','", RIDER_ACTIVE_BOOKING_STATUSES) . "')
-               ) AS active_order_count
-        FROM users u
-        INNER JOIN rider_profiles rp ON rp.user_id = u.id
-        WHERE u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved' AND rp.vehicle_type = ?
-        HAVING active_order_count < " . RIDER_MAX_CONCURRENT_ORDERS . "
-        LIMIT 100";
+$activeBookingStatuses = implode(
+    "','",
+    array_map(
+        static fn($status) => str_replace("'", "''", $status),
+        RIDER_ACTIVE_BOOKING_STATUSES
+    )
+);
+
+/*
+ * Vehicle type is deliberately not included in the WHERE clause.
+ *
+ * This allows approved riders using motorcycles, bicycles, cars,
+ * vans, or other configured vehicle types to be considered.
+ */
+$sql = "
+    SELECT
+        u.id,
+        u.full_name,
+        rp.vehicle_type,
+        rp.rating,
+        rp.last_latitude,
+        rp.last_longitude,
+        rp.last_location_updated_at,
+
+        CASE
+            WHEN rp.last_latitude IS NOT NULL
+             AND rp.last_longitude IS NOT NULL
+            THEN {$distanceSql}
+            ELSE NULL
+        END AS distance_km,
+
+        (
+            SELECT COUNT(*)
+            FROM bookings b
+            WHERE b.selected_rider_user_id = u.id
+              AND b.booking_status IN ('{$activeBookingStatuses}')
+        ) AS active_order_count
+
+    FROM users u
+
+    INNER JOIN rider_profiles rp
+        ON rp.user_id = u.id
+
+    WHERE u.role = 'rider'
+      AND u.status = 'active'
+      AND rp.kyc_status = 'approved'
+      AND rp.vehicle_type IS NOT NULL
+      AND rp.vehicle_type <> ''
+
+    HAVING active_order_count < " . (int)RIDER_MAX_CONCURRENT_ORDERS . "
+
+    LIMIT 100
+";
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute([$vehicleType]);
+$stmt->execute();
+
 $riders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Price is already locked in on the booking (set once, at creation, from the sender's
-// chosen vehicle type) - every matching rider is offered that same fixed fee. Score each
-// candidate, keep only the top 10, and drop the working fields the frontend doesn't need.
-foreach ($riders as &$r) {
-    $r['suggested_fee'] = $booking['agreed_cost'];
-    $r['eta_minutes'] = $r['distance_km'] !== null ? estimated_eta_minutes((float) $r['distance_km'], (string) $r['vehicle_type']) : null;
-    $stats = rider_delivery_stats($pdo, (int) $r['id']);
-    $r['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
-    $r['performance_ratio'] = $stats['ratio'];
-    $r['score'] = rider_match_score($r['rating'] !== null ? (float) $r['rating'] : null, $stats['ratio']);
-    // Online status is no longer a filter, but "last seen" is still useful context for the
-    // sender to weigh alongside score/distance when picking manually.
-    $r['last_seen_seconds_ago'] = !empty($r['last_location_updated_at'])
-        ? max(0, time() - strtotime((string) $r['last_location_updated_at']))
-        : null;
-    unset($r['last_location_updated_at']);
-}
-unset($r);
+foreach ($riders as &$rider) {
+    $riderVehicleType = trim((string)($rider['vehicle_type'] ?? ''));
 
-usort($riders, fn($a, $b) => $b['score'] <=> $a['score']);
+    /*
+     * Calculate the suggested fee using the rider's actual vehicle type.
+     */
+    try {
+        $riderPrice = calculate_delivery_price(
+            $pdo,
+            $routeDistanceKm,
+            $riderVehicleType
+        );
+
+        $rider['suggested_fee'] = (float)$riderPrice['total'];
+        $rider['pricing_available'] = true;
+    } catch (Throwable $e) {
+        /*
+         * Do not silently assign the booking's original fee to another
+         * vehicle type. That could show an incorrect commercial price.
+         */
+        $rider['suggested_fee'] = null;
+        $rider['pricing_available'] = false;
+    }
+
+    $rider['eta_minutes'] = $rider['distance_km'] !== null
+        ? estimated_eta_minutes(
+            (float)$rider['distance_km'],
+            $riderVehicleType
+        )
+        : null;
+
+    $stats = rider_delivery_stats(
+        $pdo,
+        (int)$rider['id']
+    );
+
+    $rider['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
+    $rider['performance_ratio'] = $stats['ratio'];
+
+    $rider['score'] = rider_match_score(
+        $rider['rating'] !== null
+            ? (float)$rider['rating']
+            : null,
+        $stats['ratio']
+    );
+
+    $rider['last_seen_seconds_ago'] =
+        !empty($rider['last_location_updated_at'])
+            ? max(
+                0,
+                time() - strtotime(
+                    (string)$rider['last_location_updated_at']
+                )
+            )
+            : null;
+
+    unset($rider['last_location_updated_at']);
+}
+
+unset($rider);
+
+/*
+ * Sort primarily by matching score.
+ *
+ * When two riders have the same score:
+ * 1. Prefer riders with available pricing.
+ * 2. Prefer the rider closer to the pickup point.
+ */
+usort($riders, static function (array $a, array $b): int {
+    $scoreComparison = ((float)$b['score']) <=> ((float)$a['score']);
+
+    if ($scoreComparison !== 0) {
+        return $scoreComparison;
+    }
+
+    $pricingComparison =
+        ((int)$b['pricing_available'])
+        <=>
+        ((int)$a['pricing_available']);
+
+    if ($pricingComparison !== 0) {
+        return $pricingComparison;
+    }
+
+    $aDistance = $a['distance_km'] !== null
+        ? (float)$a['distance_km']
+        : PHP_FLOAT_MAX;
+
+    $bDistance = $b['distance_km'] !== null
+        ? (float)$b['distance_km']
+        : PHP_FLOAT_MAX;
+
+    return $aDistance <=> $bDistance;
+});
+
+/*
+ * Return a maximum of 10 riders.
+ */
 $riders = array_slice($riders, 0, 10);
 
-// The ETag must reflect the actual result set, not just the booking's static fields - a
-// rider's rating/order count changing this list without ever touching the booking row, and
-// caching against a key that can't detect that froze the sender's rider list until a hard
-// refresh.
-$etag = sha1(json_encode(array_map(fn($r) => [$r['id'], $r['active_order_count'], $r['rating']], $riders)));
+$etagData = array_map(
+    static fn(array $rider): array => [
+        $rider['id'],
+        $rider['vehicle_type'],
+        $rider['active_order_count'],
+        $rider['rating'],
+        $rider['suggested_fee'],
+        $rider['score']
+    ],
+    $riders
+);
+
+$etag = sha1(json_encode($etagData));
+
 response_cache_headers($etag, 5);
 
-echo json_encode(['pricing_pending' => false, 'riders' => $riders]);
+echo json_encode([
+    'pricing_pending' => false,
+    'riders' => $riders
+]);

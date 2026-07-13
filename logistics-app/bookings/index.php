@@ -2220,7 +2220,7 @@ function initSenderWorkspace() {
 
             async function pollTracking() {
                 try {
-                    const res = await fetch(`bookings/ajax_track_status.php?booking_id=${selectedBookingId}`);
+                    const res = await fetch(`<?= e(url_path('bookings/ajax_track_status.php')) ?>?booking_id=${selectedBookingId}`);
                     const json = await res.json();
                     if (!json.status) return;
 
@@ -2401,7 +2401,7 @@ function initSenderWorkspace() {
             async function pollRequestStatus() {
                 if (workspaceState.matchPhase !== 'waiting') return;
                 try {
-                    const res = await fetch(`bookings/ajax_request_status.php?booking_id=${selectedBookingId}`, { cache: 'no-store' });
+                    const res = await fetch(`<?= e(url_path('bookings/ajax_request_status.php')) ?>?booking_id=${selectedBookingId}`, { cache: 'no-store' });
                     const result = await res.json();
                     if (!result.success) return;
 
@@ -2604,7 +2604,7 @@ function initSenderWorkspace() {
                 }
 
                 try {
-                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`, { cache: 'no-store' });
+                    const response = await fetch(`<?= e(url_path('bookings/ajax_fetch_riders.php')) ?>?booking_id=${selectedBookingId}`, { cache: 'no-store' });
                     const result = await response.json();
                     if (!response.ok) {
                         throw new Error(result.error || result.message || 'Unable to fetch riders.');
@@ -2657,6 +2657,20 @@ function initSenderWorkspace() {
                     renderRiderList(riders);
                 } catch (err) {
                     console.error('Update Error:', err);
+                    const listContainer = root.querySelector('#rider-list-container');
+                    if (listContainer) {
+                        listContainer.innerHTML = `
+                            <div class="text-center text-danger small py-3">
+                                <div>Failed to load rider list. ${escapeForRiderCard(err.message || 'Please try again later.')}</div>
+                                <button type="button" class="btn btn-outline-danger btn-sm mt-3 rider-fetch-retry-btn">Retry</button>
+                            </div>`;
+                        listContainer.querySelector('.rider-fetch-retry-btn')?.addEventListener('click', () => {
+                            updateRiders();
+                        });
+                    }
+                    if (floatSubtitle) {
+                        floatSubtitle.textContent = I18N.fallbackNoRiders;
+                    }
                 }
             }
 

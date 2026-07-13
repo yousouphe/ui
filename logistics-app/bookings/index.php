@@ -2683,8 +2683,23 @@ function initSenderWorkspace() {
                                 <div>Failed to load rider list. ${escapeForRiderCard(err.message || 'Please try again later.')}</div>
                                 <button type="button" class="btn btn-outline-danger btn-sm mt-3 rider-fetch-retry-btn">Retry</button>
                             </div>`;
-                        listContainer.querySelector('.rider-fetch-retry-btn')?.addEventListener('click', () => {
-                            updateRiders();
+                        listContainer.querySelector('.rider-fetch-retry-btn')?.addEventListener('click', async (ev) => {
+                            const btn = ev.currentTarget;
+                            if (btn) {
+                                btn.disabled = true;
+                                const origHtml = btn.innerHTML;
+                                btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Retrying...';
+                                try {
+                                    await updateRiders();
+                                } catch (e) {
+                                    // ignore - updateRiders shows its own error UI
+                                } finally {
+                                    btn.disabled = false;
+                                    btn.innerHTML = origHtml;
+                                }
+                            } else {
+                                updateRiders();
+                            }
                         });
                     }
                     if (floatSubtitle) {

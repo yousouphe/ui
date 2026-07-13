@@ -112,6 +112,7 @@ $dbUser = $stmt->fetch(PDO::FETCH_ASSOC);
             <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
             <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
+            <a class="nav-link" href="<?= e(url_path('admin/pricing_fallback.php')) ?>">Pricing Fallback</a>
             <?php if (($user['role'] ?? '') === 'super_admin'): ?>
                 <a class="nav-link" href="<?= e(url_path('admin/pricing.php')) ?>"><?= e(t('admin.nav_pricing')) ?></a>
             <?php endif; ?>

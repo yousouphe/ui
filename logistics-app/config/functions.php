@@ -377,7 +377,11 @@ function rider_delivery_stats(PDO $pdo, int $riderUserId): array {
     $avgPlanned = $row['avg_planned'] !== null ? (float) $row['avg_planned'] : null;
     $avgActual = $row['avg_actual'] !== null ? (float) $row['avg_actual'] : null;
     $ratio = ($avgPlanned !== null && $avgActual !== null && $avgPlanned > 0.0) ? $avgActual / $avgPlanned : null;
-    return ['avg_actual_minutes' => $avgActual, 'ratio' => $ratio];
+    return [
+        'avg_actual_minutes' => $avgActual,
+        'avg_planned_minutes' => $avgPlanned,
+        'ratio' => $ratio
+    ];
 }
 
 // Average speed assumptions (km/h) for a rough "how far away are they, time-wise" estimate

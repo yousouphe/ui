@@ -1428,6 +1428,24 @@ const I18N = <?= json_encode([
     'pricingPendingSubtitle' => t('match.pricing_pending_subtitle'),
 ], JSON_UNESCAPED_UNICODE) ?>;
 
+function isAppOffline() {
+    return typeof navigator !== 'undefined' && !navigator.onLine;
+}
+
+function isOfflineError(err) {
+    return err && (err.message === 'offline' || err.message === 'Failed to fetch' || err.message === 'NetworkError when attempting to fetch resource.');
+}
+
+async function safeFetch(url, init = {}) {
+    if (isAppOffline()) throw new Error('offline');
+    try {
+        return await fetch(url, init);
+    } catch (err) {
+        if (isAppOffline()) throw new Error('offline');
+        throw err;
+    }
+}
+
 // STUN alone only works when both sides can find a direct path (same network, lenient
 // NAT). Most real phones on mobile data sit behind carrier-grade/symmetric NAT, so a TURN
 // relay is required or calls silently fail to carry audio and time out after ICE gives up
@@ -2567,7 +2585,7 @@ function initSenderWorkspace() {
                             <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
                             <div class="text-soft small">${online ? '<span class="text-success">Online</span>' : lastSeenText(r.last_seen_seconds_ago)} &middot; ${escapeForRiderCard(vehicleLabel(r.vehicle_type))}</div>
                             <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' + haversineIndicator : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
-                            <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
+                            <div class="text-soft small"><b>${r.avg_delivery_minutes !== null ? `~${Math.round(r.avg_delivery_minutes)} min avg` : 'No data'}</b>${r.avg_planned_minutes !== null && r.avg_delivery_minutes !== null ? ` (vs ~${Math.round(r.avg_planned_minutes)} est)` : ''}${r.performance_ratio !== null ? ` &middot; ${performanceRatioText(r.performance_ratio)}` : ''}</div>
                         </div>
                         <div class="vehicle-option-price">${priceHtml}</div>
                     </div>`;

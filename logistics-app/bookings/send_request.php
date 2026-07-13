@@ -60,6 +60,7 @@ $bookingId = isset($data['booking_id']) ? (int)$data['booking_id'] : 0;
 $riderUserId = isset($data['rider_user_id']) ? (int)$data['rider_user_id'] : 0;
 $proposedCostRaw = trim((string)($data['proposed_cost'] ?? ''));
 $proposedCost = is_numeric($proposedCostRaw) ? (float)$proposedCostRaw : 0;
+$forceMatch = isset($data['force_match']) && in_array(strtolower((string)$data['force_match']), ['1', 'true', 'yes'], true);
 
 if ($bookingId <= 0) {
     fail_request('Invalid booking selected.', 422, $ajax, null, 'booking_id missing or invalid');
@@ -146,7 +147,7 @@ try {
         fail_request('Selected rider already has the maximum number of active deliveries.', 409, $ajax, $bookingId, 'rider at capacity');
     }
 
-    // Only block duplicate pending request
+    // Only block duplicate pending request unless the sender is forcing a match.
     $stmt = $pdo->prepare("
         SELECT id
         FROM rider_requests
@@ -158,9 +159,18 @@ try {
     $stmt->execute([$bookingId, $riderUserId]);
     $existingPending = $stmt->fetchColumn();
 
-    if ($existingPending) {
+    if ($existingPending && !$forceMatch) {
         $pdo->rollBack();
         fail_request('A pending request has already been sent to this rider.', 409, $ajax, $bookingId, 'duplicate pending request');
+    }
+
+    if ($existingPending && $forceMatch) {
+        $stmt = $pdo->prepare('
+            UPDATE rider_requests
+            SET proposed_cost = ?
+            WHERE id = ?
+        ');
+        $stmt->execute([$proposedCost, $existingPending]);
     }
 
     // Generate tracking token if missing
@@ -186,48 +196,80 @@ try {
     ");
     $stmt->execute([$bookingId, $riderUserId]);
 
-    // Always insert new request
-    $stmt = $pdo->prepare("
-        INSERT INTO rider_requests (
-            booking_id,
-            sender_user_id,
-            rider_user_id,
-            proposed_cost,
-            request_status,
-            created_at
-        ) VALUES (?, ?, ?, ?, 'pending', NOW())
-    ");
-    $stmt->execute([
-        $bookingId,
-        (int)$booking['sender_user_id'],
-        $riderUserId,
-        $proposedCost
-    ]);
+    if ($existingPending) {
+        $newRequestId = (int)$existingPending;
+    } else {
+        $stmt = $pdo->prepare("
+            INSERT INTO rider_requests (
+                booking_id,
+                sender_user_id,
+                rider_user_id,
+                proposed_cost,
+                request_status,
+                created_at
+            ) VALUES (?, ?, ?, ?, 'pending', NOW())
+        ");
+        $stmt->execute([
+            $bookingId,
+            (int)$booking['sender_user_id'],
+            $riderUserId,
+            $proposedCost
+        ]);
+        $newRequestId = (int)$pdo->lastInsertId();
+    }
 
-    $newRequestId = (int)$pdo->lastInsertId();
+    if ($forceMatch) {
+        $stmt = $pdo->prepare('
+            UPDATE rider_requests
+            SET request_status = "accepted"
+            WHERE id = ?
+        ');
+        $stmt->execute([$newRequestId]);
+    }
 
     $newBookingStatus = $booking['booking_status'] ?? 'submitted';
     if ($newBookingStatus === 'draft') {
         $newBookingStatus = 'submitted';
     }
 
-    $stmt = $pdo->prepare("
+    $updateBookingSql = "
         UPDATE bookings
         SET agreed_cost = ?,
             booking_status = ?,
             updated_at = NOW()
         WHERE id = ?
-    ");
-    $stmt->execute([$proposedCost, $newBookingStatus, $bookingId]);
+    ";
+    $updateBookingParams = [$proposedCost, $newBookingStatus, $bookingId];
+
+    if ($forceMatch) {
+        $newBookingStatus = $newBookingStatus === 'submitted' ? 'matched' : $newBookingStatus;
+        $updateBookingSql = "
+            UPDATE bookings
+            SET agreed_cost = ?,
+                booking_status = ?,
+                selected_rider_user_id = ?,
+                matched_at = COALESCE(matched_at, NOW()),
+                updated_at = NOW()
+            WHERE id = ?
+        ";
+        $updateBookingParams = [$proposedCost, $newBookingStatus, $riderUserId, $bookingId];
+    }
+
+    $stmt = $pdo->prepare($updateBookingSql);
+    $stmt->execute($updateBookingParams);
 
     $pdo->commit();
 
     // Not localized to the rider's own locale preference for the same reason emails.php
     // isn't - t() reflects the current request's (the sender's) session/cookie locale, and
     // there's no stored per-user locale preference to look up the rider's instead.
-    send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . $booking['booking_code'] . '.', url_path('rider/'));
-
-    $successMessage = 'Rider request sent successfully.';
+    if ($forceMatch) {
+        send_web_push($pdo, $riderUserId, 'Delivery assigned', 'You have been assigned booking ' . $booking['booking_code'] . '. Please complete the delivery.', url_path('rider/'));
+        $successMessage = 'Rider assigned successfully.';
+    } else {
+        send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . $booking['booking_code'] . '.', url_path('rider/'));
+        $successMessage = 'Rider request sent successfully.';
+    }
 
     if ($ajax) {
         respond_json([

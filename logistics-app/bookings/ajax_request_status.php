@@ -23,7 +23,7 @@ if (!$booking || (int)$booking['sender_user_id'] !== (int)$user['id']) {
 }
 
 $stmt = $pdo->prepare('
-    SELECT rr.id, rr.rider_user_id, rr.request_status, rr.proposed_cost, u.full_name, rp.vehicle_type
+    SELECT rr.id, rr.rider_user_id, rr.request_status, rr.proposed_cost, rr.created_at, u.full_name, rp.vehicle_type
     FROM rider_requests rr
     INNER JOIN users u ON u.id = rr.rider_user_id
     LEFT JOIN rider_profiles rp ON rp.user_id = rr.rider_user_id
@@ -33,6 +33,15 @@ $stmt = $pdo->prepare('
 ');
 $stmt->execute([$bookingId]);
 $request = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+if ($request && $request['request_status'] === 'pending' && $request['created_at']) {
+    $createdAt = strtotime($request['created_at']);
+    if ($createdAt !== false && (time() - $createdAt) >= 60) {
+        $stmt = $pdo->prepare('UPDATE rider_requests SET request_status = "rejected" WHERE id = ?');
+        $stmt->execute([$request['id']]);
+        $request['request_status'] = 'rejected';
+    }
+}
 
 echo json_encode([
     'success' => true,

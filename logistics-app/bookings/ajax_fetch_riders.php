@@ -216,6 +216,7 @@ foreach ($riders as &$rider) {
     );
 
     $rider['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
+    $rider['avg_planned_minutes'] = $stats['avg_planned_minutes'];
     $rider['performance_ratio'] = $stats['ratio'];
 
     $rider['score'] = rider_match_score(

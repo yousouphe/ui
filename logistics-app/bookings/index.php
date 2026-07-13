@@ -1770,7 +1770,8 @@ function initSenderWorkspace() {
             if (!container || !submitBtn || !selectedInput) return;
 
             container.querySelectorAll('.vehicle-option-card').forEach(card => {
-                card.addEventListener('click', function () {
+                card.addEventListener('click', function (e) {
+                    e.preventDefault();
                     container.querySelectorAll('.vehicle-option-card').forEach(item => {
                         item.classList.remove('selected');
                         item.setAttribute('aria-pressed', 'false');

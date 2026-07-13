@@ -2340,12 +2340,33 @@ function initSenderWorkspace() {
 
             function renderRiderMarkers(riders) {
                 const activeIds = new Set();
+
                 riders.forEach(rider => {
-                    activeIds.add(rider.id);
+                    const riderId = Number(rider.id);
+                    activeIds.add(riderId);
+
                     if (!workspaceState.detailMap) return;
-                    const latlng = [parseFloat(rider.last_latitude), parseFloat(rider.last_longitude)];
-                    if (workspaceState.riderMarkers[rider.id]) {
-                        workspaceState.riderMarkers[rider.id].setLatLng(latlng);
+
+                    const latitude = Number.parseFloat(rider.last_latitude);
+                    const longitude = Number.parseFloat(rider.last_longitude);
+                    const hasValidLocation = Number.isFinite(latitude)
+                        && Number.isFinite(longitude)
+                        && latitude >= -90 && latitude <= 90
+                        && longitude >= -180 && longitude <= 180;
+
+                    // Keep riders with unknown locations in the list, but never pass NaN
+                    // coordinates to Leaflet because one invalid marker stops all rendering.
+                    if (!hasValidLocation) {
+                        if (workspaceState.riderMarkers[riderId]) {
+                            workspaceState.detailMap.removeLayer(workspaceState.riderMarkers[riderId]);
+                            delete workspaceState.riderMarkers[riderId];
+                        }
+                        return;
+                    }
+
+                    const latlng = [latitude, longitude];
+                    if (workspaceState.riderMarkers[riderId]) {
+                        workspaceState.riderMarkers[riderId].setLatLng(latlng);
                     } else {
                         const icon = L.divIcon({
                             html: `<div style="color:${rider.vehicle_type === 'car' ? '#38bdf8' : '#fbbf24'};font-size:24px;text-shadow:0 0 5px #000;"><i class="fa-solid ${vehicleIcon(rider.vehicle_type)}"></i></div>`,
@@ -2353,9 +2374,20 @@ function initSenderWorkspace() {
                             iconSize: [30, 30],
                             iconAnchor: [15, 15]
                         });
-                        workspaceState.riderMarkers[rider.id] = L.marker(latlng, { icon }).addTo(workspaceState.detailMap).bindPopup(`<b>${escapeForRiderCard(rider.full_name)}</b>`);
+                        workspaceState.riderMarkers[riderId] = L.marker(latlng, { icon })
+                            .addTo(workspaceState.detailMap)
+                            .bindPopup(`<b>${escapeForRiderCard(rider.full_name)}</b>`);
                     }
                 });
+
+                Object.keys(workspaceState.riderMarkers).forEach(id => {
+                    const riderId = Number(id);
+                    if (!activeIds.has(riderId)) {
+                        workspaceState.detailMap?.removeLayer(workspaceState.riderMarkers[id]);
+                        delete workspaceState.riderMarkers[id];
+                    }
+                });
+
                 workspaceState.knownRiderIds = activeIds;
             }
 
@@ -2405,7 +2437,7 @@ function initSenderWorkspace() {
                         <div class="text-center py-4">
                             <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
                             <div class="fw-bold">${escapeForRiderCard(rider.full_name)}</div>
-                            <div class="text-soft small">${vehicleLabel(rider.vehicle_type)} &middot; ₦${Number(rider.suggested_fee).toLocaleString()}</div>
+                            <div class="text-soft small">${vehicleLabel(rider.vehicle_type)} &middot; ${rider.suggested_fee !== null && Number.isFinite(Number(rider.suggested_fee)) ? `₦${Number(rider.suggested_fee).toLocaleString()}` : 'Price unavailable'}</div>
                             <div class="text-soft small mt-1">${I18N.waitingForThemToRespond}</div>
                         </div>`;
                 }
@@ -2414,6 +2446,9 @@ function initSenderWorkspace() {
             }
 
             async function sendRiderRequest(rider) {
+                if (rider.suggested_fee === null || rider.suggested_fee === undefined || !Number.isFinite(Number(rider.suggested_fee))) {
+                    return;
+                }
                 workspaceState.matchPhase = 'matching';
                 if (floatTitle) floatTitle.textContent = I18N.requestingRider;
                 if (floatSubtitle) floatSubtitle.textContent = `${escapeForRiderCard(rider.full_name)} · ${vehicleLabel(rider.vehicle_type)}`;
@@ -2459,9 +2494,15 @@ function initSenderWorkspace() {
                 return `~${Number(ratio).toFixed(1)}x ${I18N.fallbackPerformanceSuffix}`;
             }
 
-            // Online/offline is no longer a filter for matching, but seeing how fresh a
-            // rider's last known location is still helps the sender judge how reachable they
-            // probably are right now.
+            const ONLINE_WINDOW_SECONDS = 60;
+
+            function riderIsOnline(rider) {
+                if (rider.is_online === true || Number(rider.is_online) === 1) return true;
+                if (rider.last_seen_seconds_ago === null || rider.last_seen_seconds_ago === undefined || rider.last_seen_seconds_ago === '') return false;
+                const secondsAgo = Number(rider.last_seen_seconds_ago);
+                return Number.isFinite(secondsAgo) && secondsAgo >= 0 && secondsAgo <= ONLINE_WINDOW_SECONDS;
+            }
+
             function lastSeenText(secondsAgo) {
                 if (secondsAgo === null || secondsAgo === undefined) return I18N.lastSeenNever;
                 if (secondsAgo < 120) return I18N.lastSeenNow;
@@ -2485,33 +2526,43 @@ function initSenderWorkspace() {
                 const cardsContainer = root.querySelector('#rider-cards');
                 if (!cardsContainer) return;
 
-                cardsContainer.innerHTML = riders.map(r => `
-                    <div class="vehicle-option-card" data-rider-id="${r.id}">
+                cardsContainer.innerHTML = riders.map(r => {
+                    const pricingAvailable = r.pricing_available !== false
+                        && Number(r.pricing_available) !== 0
+                        && r.suggested_fee !== null
+                        && r.suggested_fee !== undefined
+                        && Number.isFinite(Number(r.suggested_fee));
+                    const online = riderIsOnline(r);
+                    const priceHtml = pricingAvailable
+                        ? `₦${Number(r.suggested_fee).toLocaleString()}`
+                        : '<span class="text-warning small">Price unavailable</span>';
+
+                    return `
+                    <div class="vehicle-option-card ${pricingAvailable ? '' : 'opacity-50'}" data-rider-id="${r.id}" data-pricing-available="${pricingAvailable ? '1' : '0'}">
                         <div class="vehicle-option-icon"><i class="fa-solid ${vehicleIcon(r.vehicle_type)}"></i></div>
                         <div class="vehicle-option-info">
                             <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
+                            <div class="text-soft small">${online ? '<span class="text-success">Online</span>' : lastSeenText(r.last_seen_seconds_ago)} &middot; ${escapeForRiderCard(vehicleLabel(r.vehicle_type))}</div>
                             <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
                             <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
-                            <div class="text-soft small">${lastSeenText(r.last_seen_seconds_ago)}</div>
                         </div>
-                        <div class="vehicle-option-price">₦${Number(r.suggested_fee).toLocaleString()}</div>
-                    </div>
-                `).join('');
+                        <div class="vehicle-option-price">${priceHtml}</div>
+                    </div>`;
+                }).join('');
 
                 cardsContainer.querySelectorAll('.vehicle-option-card[data-rider-id]').forEach(card => {
                     card.addEventListener('click', function () {
+                        if (this.dataset.pricingAvailable !== '1') return;
                         const rider = riders.find(r => String(r.id) === this.dataset.riderId);
                         if (rider) sendRiderRequest(rider);
                     });
                 });
             }
 
-            // The one and only rider-matching UI - not gated on anyone being "online", since
-            // that says nothing about whether a rider is good at the job or would actually
-            // respond. Every eligible rider (right vehicle type, KYC-approved, under the
-            // 3-order cap) is ranked by rider_match_score() (rating + delivery performance)
-            // server-side; the sender can re-sort the same top-10 list client-side by
-            // whichever signal matters most to them for this particular delivery.
+            // The API supplies up to ten eligible riders across vehicle types. The page first
+            // displays riders seen within the online window; when none are online, it falls
+            // back to the eligible list so the sender can decide using price, distance,
+            // rating, workload, and delivery performance.
             function renderRiderList(riders) {
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
@@ -2553,9 +2604,17 @@ function initSenderWorkspace() {
                 }
 
                 try {
-                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`);
+                    const response = await fetch(`bookings/ajax_fetch_riders.php?booking_id=${selectedBookingId}`, { cache: 'no-store' });
                     const result = await response.json();
-                    const riders = result.riders || [];
+                    if (!response.ok) {
+                        throw new Error(result.error || result.message || 'Unable to fetch riders.');
+                    }
+
+                    const allEligibleRiders = (Array.isArray(result.riders) ? result.riders : [])
+                        .filter(rider => !workspaceState.matchExcludedRiderIds.has(Number(rider.id)));
+                    const onlineRiders = allEligibleRiders.filter(riderIsOnline);
+                    const riders = (onlineRiders.length > 0 ? onlineRiders : allEligibleRiders).slice(0, 10);
+                    const usingFallback = onlineRiders.length === 0 && allEligibleRiders.length > 0;
 
                     const listContainer = root.querySelector('#rider-list-container');
                     if (!listContainer) {
@@ -2585,7 +2644,15 @@ function initSenderWorkspace() {
                     }
 
                     if (floatTitle) floatTitle.textContent = riders.length > 0 ? I18N.riderFound : I18N.findingRider;
-                    if (floatSubtitle) floatSubtitle.textContent = riders.length > 0 ? I18N.pickOneToMatch : I18N.fallbackNoRiders;
+                    if (floatSubtitle) {
+                        if (onlineRiders.length > 0) {
+                            floatSubtitle.textContent = `${onlineRiders.length} online rider${onlineRiders.length === 1 ? '' : 's'} available`;
+                        } else if (usingFallback) {
+                            floatSubtitle.textContent = 'No rider is currently online. Showing other eligible riders.';
+                        } else {
+                            floatSubtitle.textContent = I18N.fallbackNoRiders;
+                        }
+                    }
 
                     renderRiderList(riders);
                 } catch (err) {

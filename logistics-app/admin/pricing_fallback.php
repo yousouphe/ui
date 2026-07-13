@@ -4,6 +4,15 @@ require_role(['admin', 'super_admin']);
 require_once __DIR__ . '/../config/db.php';
 
 $flagPath = __DIR__ . '/../assets/pricing_fallback.json';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'clear') {
+    require_csrf();
+    if (file_exists($flagPath)) {
+        @unlink($flagPath);
+    }
+    flash('success', 'Pricing fallback flag cleared.');
+    redirect_to('admin/pricing_fallback.php');
+}
+
 $exists = file_exists($flagPath);
 $data = null;
 if ($exists) {
@@ -25,6 +34,10 @@ if ($exists) {
 <body>
 <div class="container py-5">
     <h1 class="h4 mb-4">Pricing Fallback Status</h1>
+
+    <?php if ($success = flash('success')): ?>
+        <div class="alert alert-success"><?= e($success) ?></div>
+    <?php endif; ?>
 
     <?php if (!$exists): ?>
         <div class="alert alert-success">No haversine fallback flag present. Mapbox pricing appears healthy.</div>

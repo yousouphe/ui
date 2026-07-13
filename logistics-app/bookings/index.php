@@ -2541,7 +2541,7 @@ function initSenderWorkspace() {
                 avg_time: (a, b) => (a.avg_delivery_minutes === null) - (b.avg_delivery_minutes === null) || (a.avg_delivery_minutes ?? 0) - (b.avg_delivery_minutes ?? 0),
             };
 
-            function renderRiderCards(riders) {
+            function renderRiderCards(riders, showHaversineIndicator = false) {
                 const cardsContainer = root.querySelector('#rider-cards');
                 if (!cardsContainer) return;
 
@@ -2555,6 +2555,9 @@ function initSenderWorkspace() {
                     const priceHtml = pricingAvailable
                         ? `₦${Number(r.suggested_fee).toLocaleString()}`
                         : '<span class="text-warning small">Price unavailable</span>';
+                    const haversineIndicator = showHaversineIndicator
+                        ? '<span class="badge bg-info ms-1" title="Distance calculated via straight-line approximation">~</span>'
+                        : '';
 
                     return `
                     <div class="vehicle-option-card ${pricingAvailable ? '' : 'opacity-50'}" data-rider-id="${r.id}" data-pricing-available="${pricingAvailable ? '1' : '0'}">
@@ -2562,7 +2565,7 @@ function initSenderWorkspace() {
                         <div class="vehicle-option-info">
                             <div class="fw-bold">${escapeForRiderCard(r.full_name)} &middot; ${Number(r.rating || 0).toFixed(1)} <i class="fa-solid fa-star text-warning small"></i></div>
                             <div class="text-soft small">${online ? '<span class="text-success">Online</span>' : lastSeenText(r.last_seen_seconds_ago)} &middot; ${escapeForRiderCard(vehicleLabel(r.vehicle_type))}</div>
-                            <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
+                            <div class="text-soft small">${r.active_order_count}/3 ${I18N.fallbackOrderCount} &middot; ${r.distance_km !== null ? parseFloat(r.distance_km).toFixed(1) + 'km' + haversineIndicator : I18N.fallbackLocationUnknown}${r.eta_minutes !== null ? ` &middot; ~${r.eta_minutes} ${I18N.fallbackEtaSuffix}` : ''}</div>
                             <div class="text-soft small">${performanceRatioText(r.performance_ratio)}${r.avg_delivery_minutes !== null ? ` &middot; ~${Math.round(r.avg_delivery_minutes)} min ${I18N.fallbackAvgDeliverySuffix}` : ''}</div>
                         </div>
                         <div class="vehicle-option-price">${priceHtml}</div>
@@ -2582,7 +2585,7 @@ function initSenderWorkspace() {
             // displays riders seen within the online window; when none are online, it falls
             // back to the eligible list so the sender can decide using price, distance,
             // rating, workload, and delivery performance.
-            function renderRiderList(riders) {
+            function renderRiderList(riders, showHaversineIndicator = false) {
                 const listContainer = root.querySelector('#rider-list-container');
                 if (!listContainer) return;
 
@@ -2605,11 +2608,11 @@ function initSenderWorkspace() {
                     <div id="rider-cards"></div>
                 `;
 
-                renderRiderCards(riders);
+                renderRiderCards(riders, showHaversineIndicator);
 
                 root.querySelector('#rider-sort')?.addEventListener('change', function () {
                     const sorter = RIDER_SORTERS[this.value] || RIDER_SORTERS.score;
-                    renderRiderCards([...riders].sort(sorter));
+                    renderRiderCards([...riders].sort(sorter), showHaversineIndicator);
                 });
             }
 
@@ -2625,6 +2628,7 @@ function initSenderWorkspace() {
                 try {
                     const response = await fetch(`<?= e(url_path('bookings/ajax_fetch_riders.php')) ?>?booking_id=${selectedBookingId}`, { cache: 'no-store' });
                     const result = await response.json();
+                    const haversineUsed = result.haversine_used === true;
                     if (!response.ok) {
                         throw new Error(result.error || result.message || 'Unable to fetch riders.');
                     }
@@ -2673,7 +2677,7 @@ function initSenderWorkspace() {
                         }
                     }
 
-                    renderRiderList(riders);
+                    renderRiderList(riders, haversineUsed);
                 } catch (err) {
                     console.error('Update Error:', err);
                     const listContainer = root.querySelector('#rider-list-container');
@@ -3869,25 +3873,6 @@ window.addEventListener('pagehide', function () {
         workspaceState.peer.destroy();
     }
 });
-</script>
-<script>
-// Show a small banner when the server fell back to haversine pricing recently.
-(async function () {
-    try {
-        const res = await fetch(`<?= e(url_path('assets/pricing_fallback.json')) ?>`, { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data || !data.ts) return;
-        const container = document.querySelector('.container') || document.body;
-        const d = new Date(data.ts * 1000);
-        const banner = document.createElement('div');
-        banner.className = 'alert alert-warning mb-3';
-        banner.innerHTML = `<strong>Pricing Approximation:</strong> We temporarily used a straight-line distance for pricing (approx). This happens when automatic routing is unavailable. Last fallback: ${d.toLocaleString()}.`;
-        container.insertBefore(banner, container.firstChild);
-    } catch (e) {
-        console.debug('No pricing fallback flag or failed to load it.');
-    }
-})();
 </script>
 </body>
 </html>

@@ -240,6 +240,19 @@ foreach ($riders as &$rider) {
 
 unset($rider);
 
+// Check if haversine fallback was used for this route metric
+$haversineUsed = false;
+if (file_exists(__DIR__ . '/../assets/pricing_fallback.json')) {
+    try {
+        $fallbackData = json_decode(file_get_contents(__DIR__ . '/../assets/pricing_fallback.json'), true);
+        if (is_array($fallbackData) && isset($fallbackData['timestamp'])) {
+            $haversineUsed = true;
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+}
+
 /*
  * Sort primarily by matching score.
  *
@@ -297,5 +310,6 @@ response_cache_headers($etag, 5);
 
 echo json_encode([
     'pricing_pending' => false,
+    'haversine_used' => $haversineUsed,
     'riders' => $riders
 ]);

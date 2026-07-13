@@ -91,9 +91,37 @@ function pricing_distance_km(float $lat1, float $lng1, float $lat2, float $lng2)
 // NoRouteFoundException (see road_route_metrics()) - callers that want to distinguish "no
 // route exists" from "transient failure, try again" should catch that first.
 function pricing_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2): array {
-    $metrics = road_route_metrics($lat1, $lng1, $lat2, $lng2);
-    if ($metrics === null) {
-        throw new RuntimeException('Unable to determine road distance for pricing.');
+    // Try the accurate road routing first. If Mapbox explicitly reports "no route"
+    // re-throw so callers can surface an address-specific error. For transient
+    // failures (network, auth, rate-limit) fall back to a straight-line haversine
+    // approximation so bookings can still be created/priced temporarily.
+    try {
+        $metrics = road_route_metrics($lat1, $lng1, $lat2, $lng2);
+    } catch (NoRouteFoundException $e) {
+        // A true 'no route' is user-fixable (bad addresses) - preserve behaviour.
+        throw $e;
+    } catch (Throwable $e) {
+        // Transient/config failure - log and fall back to haversine approximation.
+        error_log('Mapbox pricing: transient failure, falling back to haversine: ' . $e->getMessage());
+        $metrics = null;
     }
+
+    if ($metrics === null) {
+        // Haversine fallback (straight-line) - temporary and approximate.
+        $earthRadius = 6371; // km
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2)**2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2)**2;
+        $distance_km = $earthRadius * (2 * atan2(sqrt($a), sqrt(1 - $a)));
+
+        // Estimate duration using a conservative average speed (km/h). Adjust if needed.
+        $average_speed_kmh = 25.0;
+        $duration_min = ($distance_km / $average_speed_kmh) * 60.0;
+
+        error_log(sprintf('Mapbox pricing: using haversine fallback (approx). distance_km=%.3f duration_min=%.1f', $distance_km, $duration_min));
+
+        return ['distance_km' => $distance_km, 'duration_min' => $duration_min];
+    }
+
     return $metrics;
 }

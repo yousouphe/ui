@@ -1,6 +1,6 @@
 # Aike Logistics — Rider Value Proposition
 
-Recruitment messaging for two audiences: **individual riders** and **companies with fleets of riders** (partnership call). English. CTA: **entrepoints.ng**.
+Recruitment messaging for two audiences: **individual riders** and **companies with fleets of riders** (partnership call). English. Rider signup CTA: **entrepoints.ng/aike/register**.
 
 Every claim below is backed by a live feature or a stated business commitment. Do not mention the platform's percentage split anywhere — see "Claim guardrails" at the bottom.
 
@@ -43,11 +43,11 @@ Every claim below is backed by a live feature or a stated business commitment. D
 - 📱 **One app does it all.** Job alerts, chat, calls, and live navigation — available in English and Hausa.
 
 ### How to start (3-step strip)
-**1. SIGN UP** at entrepoints.ng (email or Google) → **2. VERIFY** your ID and vehicle → **3. GO ONLINE** and start earning.
+**1. SIGN UP** at entrepoints.ng/aike/register (email or Google) → **2. VERIFY** your ID and vehicle → **3. GO ONLINE** and start earning.
 
 ### CTA block
 > ## **Ready to ride?**
-> ### Sign up today at **entrepoints.ng**
+> ### Sign up today at **entrepoints.ng/aike/register**
 > *Free to join. Bring your bike, car, or van.*
 
 ### Fleet partnership strip (bottom band of the flyer)
@@ -57,7 +57,7 @@ Every claim below is backed by a live feature or a stated business commitment. D
 - **Hierarchy:** Headline dominant (top third) → subheadline → 5 bullets in the middle band → 3-step strip → CTA block → fleet-partnership strip as a visually distinct bottom band (darker background, inverted colors) so both audiences see their message at a glance.
 - **Imagery:** one hero photo of a confident Nigerian rider on a bike with a branded delivery box, city street backdrop; secondary phone mockup showing the wallet screen ("Available balance" tile) if space allows. For the fleet strip, a small motif of three riders in a row.
 - **Color:** use the app's sky-blue brand palette (#38bdf8 / #0ea5e9 accents on white) for recognition.
-- **QR code:** place a QR code linking to `https://entrepoints.ng` beside the CTA — riders scan instead of typing.
+- **QR code:** place a QR code linking to `https://entrepoints.ng/aike/register` beside the CTA — riders scan instead of typing the full address.
 - Keep to one page; bullets must survive at arm's length — minimum 11pt body.
 
 ---
@@ -74,7 +74,7 @@ Format: 9:16 vertical (WhatsApp Status, TikTok, Instagram Reels, YouTube Shorts)
 | 4 | 0:12–0:16 | Handover moment: customer receives package, smiles, taps 5 stars on their phone. | "Deliver well, and your rating brings the next job to *you*. Your good name is your best advert." | **⭐⭐⭐⭐⭐ Good work wins more work** |
 | 5 | 0:16–0:21 | Phone screen: wallet balance counting up; cut to bank alert notification on the phone. | "And your money? Withdraw it daily — straight to your bank account." | **Withdraw daily 🏦** |
 | 6 | 0:21–0:25 | Rider parks, pulls off helmet, satisfied look at sunset. App signup screen appears on phone. | "Sign up free with your email or Google. Verify. Go online. Start earning." | **Sign up → Verify → Earn** |
-| 7 | 0:25–0:30 | Full-screen brand card: Aike logo, sky-blue background, URL + QR code. A second line fades in for fleets. Music hits final beat. | "Aike Logistics — your ride, your time, your money. Got a fleet of riders? Partner with us. Join at entrepoints-dot-N-G." | **entrepoints.ng** *(large)* + QR code, then: **Fleet owner? Partner with us.** |
+| 7 | 0:25–0:30 | Full-screen brand card: Aike logo, sky-blue background, signup URL + QR code. A second line fades in for fleets. Music hits final beat. | "Aike Logistics — your ride, your time, your money. Got a fleet of riders? Partner with us. Sign up now — the link is on your screen." | **entrepoints.ng/aike/register** *(large)* + QR code, then: **Fleet owner? Partner with us.** |
 
 **Production notes:**
 - Scenes 1, 3, 4, 6 are live-action (or AI-generated street footage); scenes 2 and 5 are screen recordings of the actual app — use the real job-offer card and wallet page for authenticity.

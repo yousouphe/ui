@@ -72,6 +72,7 @@ body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:1
 .lang-switch a.active{font-weight:700;color:#0f2c44}
 </style>
 </head><body>
+<?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
 <div class="lang-switch">
   <a href="<?= e(url_path('set_locale?locale=en&redirect=login')) ?>" class="<?= current_locale() === 'en' ? 'active' : '' ?>">EN</a>
   &middot;

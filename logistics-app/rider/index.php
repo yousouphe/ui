@@ -841,7 +841,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </style>
 </head>
 <body>
-
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container">
         <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>"><?= e(t('common.brand')) ?></a>

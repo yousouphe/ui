@@ -1,0 +1,146 @@
+/* Aike PWA splash + connectivity styles. Precached by the service worker so it is available
+   offline. Critical layout for #aike-splash is inlined in config/pwa.php; this file adds the
+   illustration, its animation, and the slim runtime connectivity banner. Kept lightweight
+   (no images, no fonts, no dependencies) for slow mobile networks. */
+
+/* --- Splash illustration: a simple pickup -> drop-off route with a moving courier dot,
+   representing both sides of the app (a sender's delivery in motion, a rider's trip). --- */
+#aike-splash .aike-illus {
+  width: min(15rem, 74vw);
+  height: 3.4rem;
+  position: relative;
+  margin: -0.25rem 0 0.25rem;
+}
+#aike-splash .aike-illus::before,
+#aike-splash .aike-illus::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-top: -0.45rem;
+  border-radius: 50%;
+}
+#aike-splash .aike-illus::before { left: 0; background: #0b6ec9; }              /* pickup */
+#aike-splash .aike-illus::after  { right: 0; background: #16a34a; }             /* drop-off */
+#aike-splash .aike-illus .aike-line {
+  position: absolute;
+  top: 50%;
+  left: 0.9rem;
+  right: 0.9rem;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, #9cc6ea 0 8px, transparent 8px 16px);
+  background-size: 16px 3px;
+  animation: aike-dash 700ms linear infinite;
+}
+#aike-splash .aike-illus .aike-courier {
+  position: absolute;
+  top: 50%;
+  left: 0.9rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-top: -0.75rem;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #0b6ec9;
+  box-shadow: 0 4px 10px rgba(11, 110, 201, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: aike-ride 2.6s ease-in-out infinite;
+}
+#aike-splash .aike-illus .aike-courier::before {
+  content: "";
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #0b6ec9;
+}
+
+@keyframes aike-dash { to { background-position: 16px 0; } }
+@keyframes aike-ride {
+  0%   { left: 0.9rem; }
+  50%  { left: calc(100% - 0.9rem - 1.5rem); }
+  100% { left: 0.9rem; }
+}
+
+/* Feature-message fade between rotations. */
+#aike-splash .aike-msg { transition: opacity 0.3s ease; }
+#aike-splash .aike-msg.aike-msg-out { opacity: 0; }
+
+/* --- Offline / retry block, shown inside the splash by boot.js or by offline.html. --- */
+.aike-offline-box {
+  max-width: 24rem;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(15, 42, 68, 0.12);
+  border-radius: 1rem;
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+}
+.aike-offline-box .aike-offline-title { font-weight: 700; color: #b45309; }
+.aike-offline-box .aike-offline-sub { font-size: 0.9rem; color: #5c7a91; margin: 0; }
+.aike-retry-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 0.6rem;
+  background: #0b6ec9;
+  color: #fff;
+  font-weight: 600;
+  padding: 0.55rem 1.4rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  min-height: 44px;
+}
+.aike-retry-btn:hover { background: #095ca8; }
+.aike-retry-btn:focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+.aike-retry-btn[disabled] { opacity: 0.6; cursor: progress; }
+
+/* --- Slim runtime banner for a page that was ALREADY loaded and then went offline.
+   Non-blocking: the app keeps working from its current state and its own pollers self-heal;
+   we never reload the whole page here. --- */
+#aike-net-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%) translateY(150%);
+  z-index: 2147482000;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  background: #64748b;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  transition: transform 0.35s ease, background 0.35s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+#aike-net-banner.aike-show { transform: translateX(-50%) translateY(0); }
+#aike-net-banner.aike-offline { background: #b45309; }
+#aike-net-banner.aike-online { background: #16a34a; }
+#aike-net-banner .aike-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+  animation: aike-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes aike-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  #aike-splash .aike-illus .aike-line,
+  #aike-splash .aike-illus .aike-courier,
+  #aike-net-banner .aike-dot { animation: none !important; }
+  #aike-splash .aike-illus .aike-courier { left: calc(50% - 0.75rem); }
+  #aike-net-banner { transition: none; }
+}

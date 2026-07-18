@@ -42,8 +42,11 @@ function road_route_metrics(float $lat1, float $lng1, float $lat2, float $lng2):
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_CONNECTTIMEOUT => 5,
+        // Tight caps: this call sits in a request path, so a slow/unreachable Mapbox must
+        // never pin a PHP worker for long (worker-exhaustion DoS). Results are cached by
+        // cached_route_metrics() so a short timeout only affects the rare cache-miss.
+        CURLOPT_TIMEOUT => 4,
+        CURLOPT_CONNECTTIMEOUT => 3,
     ]);
     $response = curl_exec($ch);
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

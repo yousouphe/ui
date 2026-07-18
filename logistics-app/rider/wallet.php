@@ -63,15 +63,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($formAction === 'request_withdrawal') {
         $amount = (float) ($_POST['amount'] ?? 0);
-        $available = rider_available_balance($pdo, (int) $user['id']);
 
         if (!$bankAccount || empty($bankAccount['bank_code']) || empty($bankAccount['verified_at'])) {
             flash('error', t('wallet.add_bank_details_first'));
-        } elseif ($amount <= 0) {
+            redirect_to('rider/wallet');
+        }
+        if ($amount <= 0) {
             flash('error', t('wallet.invalid_withdrawal_amount'));
-        } elseif ($amount > $available) {
-            flash('error', t('wallet.withdrawal_exceeds_balance'));
-        } else {
+            redirect_to('rider/wallet');
+        }
+
+        // Create the withdrawal under a transaction so the balance check and the insert are
+        // atomic. rider_available_balance_locked() takes row locks on this rider's ledger and
+        // pending withdrawals, so two withdrawal submissions racing each other serialise here
+        // instead of both reading the same balance and both inserting (TOCTOU double-spend).
+        $withdrawalCreated = false;
+        try {
+            $pdo->beginTransaction();
+            $available = rider_available_balance_locked($pdo, (int) $user['id']);
+
+            if ($amount > $available) {
+                $pdo->rollBack();
+                flash('error', t('wallet.withdrawal_exceeds_balance'));
+                redirect_to('rider/wallet');
+            }
+
             $stmt = $pdo->prepare('
                 INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status)
                 VALUES (?, ?, ?, ?, ?, ?, "pending")
@@ -84,8 +100,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bankAccount['account_number'],
                 $bankAccount['account_name'],
             ]);
-            flash('success', t('wallet.withdrawal_request_submitted'));
+            $pdo->commit();
+            $withdrawalCreated = true;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('withdrawal request failed: ' . $e->getMessage());
+            flash('error', t('wallet.withdrawal_exceeds_balance'));
+            redirect_to('rider/wallet');
+        }
 
+        if ($withdrawalCreated) {
+            flash('success', t('wallet.withdrawal_request_submitted'));
+            // Notifications run after commit so a failed/rolled-back attempt never emails a
+            // "request received" message for a withdrawal that was not actually recorded.
             send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount);
             notify_admins($pdo, 'New withdrawal request', '<p><strong>' . e((string) $user['full_name']) . '</strong> requested a withdrawal of ₦' . number_format($amount, 2) . '.</p><p>Review it from the admin portal.</p>');
         }

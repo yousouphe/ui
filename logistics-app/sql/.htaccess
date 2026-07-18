@@ -1,0 +1,13 @@
+# Deny all HTTP access to this directory.
+#
+# Nothing here is meant to be fetched over the web - it holds application config/secrets,
+# raw SQL migrations, and CLI-only maintenance scripts. Serving any of it would leak
+# credentials or internal structure. The document root is the app folder itself on the
+# target shared host, so without this these paths would otherwise be directly reachable.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

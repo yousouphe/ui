@@ -39,6 +39,16 @@ if ((int)($booking['sender_user_id'] ?? 0) !== (int)($user['id'] ?? 0)) {
     exit;
 }
 
+// Cheap per-user throttle. Legit polling is ~4 requests/minute; 90/minute is enormous
+// headroom for multiple tabs yet caps a runaway/abusive client hammering this (each request
+// can otherwise fan out to route + per-rider pricing work). Fails open on DB error.
+if (is_rate_limited($pdo, 'fetch_riders', (string) ($user['id'] ?? '0'), 90, 1)) {
+    http_response_code(429);
+    echo json_encode(['error' => 'Too many requests. Please slow down.']);
+    exit;
+}
+record_rate_limit_attempt($pdo, 'fetch_riders', (string) ($user['id'] ?? '0'));
+
 $pickupLat = (float)$booking['pickup_latitude'];
 $pickupLng = (float)$booking['pickup_longitude'];
 $deliveryLat = (float)$booking['delivery_latitude'];
@@ -49,14 +59,15 @@ $routeDistanceKm = null;
 $routeDurationMinutes = null;
 
 /*
- * Obtain route metrics once.
- *
- * These route metrics are shared by all riders because the delivery
- * pickup and destination remain the same. Only pricing changes based
- * on each rider's vehicle type.
+ * Obtain route metrics once, via the shared route cache. Pickup->delivery never changes for
+ * a given booking, so after the first poll populates the cache every subsequent poll is a
+ * cheap local read instead of a fresh, worker-blocking Mapbox call - this is what stops the
+ * poll loop from being turned into a worker-exhaustion / Mapbox-quota DoS. The road distance
+ * is vehicle-independent; only the per-rider price below varies by vehicle type.
  */
 try {
-    $metrics = pricing_route_metrics(
+    $metrics = cached_route_metrics(
+        $pdo,
         $pickupLat,
         $pickupLng,
         $deliveryLat,

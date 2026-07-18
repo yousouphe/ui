@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Aike",
+    "slug": "aike",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "aike",
+    "userInterfaceStyle": "light",
+    "primaryColor": "#0b6ec9",
+    "splash": {
+      "backgroundColor": "#eaf5ff",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ng.aike.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Aike uses your location to set pickup/drop-off and show nearby riders.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Riders share location only while online or on an active delivery so senders can track the trip."
+      }
+    },
+    "android": {
+      "package": "ng.aike.app",
+      "adaptiveIcon": { "backgroundColor": "#0b6ec9" },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Riders share location only while online or on an active delivery.",
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "//": "Non-secret runtime config is read from env at build time; see src/config.ts and .env.example. No secrets here."
+    }
+  }
+}

@@ -1,1 +1,33 @@
+# --- Backend / web (existing) ---
 logistics-app/config/env.php
+
+# --- Mobile app (mobile/) ---
+# Dependencies & local env (never commit secrets or lockfile-installed modules)
+mobile/node_modules/
+mobile/.env
+mobile/.env.*
+!mobile/.env.example
+
+# Expo / Metro / build caches
+mobile/.expo/
+mobile/.expo-shared/
+mobile/dist/
+mobile/web-build/
+mobile/*.tsbuildinfo
+
+# Android build outputs & signing (never commit keystores)
+mobile/android/
+mobile/*.keystore
+mobile/*.jks
+
+# iOS build outputs & provisioning (never commit provisioning profiles / certs)
+mobile/ios/
+mobile/*.mobileprovision
+mobile/*.p8
+mobile/*.p12
+
+# EAS / native credentials
+mobile/credentials.json
+
+# Misc
+.DS_Store

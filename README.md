@@ -1,3 +1,21 @@
+# Aike platform
+
+This repository hosts the **Aike** logistics platform:
+
+- **`logistics-app/`** — the existing web application and its PHP backend (single source of truth
+  for auth, business rules, payments, maps, notifications). Unchanged by the mobile work.
+- **`mobile/`** — the Android & iOS app (React Native + Expo). A thin client over the same
+  backend via a versioned JSON API. See [`mobile/README.md`](mobile/README.md) and
+  [`mobile/docs/`](mobile/docs) (audit, feature-parity matrix, architecture, API specs, roadmap).
+- **`shared/`** — non-sensitive contracts shared by web/mobile (status, vehicle, role identifiers,
+  API types). No business logic, no secrets.
+
+The web and mobile apps operate independently on the **same** trusted backend and database.
+
+---
+
+_Original template README (repository scaffold) below._
+
 This is repository with examples of simple UI components. The repository is based on Next.js and React.js. 
 
 # installation

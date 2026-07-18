@@ -1,20 +1,56 @@
 <?php
+function request_is_https(): bool {
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+}
+
+// Baseline response hardening applied to every request. Deliberately permissive on
+// script/style sources (the app relies on inline handlers and a handful of CDNs) so it
+// never breaks the UI, while still shutting down the high-value attacks: clickjacking
+// (frame-ancestors / X-Frame-Options), MIME sniffing (nosniff), <base> hijacking, and
+// plugin/object injection. Called once at include time, before any output.
+function send_security_headers(): void {
+    if (headers_sent()) {
+        return;
+    }
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('X-Permitted-Cross-Domain-Policies: none');
+    header(
+        "Content-Security-Policy: "
+        . "default-src 'self' https: data: blob:; "
+        . "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; "
+        . "style-src 'self' 'unsafe-inline' https:; "
+        . "img-src 'self' data: blob: https:; "
+        . "font-src 'self' data: https:; "
+        . "media-src 'self' blob: https:; "
+        . "connect-src 'self' https: wss:; "
+        . "frame-ancestors 'self'; "
+        . "object-src 'none'; "
+        . "base-uri 'self'"
+    );
+    if (request_is_https()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+}
+
 if (session_status() === PHP_SESSION_NONE) {
     // use_strict_mode rejects session IDs the server never generated (e.g. a session ID
     // set by an attacker before a victim logs in), which is what session fixation relies on.
     ini_set('session.use_strict_mode', '1');
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
         'domain' => '',
-        'secure' => $isHttps,
+        'secure' => request_is_https(),
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
     session_start();
 }
+
+send_security_headers();
 
 function config_app(): array {
     static $config = null;
@@ -74,7 +110,13 @@ function set_locale(string $locale): void {
         return;
     }
     $_SESSION['locale'] = $locale;
-    setcookie('locale', $locale, time() + 60 * 60 * 24 * 365, '/');
+    setcookie('locale', $locale, [
+        'expires' => time() + 60 * 60 * 24 * 365,
+        'path' => '/',
+        'secure' => request_is_https(),
+        'httponly' => false, // read by client JS for the locale switcher
+        'samesite' => 'Lax',
+    ]);
 }
 
 function translations(): array {
@@ -441,6 +483,31 @@ function rider_available_balance(PDO $pdo, int $riderUserId): float {
     return $balance - $held;
 }
 
+// Same figure as rider_available_balance(), but computed under row locks so it is safe to use
+// as the authority for "can this withdrawal be created?". MUST be called inside an open
+// transaction: the SELECT ... FOR UPDATE on this rider's pending/processing withdrawal rows
+// (and a shared lock on their wallet ledger) serialises concurrent withdrawal submissions, so
+// two requests racing the check-then-insert can no longer both pass and over-withdraw (TOCTOU
+// double-spend). Locks are held until the caller commits/rolls back.
+function rider_available_balance_locked(PDO $pdo, int $riderUserId): float {
+    // LOCK IN SHARE MODE: we only need to prevent the ledger from changing under us, not to
+    // block earnings crediting elsewhere any harder than necessary.
+    $stmt = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE rider_user_id = ? LOCK IN SHARE MODE');
+    $stmt->execute([$riderUserId]);
+    $balance = (float) $stmt->fetchColumn();
+
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(amount), 0)
+        FROM withdrawal_requests
+        WHERE rider_user_id = ? AND status IN ('pending', 'processing')
+        FOR UPDATE
+    ");
+    $stmt->execute([$riderUserId]);
+    $held = (float) $stmt->fetchColumn();
+
+    return $balance - $held;
+}
+
 // Active admin accounts to notify for events that need their attention (new KYC, new
 // withdrawal request, new complaint) - "accountability" means every admin sees every event,
 // not just whoever happens to be online when it happens.
@@ -475,8 +542,76 @@ function booking_is_concluded(array $booking): bool {
     return (int) ($booking['rider_payment_confirmed'] ?? 0) === 1;
 }
 
+// Resolves the real client IP. By default this is REMOTE_ADDR only - proxy headers
+// (X-Forwarded-For, CF-Connecting-IP) are trivially spoofable, so trusting them blindly
+// would let an attacker forge a fresh IP per request and bypass rate limiting entirely.
+// They are ONLY honoured when the direct peer (REMOTE_ADDR) is a configured trusted proxy
+// (config/env.php 'trusted_proxies' - e.g. your Cloudflare/load-balancer ranges). Without
+// that config the behaviour is unchanged. This is what stops the reverse case too: behind
+// a CDN, every visitor otherwise shares the CDN's REMOTE_ADDR, so one attacker could trip
+// the shared rate-limit bucket and lock out all real users.
 function client_ip(): string {
-    return (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    $trusted = (array) (config_app()['trusted_proxies'] ?? []);
+    if (!$trusted || !ip_in_ranges($remote, $trusted)) {
+        return $remote;
+    }
+    // Cloudflare's single-hop header is the most reliable when present.
+    $cf = trim((string) ($_SERVER['HTTP_CF_CONNECTING_IP'] ?? ''));
+    if ($cf !== '' && filter_var($cf, FILTER_VALIDATE_IP)) {
+        return $cf;
+    }
+    // Otherwise walk X-Forwarded-For right-to-left, skipping our own trusted proxies; the
+    // first address we don't recognise as a proxy is the real client.
+    $xff = (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
+    if ($xff !== '') {
+        $parts = array_reverse(array_map('trim', explode(',', $xff)));
+        foreach ($parts as $candidate) {
+            if ($candidate === '' || !filter_var($candidate, FILTER_VALIDATE_IP)) {
+                continue;
+            }
+            if (!ip_in_ranges($candidate, $trusted)) {
+                return $candidate;
+            }
+        }
+    }
+    return $remote;
+}
+
+// True if $ip matches any of $ranges (exact IP or CIDR, IPv4/IPv6).
+function ip_in_ranges(string $ip, array $ranges): bool {
+    foreach ($ranges as $range) {
+        $range = trim((string) $range);
+        if ($range === '') {
+            continue;
+        }
+        if (strpos($range, '/') === false) {
+            if ($ip === $range) {
+                return true;
+            }
+            continue;
+        }
+        [$subnet, $bits] = explode('/', $range, 2);
+        $bits = (int) $bits;
+        $ipBin = @inet_pton($ip);
+        $subnetBin = @inet_pton($subnet);
+        if ($ipBin === false || $subnetBin === false || strlen($ipBin) !== strlen($subnetBin)) {
+            continue;
+        }
+        $bytes = intdiv($bits, 8);
+        $remainder = $bits % 8;
+        if ($bytes > 0 && strncmp($ipBin, $subnetBin, $bytes) !== 0) {
+            continue;
+        }
+        if ($remainder === 0) {
+            return true;
+        }
+        $mask = chr(0xff << (8 - $remainder) & 0xff);
+        if ((ord($ipBin[$bytes]) & ord($mask)) === (ord($subnetBin[$bytes]) & ord($mask))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Checked BEFORE doing sensitive work (verifying a password, sending a reset email,
@@ -502,6 +637,79 @@ function record_rate_limit_attempt(PDO $pdo, string $action, string $identifier)
     } catch (Throwable $e) {
         error_log('record_rate_limit_attempt failed: ' . $e->getMessage());
     }
+}
+
+// Road-distance/duration between two points, cached in the route_cache table so the same
+// pickup->delivery pair is only ever fetched from Mapbox once per TTL window. This is what
+// keeps the sender's rider-list poll (which fires every ~15s per open booking) from making
+// a fresh, worker-blocking outbound Mapbox call on every single poll - the first poll
+// populates the cache, the rest are cheap local reads. Coordinates are rounded to ~11m so
+// tiny GPS jitter still hits the same cache key. Throws NoRouteFoundException /
+// RuntimeException exactly like pricing_route_metrics() so callers behave identically.
+function cached_route_metrics(PDO $pdo, float $lat1, float $lng1, float $lat2, float $lng2, int $ttlSeconds = 86400): array {
+    $key = sha1(implode(',', [
+        number_format($lat1, 4, '.', ''), number_format($lng1, 4, '.', ''),
+        number_format($lat2, 4, '.', ''), number_format($lng2, 4, '.', ''),
+    ]));
+
+    try {
+        $stmt = $pdo->prepare('SELECT distance_km, duration_min FROM route_cache WHERE coord_key = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) LIMIT 1');
+        $stmt->execute([$key, $ttlSeconds]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return ['distance_km' => (float) $row['distance_km'], 'duration_min' => (float) $row['duration_min']];
+        }
+    } catch (Throwable $e) {
+        error_log('cached_route_metrics read failed: ' . $e->getMessage());
+    }
+
+    // Cache miss - the one outbound Mapbox call. Let its exceptions propagate unchanged.
+    $metrics = pricing_route_metrics($lat1, $lng1, $lat2, $lng2);
+
+    try {
+        $stmt = $pdo->prepare('REPLACE INTO route_cache (coord_key, distance_km, duration_min, created_at) VALUES (?, ?, ?, NOW())');
+        $stmt->execute([$key, (float) $metrics['distance_km'], (float) $metrics['duration_min']]);
+    } catch (Throwable $e) {
+        error_log('cached_route_metrics write failed: ' . $e->getMessage());
+    }
+
+    return $metrics;
+}
+
+// Opportunistic housekeeping so append-only/scratch data can't grow without bound and fill
+// the disk (a denial-of-service in itself) or degrade the rate-limit lookups. Cheap, wrapped
+// in try/catch, and only actually runs on a small fraction of requests (see db.php) so it
+// never adds latency to the hot path. scripts/gc.php runs the same routine from cron.
+function run_maintenance_gc(PDO $pdo): void {
+    try {
+        $pdo->prepare('DELETE FROM rate_limit_attempts WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)')->execute();
+    } catch (Throwable $e) {
+        error_log('gc rate_limit_attempts failed: ' . $e->getMessage());
+    }
+    try {
+        if (db_table_exists($pdo, 'route_cache')) {
+            $pdo->prepare('DELETE FROM route_cache WHERE created_at < DATE_SUB(NOW(), INTERVAL 2 DAY)')->execute();
+        }
+    } catch (Throwable $e) {
+        error_log('gc route_cache failed: ' . $e->getMessage());
+    }
+
+    // Stale realtime scratch files: presence pings older than 5 min, call state older than
+    // 30 min. Voice notes are left alone - they're referenced from chat history.
+    $assets = dirname(__DIR__) . '/assets';
+    $sweep = static function (string $dir, int $maxAgeSeconds): void {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $now = time();
+        foreach (glob($dir . '/*.json') ?: [] as $file) {
+            if (is_file($file) && ($now - (int) @filemtime($file)) > $maxAgeSeconds) {
+                @unlink($file);
+            }
+        }
+    };
+    $sweep($assets . '/realtime_presence', 300);
+    $sweep($assets . '/realtime_calls', 1800);
 }
 
 // Central troubleshooting trail for admins - bookings, payments, withdrawals, admin

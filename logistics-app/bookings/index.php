@@ -226,6 +226,17 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
                 respond_json(['success' => false, 'message' => 'Invalid voice note recipient.'], 422);
             }
 
+            // Cap the size (voice notes are short clips) so this endpoint can't be used to
+            // fill the disk, and throttle per user so it can't be spammed - both are outage
+            // vectors when the volume fills up.
+            if ((int) ($_FILES['voice_note']['size'] ?? 0) > 2 * 1024 * 1024) {
+                respond_json(['success' => false, 'message' => 'Voice note is too large (max 2MB).'], 413);
+            }
+            if (is_rate_limited($pdo, 'voice_upload', (string) $currentUserId, 20, 1)) {
+                respond_json(['success' => false, 'message' => 'Too many voice notes. Please wait a moment.'], 429);
+            }
+            record_rate_limit_attempt($pdo, 'voice_upload', (string) $currentUserId);
+
             $tmp = $_FILES['voice_note']['tmp_name'];
             $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp) ?: 'audio/webm';
             $extMap = [

@@ -1,9 +1,10 @@
 <?php
-require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/functions.php';
+require_role(['rider']);
+require_once __DIR__ . '/../config/db.php';
 
+header('Content-Type: application/json');
 $user = current_user();
-if (!$user) exit;
 
 $stmt = $pdo->prepare('
     SELECT rr.*, b.pickup_address 

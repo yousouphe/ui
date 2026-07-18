@@ -35,7 +35,11 @@ function send_security_headers(): void {
     }
 }
 
-if (session_status() === PHP_SESSION_NONE) {
+// The stateless mobile API (api/index.php) authenticates with bearer tokens, not the PHP
+// session cookie, so it defines AIKE_STATELESS before including this file to skip starting a
+// session (avoids issuing a Set-Cookie the API client would ignore). The web app never defines
+// it, so its behaviour is unchanged.
+if (session_status() === PHP_SESSION_NONE && !defined('AIKE_STATELESS')) {
     // use_strict_mode rejects session IDs the server never generated (e.g. a session ID
     // set by an attacker before a victim logs in), which is what session fixation relies on.
     ini_set('session.use_strict_mode', '1');

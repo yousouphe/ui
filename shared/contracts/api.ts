@@ -64,6 +64,17 @@ export interface RiderCandidate {
   lastSeenSecondsAgo: number | null; // null => never seen; large => stale (not "live")
 }
 
+export interface RiderOffer {
+  requestId: number;
+  bookingId: number;
+  bookingCode: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  vehicleType: VehicleType | null;
+  itemName: string;
+  proposedCost: number | null;
+}
+
 export interface Booking {
   id: number;
   status: BookingStatus;

@@ -9,6 +9,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
 import { useAuth } from '@/auth/AuthContext';
 import { riderApi, senderApi } from '@/api/services';
+import { startRiderLocation, stopRiderLocation } from '@/services/location';
 import { colors, spacing, typography } from '@/theme/theme';
 import type { Booking } from '@shared/contracts/api';
 
@@ -75,6 +76,7 @@ export function SenderOrdersScreen() {
 
 export function RiderHomeScreen() {
   const { t } = useTranslation();
+  const navigation = useNavigation<{ navigate: (s: string) => void }>();
   const [online, setOnline] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,13 @@ export function RiderHomeScreen() {
     try {
       await riderApi.setStatus(next ? 'available' : 'offline');
       setOnline(next);
+      // Background location runs ONLY while online (and is requested only for riders).
+      if (next) {
+        const ok = await startRiderLocation();
+        if (!ok) setError('Location permission is needed to receive nearby deliveries.');
+      } else {
+        await stopRiderLocation();
+      }
     } catch (e) {
       setError('Could not update your status. Make sure your account is verified.');
     } finally {
@@ -99,6 +108,8 @@ export function RiderHomeScreen() {
         <Text style={styles.soft}>Go online to receive nearby delivery requests. Location is shared only while you're online or on a delivery.</Text>
         {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
       </Card>
+      <Button title="New offers" onPress={() => navigation.navigate('Offers')} />
+      <Button title="Active jobs" variant="secondary" onPress={() => navigation.navigate('ActiveJobs')} />
     </Screen>
   );
 }

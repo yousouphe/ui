@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { useAuth } from '@/auth/AuthContext';
 import { ApiClientError } from '@/api/client';
 import { VEHICLE_TYPES, VEHICLE_LABEL, type VehicleType } from '@shared/constants/vehicles';
@@ -96,6 +97,7 @@ export function RegisterScreen({ navigation }: { navigation?: Nav }) {
         ) : null}
 
         <Button title={t('auth.signUp')} onPress={submit} loading={loading} disabled={!canSubmit} style={{ marginTop: spacing.lg }} />
+        <GoogleSignInButton onError={(m) => setError(m || null)} />
         <Text style={styles.link} onPress={() => navigation?.navigate('Login')} accessibilityRole="button">
           {t('auth.haveAccount')} {t('auth.signIn')}
         </Text>

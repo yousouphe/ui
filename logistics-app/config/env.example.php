@@ -37,6 +37,10 @@ return [
     // set to {app_url}/auth/google_callback.php
     'google_client_id' => 'REDACTED_GOOGLE_CLIENT_ID',
     'google_client_secret' => 'REDACTED_GOOGLE_CLIENT_SECRET',
+    // Mobile Google OAuth client IDs (iOS / Android / Expo web), comma-separated. The mobile
+    // /api/v1/auth/google endpoint verifies the ID token's `aud` against this list (plus the web
+    // client id above). Leave blank to skip the aud check (any valid Google ID token accepted).
+    'google_mobile_client_ids' => 'REDACTED_GOOGLE_MOBILE_CLIENT_IDS',
     // Web Push (browser notifications for senders/riders). Generate once with
     // `php scripts/generate_vapid_keys.php` and paste the PEM below - the public key is
     // derived from it automatically, there is nothing else to configure.

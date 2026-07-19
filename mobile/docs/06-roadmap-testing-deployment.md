@@ -14,8 +14,8 @@ independently testable and does not disturb the running web app.
 | **5. Sender app** | Full sender workflow against the API + tests | mobile-only | — |
 | **6. Rider app** | Full rider workflow incl. availability, jobs, earnings, background location + tests | mobile-only | — |
 | **7. Integrations** | Maps, FCM/APNs push, calling (dialler + in-app if infra), Paystack, support | mobile + minimal backend | — |
-| **8. Parity validation** | Every matrix row verified implemented/retained/deprecated-with-reason | cross-cutting | — |
-| **9. Security & performance** | Token/IDOR/rate-limit review; battery/network/device perf; low-end Android | cross-cutting | — |
+| **8. Parity validation** | Every matrix row verified implemented/retained/deprecated-with-reason | cross-cutting | ✅ done (doc 07; R1/R2/R3 closed the gaps) |
+| **9. Security & performance** | Token/IDOR/rate-limit review; battery/network/device perf; low-end Android | cross-cutting | 🟡 security review done + fail-closed OAuth fix (doc 08); device/battery/network pass is on-device |
 | **10. Deployment** | Signed builds (EAS), store assets, privacy disclosures, monitoring, rollback | release | — |
 
 **Gate:** Phases 5–7 cannot start a given feature until its API (Phase 3) exists and is tested

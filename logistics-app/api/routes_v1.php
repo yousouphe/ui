@@ -484,3 +484,356 @@ function api_haversine_m(float $lat1, float $lng1, float $lat2, float $lng2): fl
     $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
     return $earth * (2 * atan2(sqrt($a), sqrt(1 - $a)));
 }
+
+// ---- Profile update -------------------------------------------------------------------------
+
+function api_profile_update(PDO $pdo): void {
+    $user = api_require($pdo);
+    $b = api_body();
+    $fullName = isset($b['fullName']) ? trim((string) $b['fullName']) : null;
+    $phone = isset($b['phone']) ? trim((string) $b['phone']) : null;
+    $sets = [];
+    $params = [];
+    if ($fullName !== null) {
+        if ($fullName === '') { api_fail(400, 'VALIDATION', 'Name cannot be empty.', ['fullName' => 'Required']); }
+        $sets[] = 'full_name = ?'; $params[] = $fullName;
+    }
+    if ($phone !== null) {
+        if ($phone === '') { api_fail(400, 'VALIDATION', 'Phone cannot be empty.', ['phone' => 'Required']); }
+        $sets[] = 'phone = ?'; $params[] = $phone;
+    }
+    if (!$sets) {
+        api_fail(400, 'VALIDATION', 'Nothing to update.');
+    }
+    $params[] = $user['id'];
+    $pdo->prepare('UPDATE users SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    api_ok(api_user_public($stmt->fetch(PDO::FETCH_ASSOC)));
+}
+
+// ---- Password reset -------------------------------------------------------------------------
+
+function api_auth_forgot(PDO $pdo): void {
+    // Mirrors forgot-password.php: rate-limited, always returns the same generic result so it
+    // can't be used to enumerate registered emails.
+    $email = strtolower(trim((string) (api_body()['email'] ?? '')));
+    $ip = client_ip();
+    $limited = is_rate_limited($pdo, 'forgot_password_ip', $ip, 5, 60)
+        || ($email !== '' && is_rate_limited($pdo, 'forgot_password_email', $email, 3, 60));
+    if (!$limited) {
+        record_rate_limit_attempt($pdo, 'forgot_password_ip', $ip);
+        if ($email !== '') { record_rate_limit_attempt($pdo, 'forgot_password_email', $email); }
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $stmt = $pdo->prepare('SELECT id, full_name, email FROM users WHERE email = ? LIMIT 1');
+            $stmt->execute([$email]);
+            $u = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($u) {
+                $token = bin2hex(random_bytes(32));
+                $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))')
+                    ->execute([$u['id'], hash('sha256', $token)]);
+                if (function_exists('send_password_reset_email')) {
+                    $resetUrl = rtrim((string) (config_app()['app_url'] ?? ''), '/') . '/reset-password?token=' . $token;
+                    try { send_password_reset_email($u['email'], $u['full_name'], $resetUrl); } catch (Throwable $e) {}
+                }
+            }
+        }
+    }
+    api_ok(['message' => 'If that email is registered, a reset link has been sent.']);
+}
+
+function api_auth_reset(PDO $pdo): void {
+    $b = api_body();
+    $token = (string) ($b['token'] ?? '');
+    $password = (string) ($b['password'] ?? '');
+    if ($token === '' || strlen($password) < 8) {
+        api_fail(400, 'VALIDATION', 'A valid token and a password of at least 8 characters are required.',
+            ['password' => strlen($password) < 8 ? 'At least 8 characters' : '']);
+    }
+    $stmt = $pdo->prepare('SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ? LIMIT 1');
+    $stmt->execute([hash('sha256', $token)]);
+    $rec = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$rec || $rec['used_at'] !== null || strtotime((string) $rec['expires_at']) <= time()) {
+        api_fail(400, 'INVALID_TOKEN', 'This reset link is invalid or has expired. Please request a new one.');
+    }
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $rec['user_id']]);
+        $pdo->prepare('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?')->execute([$rec['id']]);
+        // Revoke existing mobile sessions on a password change.
+        $pdo->prepare('UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL')->execute([$rec['user_id']]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        api_fail(503, 'RESET_FAILED', 'We could not reset your password right now. Please try again.');
+    }
+    api_ok(['message' => 'Your password has been reset. Please sign in.']);
+}
+
+// ---- Rating & complaint (post-delivery) -----------------------------------------------------
+
+function api_booking_rating(PDO $pdo, int $id): void {
+    $user = api_require($pdo, ['sender']);
+    $b = api_body();
+    $rating = (int) ($b['rating'] ?? 0);
+    $reviewText = trim((string) ($b['review'] ?? ''));
+    if ($rating < 1 || $rating > 5) {
+        api_fail(400, 'VALIDATION', 'Rating must be between 1 and 5 stars.', ['rating' => '1-5']);
+    }
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id, booking_status FROM bookings WHERE id = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if ($booking['booking_status'] !== 'delivered') {
+        api_fail(409, 'NOT_DELIVERED', 'You can only rate a booking after it has been delivered.');
+    }
+    $riderUserId = (int) ($booking['selected_rider_user_id'] ?? 0);
+    if ($riderUserId <= 0) {
+        api_fail(422, 'NO_RIDER', 'No rider is associated with this booking.');
+    }
+    $exists = $pdo->prepare('SELECT id FROM booking_ratings WHERE booking_id = ? LIMIT 1');
+    $exists->execute([$id]);
+    if ($exists->fetchColumn()) {
+        api_fail(409, 'ALREADY_RATED', 'You have already rated this delivery.');
+    }
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('INSERT INTO booking_ratings (booking_id, sender_user_id, rider_user_id, rating, review_text, created_at) VALUES (?, ?, ?, ?, ?, NOW())')
+            ->execute([$id, (int) $user['id'], $riderUserId, $rating, $reviewText !== '' ? $reviewText : null]);
+        $pdo->prepare('UPDATE rider_profiles SET rating = (SELECT ROUND(AVG(rating), 2) FROM booking_ratings WHERE rider_user_id = ?) WHERE user_id = ?')
+            ->execute([$riderUserId, $riderUserId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        api_fail(503, 'RATING_FAILED', 'Unable to save your rating.');
+    }
+    api_ok(['message' => 'Thanks for rating your rider!']);
+}
+
+function api_complaint_create(PDO $pdo): void {
+    $user = api_require($pdo, ['sender']);
+    $b = api_body();
+    $bookingId = (int) ($b['bookingId'] ?? 0);
+    $category = trim((string) ($b['category'] ?? ''));
+    $message = trim((string) ($b['message'] ?? ''));
+    $allowed = ['damaged_item', 'late_delivery', 'wrong_item', 'rider_behavior', 'other'];
+    if ($bookingId <= 0) { api_fail(400, 'VALIDATION', 'A booking is required.'); }
+    if (!in_array($category, $allowed, true)) { api_fail(400, 'VALIDATION', 'Please choose a valid complaint category.', ['category' => implode('|', $allowed)]); }
+    if ($message === '') { api_fail(400, 'VALIDATION', 'Please describe the issue.', ['message' => 'Required']); }
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, booking_status, booking_code FROM bookings WHERE id = ? LIMIT 1');
+    $stmt->execute([$bookingId]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if ($booking['booking_status'] !== 'delivered') {
+        api_fail(409, 'NOT_DELIVERED', 'You can only report a problem after this booking has been delivered.');
+    }
+    $pdo->prepare('INSERT INTO booking_complaints (booking_id, sender_user_id, category, message, status, created_at) VALUES (?, ?, ?, ?, "open", NOW())')
+        ->execute([$bookingId, (int) $user['id'], $category, $message]);
+    if (function_exists('notify_admins')) {
+        try { notify_admins($pdo, 'New complaint reported - ' . $booking['booking_code'],
+            '<p><strong>' . e((string) $user['full_name']) . '</strong> reported an issue with booking <strong>' . e((string) $booking['booking_code']) . '</strong> (mobile).</p><p><strong>Category:</strong> ' . e($category) . '</p><p>' . nl2br(e($message)) . '</p>'); } catch (Throwable $e) {}
+    }
+    api_ok(['message' => 'Your report has been submitted. Our team will follow up.'], [], 201);
+}
+
+// ---- Rider discovery (mirrors bookings/ajax_fetch_riders.php ranking) ------------------------
+
+function api_riders_discover(PDO $pdo, int $bookingId): void {
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude FROM bookings WHERE id = ? LIMIT 1');
+    $stmt->execute([$bookingId]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    $plat = (float) $booking['pickup_latitude'];
+    $plng = (float) $booking['pickup_longitude'];
+    $dlat = (float) $booking['delivery_latitude'];
+    $dlng = (float) $booking['delivery_longitude'];
+
+    try {
+        $metrics = cached_route_metrics($pdo, $plat, $plng, $dlat, $dlng);
+    } catch (Throwable $e) {
+        api_ok(['pricingPending' => true, 'riders' => []]);
+    }
+    $routeKm = (float) $metrics['distance_km'];
+
+    $distanceSql = haversine_sql('rp.last_latitude', 'rp.last_longitude', $plat, $plng);
+    $activeStatuses = implode("','", array_map(static fn($s) => str_replace("'", "''", $s), RIDER_ACTIVE_BOOKING_STATUSES));
+    $sql = "SELECT u.id, u.full_name, rp.vehicle_type, rp.rating, rp.last_latitude, rp.last_longitude, rp.last_location_updated_at,
+                   CASE WHEN rp.last_latitude IS NOT NULL AND rp.last_longitude IS NOT NULL THEN {$distanceSql} ELSE NULL END AS distance_km,
+                   (SELECT COUNT(*) FROM bookings b WHERE b.selected_rider_user_id = u.id AND b.booking_status IN ('{$activeStatuses}')) AS active_order_count
+            FROM users u INNER JOIN rider_profiles rp ON rp.user_id = u.id
+            WHERE u.role = 'rider' AND u.status = 'active' AND rp.kyc_status = 'approved'
+              AND rp.vehicle_type IS NOT NULL AND rp.vehicle_type <> ''
+            HAVING active_order_count < " . (int) RIDER_MAX_CONCURRENT_ORDERS . " LIMIT 100";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute();
+    $riders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($riders as &$r) {
+        $vt = trim((string) ($r['vehicle_type'] ?? ''));
+        try {
+            $r['suggested_fee'] = (float) calculate_delivery_price($pdo, $routeKm, $vt)['total'];
+            $r['pricing_available'] = true;
+        } catch (Throwable $e) {
+            $r['suggested_fee'] = null;
+            $r['pricing_available'] = false;
+        }
+        $r['eta_minutes'] = $r['distance_km'] !== null ? estimated_eta_minutes((float) $r['distance_km'], $vt) : null;
+        $stats = rider_delivery_stats($pdo, (int) $r['id']);
+        $r['score'] = rider_match_score($r['rating'] !== null ? (float) $r['rating'] : null, $stats['ratio']);
+        $r['last_seen_seconds_ago'] = !empty($r['last_location_updated_at'])
+            ? max(0, time() - strtotime((string) $r['last_location_updated_at'])) : null;
+    }
+    unset($r);
+
+    usort($riders, static fn(array $a, array $b): int => ((float) $b['score']) <=> ((float) $a['score']));
+    $riders = array_slice($riders, 0, (int) MAX_RIDERS_RETURNED_API());
+
+    $out = array_map(static fn(array $r): array => [
+        'userId' => (int) $r['id'],
+        'fullName' => (string) $r['full_name'],
+        'vehicleType' => $r['vehicle_type'] !== null ? (string) $r['vehicle_type'] : null,
+        'rating' => $r['rating'] !== null ? (float) $r['rating'] : null,
+        'distanceKm' => $r['distance_km'] !== null ? round((float) $r['distance_km'], 2) : null,
+        'etaMinutes' => $r['eta_minutes'],
+        'suggestedFee' => $r['suggested_fee'],
+        'pricingAvailable' => (bool) $r['pricing_available'],
+        'lastSeenSecondsAgo' => $r['last_seen_seconds_ago'],
+    ], $riders);
+    api_ok(['pricingPending' => false, 'riders' => $out]);
+}
+
+function MAX_RIDERS_RETURNED_API(): int { return 10; }
+
+// ---- Banks & withdrawals --------------------------------------------------------------------
+
+function api_banks_list(PDO $pdo): void {
+    api_require($pdo, ['rider']);
+    $banks = function_exists('paystack_banks_list') ? paystack_banks_list($pdo) : [];
+    api_ok(['banks' => array_map(static fn(array $b): array => [
+        'code' => (string) $b['code'],
+        'name' => (string) $b['name'],
+    ], $banks)]);
+}
+
+function api_rider_withdraw(PDO $pdo): void {
+    $user = api_require($pdo, ['rider']);
+    api_idempotency_replay($pdo, (int) $user['id'], 'POST rider/withdrawals');
+    $amount = (float) (api_body()['amount'] ?? 0);
+    if ($amount <= 0) {
+        api_fail(400, 'VALIDATION', 'Enter a valid withdrawal amount.', ['amount' => 'Must be greater than zero']);
+    }
+    // Bank details must exist and be verified (mirrors rider/wallet.php).
+    $stmt = $pdo->prepare('SELECT bank_name, bank_code, account_number, account_name, verified_at FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    $bank = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$bank || empty($bank['bank_code']) || empty($bank['verified_at'])) {
+        api_fail(422, 'NO_BANK', 'Add and verify your bank account before requesting a withdrawal.');
+    }
+    // Transactional balance check (reuses the row-locked helper — same double-spend protection
+    // as the web withdrawal path).
+    $created = false;
+    try {
+        $pdo->beginTransaction();
+        $available = rider_available_balance_locked($pdo, (int) $user['id']);
+        if ($amount > $available) {
+            $pdo->rollBack();
+            api_fail(422, 'INSUFFICIENT_FUNDS', 'That amount exceeds your available balance.');
+        }
+        $pdo->prepare('INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status) VALUES (?, ?, ?, ?, ?, ?, "pending")')
+            ->execute([$user['id'], $amount, $bank['bank_name'], $bank['bank_code'], $bank['account_number'], $bank['account_name']]);
+        $pdo->commit();
+        $created = true;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($created === false && strpos($e->getMessage(), 'INSUFFICIENT') === false) {
+            error_log('api withdrawal failed: ' . $e->getMessage());
+        }
+        api_fail(503, 'WITHDRAW_FAILED', 'We could not submit your withdrawal right now. Please try again.');
+    }
+    $env = ['ok' => true, 'data' => ['message' => 'Withdrawal request submitted.'], 'error' => null, 'meta' => ['requestId' => bin2hex(random_bytes(8))]];
+    $body = json_encode($env);
+    api_idempotency_store($pdo, (int) $user['id'], 'POST rider/withdrawals', 201, $body);
+    if (function_exists('send_withdrawal_requested_email')) {
+        try { send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount); } catch (Throwable $e) {}
+    }
+    if (!headers_sent()) { http_response_code(201); header('Content-Type: application/json; charset=utf-8'); }
+    echo $body;
+    exit;
+}
+
+// ---- Payments (Paystack — secrets stay server-side; init/verify wrap existing helpers) -------
+
+function api_payment_init(PDO $pdo): void {
+    $user = api_require($pdo, ['sender']);
+    api_idempotency_replay($pdo, (int) $user['id'], 'POST payments/init');
+    $bookingId = (int) (api_body()['bookingId'] ?? 0);
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, agreed_cost, payment_status, booking_code, booking_status FROM bookings WHERE id = ? LIMIT 1');
+    $stmt->execute([$bookingId]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if (($booking['payment_status'] ?? '') === 'paid') {
+        api_fail(409, 'ALREADY_PAID', 'This booking is already paid.');
+    }
+    if ($booking['agreed_cost'] === null || (float) $booking['agreed_cost'] <= 0) {
+        api_fail(422, 'NO_PRICE', 'This booking does not have a confirmed price yet.');
+    }
+    if (!function_exists('paystack_configured') || !paystack_configured()) {
+        api_fail(503, 'PAYMENTS_UNAVAILABLE', 'Payments are temporarily unavailable. Please try again shortly.');
+    }
+    // Initialise a Paystack transaction server-side (amount in kobo). The secret key never
+    // leaves the server; the app receives only the reference + access code / authorization URL.
+    $reference = 'AIKE-' . $booking['booking_code'] . '-' . bin2hex(random_bytes(4));
+    $res = paystack_request('POST', '/transaction/initialize', [
+        'email' => (string) $user['email'],
+        'amount' => (int) round(((float) $booking['agreed_cost']) * 100),
+        'reference' => $reference,
+        'metadata' => ['booking_id' => (int) $booking['id'], 'channel' => 'mobile'],
+    ]);
+    if (!($res['status'] ?? false)) {
+        api_fail(502, 'PAYMENT_INIT_FAILED', 'Could not start the payment. Please try again.');
+    }
+    $data = $res['data'] ?? [];
+    $pdo->prepare('UPDATE bookings SET paystack_reference = ?, paystack_access_code = ?, payment_status = "pending" WHERE id = ?')
+        ->execute([$reference, $data['access_code'] ?? null, $booking['id']]);
+    $env = ['ok' => true, 'data' => [
+        'reference' => $reference,
+        'accessCode' => $data['access_code'] ?? null,
+        'authorizationUrl' => $data['authorization_url'] ?? null,
+    ], 'error' => null, 'meta' => ['requestId' => bin2hex(random_bytes(8))]];
+    $body = json_encode($env);
+    api_idempotency_store($pdo, (int) $user['id'], 'POST payments/init', 200, $body);
+    if (!headers_sent()) { header('Content-Type: application/json; charset=utf-8'); }
+    echo $body;
+    exit;
+}
+
+function api_payment_verify(PDO $pdo): void {
+    $user = api_require($pdo, ['sender']);
+    $reference = trim((string) (api_body()['reference'] ?? ''));
+    if ($reference === '') {
+        api_fail(400, 'VALIDATION', 'A payment reference is required.');
+    }
+    // Verify server-side and let the shared finalize routine reconcile (idempotent; the webhook
+    // remains the authoritative path). Ownership: the reference must belong to the caller.
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, payment_status FROM bookings WHERE paystack_reference = ? LIMIT 1');
+    $stmt->execute([$reference]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Payment not found.');
+    }
+    if (function_exists('finalize_booking_payment')) {
+        try { finalize_booking_payment($pdo, $reference); } catch (Throwable $e) { error_log('api verify: ' . $e->getMessage()); }
+    }
+    $stmt->execute([$reference]);
+    $fresh = $stmt->fetch(PDO::FETCH_ASSOC);
+    api_ok(['paymentStatus' => (string) ($fresh['payment_status'] ?? 'pending')]);
+}

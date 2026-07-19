@@ -410,6 +410,98 @@ function api_rider_offers(PDO $pdo): void {
     api_ok(['offers' => $offers]);
 }
 
+function api_rider_offer_respond(PDO $pdo, int $requestId, string $action): void {
+    // Rider accepts or rejects a pending offer. Mirrors rider/index.php: capacity cap on accept,
+    // accepting supersedes other pending requests on the booking and assigns the rider (status
+    // submitted -> matched), rejecting just marks the request. Notifies the sender.
+    $user = api_require($pdo, ['rider']);
+    $stmt = $pdo->prepare(
+        'SELECT rr.*, b.id AS booking_id, b.booking_code, b.booking_status, b.sender_user_id
+         FROM rider_requests rr INNER JOIN bookings b ON b.id = rr.booking_id
+         WHERE rr.id = ? AND rr.rider_user_id = ? LIMIT 1'
+    );
+    $stmt->execute([$requestId, $user['id']]);
+    $req = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$req) {
+        api_fail(404, 'NOT_FOUND', 'Request not found.');
+    }
+    if (($req['request_status'] ?? '') !== 'pending') {
+        api_fail(409, 'ALREADY_PROCESSED', 'This request has already been processed.');
+    }
+    if ($action === 'accepted' && rider_active_order_count($pdo, (int) $user['id'], (int) $req['booking_id']) >= RIDER_MAX_CONCURRENT_ORDERS) {
+        api_fail(409, 'AT_CAPACITY', 'You already have the maximum number of active deliveries. Complete one first.');
+    }
+    try {
+        $pdo->beginTransaction();
+        if ($action === 'accepted') {
+            $pdo->prepare('UPDATE rider_requests SET request_status = "accepted" WHERE id = ?')->execute([$requestId]);
+            $pdo->prepare('UPDATE rider_requests SET request_status = "rejected" WHERE booking_id = ? AND id <> ? AND request_status = "pending"')
+                ->execute([(int) $req['booking_id'], $requestId]);
+            $pdo->prepare('UPDATE bookings
+                    SET selected_rider_user_id = ?,
+                        agreed_cost = CASE WHEN agreed_cost IS NULL OR agreed_cost = 0 THEN ? ELSE agreed_cost END,
+                        booking_status = CASE WHEN booking_status = "submitted" THEN "matched" ELSE booking_status END,
+                        matched_at = COALESCE(matched_at, NOW())
+                    WHERE id = ?')
+                ->execute([$user['id'], (float) ($req['proposed_cost'] ?? 0), (int) $req['booking_id']]);
+        } else {
+            $pdo->prepare('UPDATE rider_requests SET request_status = "rejected" WHERE id = ?')->execute([$requestId]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        error_log('api offer respond failed: ' . $e->getMessage());
+        api_fail(503, 'OFFER_FAILED', 'Could not update the offer right now. Please try again.');
+    }
+    if (function_exists('send_web_push')) {
+        try {
+            if ($action === 'accepted') {
+                send_web_push($pdo, (int) $req['sender_user_id'], (string) $user['full_name'] . ' accepted your delivery', 'Booking ' . $req['booking_code'] . ' is on its way to pickup.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']));
+            } else {
+                send_web_push($pdo, (int) $req['sender_user_id'], 'Rider declined your request', 'Booking ' . $req['booking_code'] . ' - try another rider.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']));
+            }
+        } catch (Throwable $e) {}
+    }
+    log_event($pdo, 'booking_' . $action, 'Rider ' . $action . ' offer for booking ' . ($req['booking_code'] ?? '') . ' (mobile)', (int) $user['id'], (string) $user['role'], 'booking', (int) $req['booking_id']);
+    api_ok(['bookingId' => (int) $req['booking_id'], 'requestStatus' => $action]);
+}
+
+function api_rider_confirm_payment(PDO $pdo, int $id): void {
+    // Rider confirms they received payment for a delivered, paid booking -> credits their wallet
+    // with the 85% payout. Mirrors rider/ajax_confirm_payment.php. Guards: owned, delivered,
+    // not already confirmed, sender has paid.
+    $user = api_require($pdo, ['rider']);
+    $stmt = $pdo->prepare('SELECT id, booking_code, booking_status, payment_status, rider_payment_confirmed, agreed_cost FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
+    $stmt->execute([$id, $user['id']]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if ($booking['booking_status'] !== 'delivered') {
+        api_fail(409, 'NOT_DELIVERED', 'Booking has not been delivered yet.');
+    }
+    if ((int) $booking['rider_payment_confirmed'] === 1) {
+        api_fail(409, 'ALREADY_CONFIRMED', 'Payment has already been confirmed for this booking.');
+    }
+    if (($booking['payment_status'] ?? 'unpaid') !== 'paid') {
+        api_fail(409, 'NOT_PAID', 'The sender has not paid for this booking yet.');
+    }
+    $payout = rider_payout_amount((float) $booking['agreed_cost']);
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare('UPDATE bookings SET rider_payment_confirmed = 1, rider_payment_confirmed_at = NOW() WHERE id = ?')->execute([$id]);
+        $pdo->prepare('INSERT INTO wallet_transactions (rider_user_id, booking_id, type, amount, description) VALUES (?, ?, "earning", ?, ?)')
+            ->execute([$user['id'], $id, $payout, sprintf('Delivery %s', $booking['booking_code'])]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        error_log('api confirm payment failed: ' . $e->getMessage());
+        api_fail(503, 'CONFIRM_FAILED', 'Unable to confirm payment right now. Please try again.');
+    }
+    log_event($pdo, 'booking_concluded', 'Booking ' . $booking['booking_code'] . ' concluded - rider confirmed payment (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id, ['payout' => $payout]);
+    api_ok(['payout' => (float) $payout]);
+}
+
 function api_rider_transition(PDO $pdo, int $id): void {
     $user = api_require($pdo, ['rider']);
     $to = (string) (api_body()['to'] ?? '');

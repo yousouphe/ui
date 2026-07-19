@@ -13,6 +13,7 @@ import type {
   PriceBreakdown,
   RiderCandidate,
   RiderJobFilter,
+  RiderOffer,
   UserProfile,
 } from '@shared/contracts/api';
 
@@ -99,11 +100,20 @@ export const riderApi = {
   pushLocation(lat: number, lng: number, status?: string): Promise<void> {
     return apiRequest('/rider/location', { method: 'POST', body: { lat, lng, status } });
   },
-  offers(): Promise<{ offers: unknown[] }> {
+  offers(): Promise<{ offers: RiderOffer[] }> {
     return apiRequest('/rider/offers');
+  },
+  acceptOffer(requestId: number): Promise<{ bookingId: number; requestStatus: string }> {
+    return apiRequest(`/rider/offers/${requestId}/accept`, { method: 'POST' });
+  },
+  rejectOffer(requestId: number): Promise<{ bookingId: number; requestStatus: string }> {
+    return apiRequest(`/rider/offers/${requestId}/reject`, { method: 'POST' });
   },
   transition(id: number, to: string): Promise<{ booking: Booking }> {
     return apiRequest(`/rider/bookings/${id}/transition`, { method: 'POST', body: { to } });
+  },
+  confirmPayment(id: number): Promise<{ payout: number }> {
+    return apiRequest(`/rider/bookings/${id}/confirm-payment`, { method: 'POST' });
   },
   jobs(filter: RiderJobFilter): Promise<{ bookings: Booking[] }> {
     return apiRequest(`/rider/bookings?filter=${filter}`);

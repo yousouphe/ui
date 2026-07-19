@@ -17,6 +17,7 @@ import {
   SenderOrdersScreen,
 } from '@/screens';
 import { CreateBookingScreen, PayScreen, RateScreen, RidersScreen, TrackScreen } from '@/screens/sender/flow';
+import { RiderActiveJobsScreen, RiderOffersScreen } from '@/screens/rider/flow';
 import { colors } from '@/theme/theme';
 
 const Stack = createNativeStackNavigator();
@@ -75,11 +76,22 @@ function SenderStack() {
   );
 }
 
+// The rider side wraps its tabs in a stack so Offers and Active jobs can be pushed over them.
+function RiderStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerBackTitleVisible: false }}>
+      <Stack.Screen name="RiderTabs" component={RiderTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="Offers" component={RiderOffersScreen} options={{ title: 'New offers' }} />
+      <Stack.Screen name="ActiveJobs" component={RiderActiveJobsScreen} options={{ title: 'Active jobs' }} />
+    </Stack.Navigator>
+  );
+}
+
 export function RootNavigator() {
   const { user } = useAuth();
   return (
     <NavigationContainer theme={navTheme}>
-      {!user ? <AuthStack /> : user.role === 'rider' ? <RiderTabs /> : <SenderStack />}
+      {!user ? <AuthStack /> : user.role === 'rider' ? <RiderStack /> : <SenderStack />}
     </NavigationContainer>
   );
 }

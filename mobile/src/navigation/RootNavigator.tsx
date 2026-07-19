@@ -20,6 +20,8 @@ import {
 } from '@/screens';
 import { CreateBookingScreen, PayScreen, RateScreen, RidersScreen, TrackScreen } from '@/screens/sender/flow';
 import { ComplaintScreen } from '@/screens/sender/ComplaintScreen';
+import { EditBookingScreen } from '@/screens/sender/EditBookingScreen';
+import { ReceiptsScreen } from '@/screens/sender/ReceiptsScreen';
 import { RiderActiveJobsScreen, RiderOffersScreen } from '@/screens/rider/flow';
 import { WithdrawScreen } from '@/screens/rider/WithdrawScreen';
 import { colors } from '@/theme/theme';
@@ -79,6 +81,8 @@ function SenderStack() {
       <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Payment' }} />
       <Stack.Screen name="Rate" component={RateScreen} options={{ title: 'Rate' }} />
       <Stack.Screen name="Complaint" component={ComplaintScreen} options={{ title: 'Report a problem' }} />
+      <Stack.Screen name="EditBooking" component={EditBookingScreen} options={{ title: 'Edit booking' }} />
+      <Stack.Screen name="Receipts" component={ReceiptsScreen} options={{ title: 'Receipts' }} />
     </Stack.Navigator>
   );
 }

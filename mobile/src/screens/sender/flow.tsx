@@ -205,6 +205,7 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [rebooking, setRebooking] = useState(false);
 
   // Booking endpoints (pickup/drop-off) are fixed — fetch once for the map.
   useEffect(() => {
@@ -237,6 +238,21 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
 
   // Cancellable pre-handover only; the backend enforces the exact rule and rejects otherwise.
   const canCancel = ['submitted', 'matched', 'accepted', 'arrived_at_pickup'].includes(status) && payment !== 'paid';
+  // Editable only before a rider has accepted (server enforces this too).
+  const canEdit = ['draft', 'submitted', 'matched'].includes(status);
+
+  async function doRebook() {
+    setRebooking(true);
+    setError(null);
+    try {
+      await senderApi.rebook(bookingId);
+      navigation.navigate('Riders', { bookingId }); // reopened → back to rider matching
+    } catch (e) {
+      setError(e instanceof ApiClientError ? e.message : 'Could not rebook this delivery.');
+    } finally {
+      setRebooking(false);
+    }
+  }
 
   async function doCancel() {
     if (!cancelReason.trim()) return;
@@ -282,6 +298,12 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
           <Text style={styles.soft}>Waiting for a rider to accept…</Text>
         )}
       </Card>
+      {canEdit ? (
+        <Button title="Edit booking" variant="secondary" onPress={() => navigation.navigate('EditBooking', { bookingId })} />
+      ) : null}
+      {status === 'cancelled' ? (
+        <Button title="Rebook this delivery" onPress={doRebook} loading={rebooking} />
+      ) : null}
       {rider?.fullName ? <CallButton bookingId={bookingId} label="Call rider" /> : null}
       {status === 'delivered' && payment !== 'paid' ? (
         <Button title="Pay now" onPress={() => navigation.navigate('Pay', { bookingId })} />

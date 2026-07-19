@@ -210,6 +210,140 @@ function api_booking_cancel(PDO $pdo, int $id): void {
     api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
 }
 
+function api_booking_update(PDO $pdo, int $id): void {
+    // Edit booking details and/or change the delivery address (with a backend reprice). Mirrors
+    // bookings/ajax_update_details.php + ajax_update_delivery.php: only editable before a rider has
+    // accepted (draft/submitted/matched), and a repriced address is only recomputed when a rider is
+    // already selected AND the new destination is farther — a closer destination keeps the agreed
+    // price. Price is always a fresh absolute fare from the shared engine (never a multiplier).
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1');
+    $stmt->execute([$id, $user['id']]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if (!in_array($booking['booking_status'], ['draft', 'submitted', 'matched'], true)) {
+        api_fail(422, 'NOT_EDITABLE', 'This booking can no longer be edited.');
+    }
+
+    $b = api_body();
+    $sets = [];
+    $params = [];
+
+    // Detail fields (all optional; only provided keys are updated).
+    $detailMap = [
+        'recipientName' => ['recipient_name', true],
+        'recipientPhone' => ['recipient_phone', true],
+        'itemName' => ['item_name', true],
+        'itemCategory' => ['item_category', false],
+        'itemDescription' => ['item_description', false],
+        'notes' => ['special_instructions', false],
+    ];
+    foreach ($detailMap as $key => [$col, $requiredNonEmpty]) {
+        if (array_key_exists($key, $b)) {
+            $val = trim((string) $b[$key]);
+            if ($requiredNonEmpty && $val === '') {
+                api_fail(400, 'VALIDATION', 'This field cannot be empty.', [$key => 'Required']);
+            }
+            $sets[] = "$col = ?";
+            $params[] = $val;
+        }
+    }
+
+    // Delivery address change (+ conditional reprice).
+    $priceChanged = false;
+    if (isset($b['dropoff']) && is_array($b['dropoff'])) {
+        $d = $b['dropoff'];
+        $addr = trim((string) ($d['address'] ?? ''));
+        $lat = isset($d['lat']) && is_numeric($d['lat']) ? (float) $d['lat'] : null;
+        $lng = isset($d['lng']) && is_numeric($d['lng']) ? (float) $d['lng'] : null;
+        if ($addr === '' || $lat === null || $lng === null
+            || $lat < 3 || $lat > 15 || $lng < 2 || $lng > 15) {
+            api_fail(400, 'VALIDATION', 'A valid delivery address is required.');
+        }
+        $sets[] = 'delivery_address = ?';
+        $params[] = $addr;
+        $sets[] = 'delivery_latitude = ?';
+        $params[] = $lat;
+        $sets[] = 'delivery_longitude = ?';
+        $params[] = $lng;
+
+        if (!empty($booking['selected_rider_user_id']) && $booking['pickup_latitude'] !== null && $booking['pickup_longitude'] !== null) {
+            $plat = (float) $booking['pickup_latitude'];
+            $plng = (float) $booking['pickup_longitude'];
+            try {
+                $newDistance = (float) cached_route_metrics($pdo, $plat, $plng, $lat, $lng)['distance_km'];
+                $oldDistance = null;
+                if ($booking['delivery_latitude'] !== null && $booking['delivery_longitude'] !== null) {
+                    $oldDistance = (float) cached_route_metrics($pdo, $plat, $plng, (float) $booking['delivery_latitude'], (float) $booking['delivery_longitude'])['distance_km'];
+                }
+            } catch (NoRouteFoundException $e) {
+                api_fail(422, 'NO_ROUTE', 'No route could be found between these locations. Please check the delivery address.');
+            } catch (Throwable $e) {
+                api_fail(503, 'ROUTE_UNAVAILABLE', 'Unable to calculate route distance right now. Please try again shortly.');
+            }
+            $newAgreed = $booking['agreed_cost'];
+            if ($booking['agreed_cost'] === null || $oldDistance === null || $newDistance > $oldDistance) {
+                $vt = (string) ($booking['vehicle_type'] ?? 'bike');
+                $newAgreed = (float) calculate_delivery_price($pdo, $newDistance, $vt)['total'];
+            }
+            $priceChanged = (float) $newAgreed !== (float) $booking['agreed_cost'];
+            $sets[] = 'agreed_cost = ?';
+            $params[] = $newAgreed;
+        }
+    }
+
+    if (!$sets) {
+        api_fail(400, 'VALIDATION', 'Nothing to update.');
+    }
+    $params[] = $id;
+    $pdo->prepare('UPDATE bookings SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
+    log_event($pdo, 'booking_updated', 'Booking #' . $id . ' edited by sender (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
+    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id)), 'priceChanged' => $priceChanged]);
+}
+
+function api_booking_rebook(PDO $pdo, int $id): void {
+    // Reopen a cancelled booking for rider matching. Mirrors bookings/ajax_rebook.php: only a
+    // cancelled booking can be rebooked; it returns to 'submitted' with the rider cleared.
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare('SELECT id, booking_status FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1');
+    $stmt->execute([$id, $user['id']]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if (($booking['booking_status'] ?? '') !== 'cancelled') {
+        api_fail(422, 'NOT_CANCELLED', 'Only cancelled bookings can be rebooked.');
+    }
+    $pdo->prepare("UPDATE bookings
+                   SET booking_status = 'submitted', selected_rider_user_id = NULL,
+                       cancellation_reason = NULL, cancelled_by = NULL,
+                       sender_handover_confirmed = 0, sender_handover_confirmed_at = NULL
+                   WHERE id = ?")->execute([$id]);
+    $pdo->prepare("UPDATE rider_requests SET request_status = 'rejected' WHERE booking_id = ? AND request_status = 'accepted'")->execute([$id]);
+    log_event($pdo, 'booking_rebooked', 'Booking #' . $id . ' reopened for matching (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
+    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
+}
+
+function api_payments_list(PDO $pdo): void {
+    // Sender's payment receipts: every booking they've paid for. There is no separate payments
+    // table for sender charges — a paid booking carries its Paystack reference and amount.
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare("SELECT id, booking_code, agreed_cost, paystack_reference, updated_at
+                           FROM bookings WHERE sender_user_id = ? AND payment_status = 'paid'
+                           ORDER BY updated_at DESC LIMIT 50");
+    $stmt->execute([$user['id']]);
+    $items = array_map(static fn(array $r): array => [
+        'bookingId' => (int) $r['id'],
+        'bookingCode' => (string) $r['booking_code'],
+        'amount' => $r['agreed_cost'] !== null ? (float) $r['agreed_cost'] : null,
+        'reference' => $r['paystack_reference'] !== null ? (string) $r['paystack_reference'] : null,
+        'paidAt' => (string) $r['updated_at'],
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    api_ok(['payments' => $items]);
+}
+
 function api_booking_contact(PDO $pdo, int $id): void {
     // Returns the counterpart's phone so the app can open the DEVICE DIALLER. In-app calling is
     // deliberately not offered on mobile (no WebRTC infra there — the web PeerJS path does not

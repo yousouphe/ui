@@ -16,6 +16,7 @@ import {
   SenderHomeScreen,
   SenderOrdersScreen,
 } from '@/screens';
+import { CreateBookingScreen, PayScreen, RateScreen, RidersScreen, TrackScreen } from '@/screens/sender/flow';
 import { colors } from '@/theme/theme';
 
 const Stack = createNativeStackNavigator();
@@ -59,11 +60,26 @@ function RiderTabs() {
   );
 }
 
+// The sender side wraps the tabs in a stack so the booking flow (create → riders → track → pay
+// → rate) can be pushed over them.
+function SenderStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerBackTitleVisible: false }}>
+      <Stack.Screen name="SenderTabs" component={SenderTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="CreateBooking" component={CreateBookingScreen} options={{ title: 'New delivery' }} />
+      <Stack.Screen name="Riders" component={RidersScreen} options={{ title: 'Choose a rider' }} />
+      <Stack.Screen name="Track" component={TrackScreen} options={{ title: 'Track' }} />
+      <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Payment' }} />
+      <Stack.Screen name="Rate" component={RateScreen} options={{ title: 'Rate' }} />
+    </Stack.Navigator>
+  );
+}
+
 export function RootNavigator() {
   const { user } = useAuth();
   return (
     <NavigationContainer theme={navTheme}>
-      {!user ? <AuthStack /> : user.role === 'rider' ? <RiderTabs /> : <SenderTabs />}
+      {!user ? <AuthStack /> : user.role === 'rider' ? <RiderTabs /> : <SenderStack />}
     </NavigationContainer>
   );
 }

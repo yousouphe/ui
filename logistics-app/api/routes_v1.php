@@ -210,6 +210,73 @@ function api_booking_cancel(PDO $pdo, int $id): void {
     api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
 }
 
+function api_booking_request_rider(PDO $pdo, int $id): void {
+    // Sender sends a delivery request to a chosen rider. Mirrors bookings/send_request.php:
+    // row-locked booking, capacity cap, no duplicate pending, other pending requests rejected.
+    $user = api_require($pdo, ['sender']);
+    $b = api_body();
+    $riderUserId = (int) ($b['riderUserId'] ?? 0);
+    $proposedCost = (float) ($b['proposedCost'] ?? 0);
+    if ($riderUserId <= 0) {
+        api_fail(400, 'VALIDATION', 'Choose a rider.');
+    }
+    if ($proposedCost <= 0) {
+        api_fail(400, 'VALIDATION', 'A valid fee is required.', ['proposedCost' => 'Must be greater than zero']);
+    }
+
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1 FOR UPDATE');
+        $stmt->execute([$id, $user['id']]);
+        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$booking) {
+            $pdo->rollBack();
+            api_fail(404, 'NOT_FOUND', 'Booking not found.');
+        }
+        $blocked = ['matched', 'accepted', 'arrived_at_pickup', 'package_received', 'in_transit', 'delivered', 'cancelled'];
+        if (in_array(($booking['booking_status'] ?? ''), $blocked, true)) {
+            $pdo->rollBack();
+            api_fail(409, 'BOOKING_LOCKED', 'This booking can no longer receive rider requests.');
+        }
+        $stmt = $pdo->prepare('SELECT u.id, u.role FROM users u INNER JOIN rider_profiles rp ON rp.user_id = u.id WHERE u.id = ? LIMIT 1');
+        $stmt->execute([$riderUserId]);
+        $rider = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$rider || ($rider['role'] ?? '') !== 'rider') {
+            $pdo->rollBack();
+            api_fail(404, 'RIDER_NOT_FOUND', 'Selected rider was not found.');
+        }
+        if (rider_active_order_count($pdo, $riderUserId) >= RIDER_MAX_CONCURRENT_ORDERS) {
+            $pdo->rollBack();
+            api_fail(409, 'RIDER_AT_CAPACITY', 'That rider already has the maximum number of active deliveries.');
+        }
+        $stmt = $pdo->prepare("SELECT id FROM rider_requests WHERE booking_id = ? AND rider_user_id = ? AND request_status = 'pending' LIMIT 1");
+        $stmt->execute([$id, $riderUserId]);
+        if ($stmt->fetchColumn()) {
+            $pdo->rollBack();
+            api_fail(409, 'DUPLICATE_REQUEST', 'A pending request has already been sent to this rider.');
+        }
+        // Supersede any other pending requests on this booking, then create this one.
+        $pdo->prepare("UPDATE rider_requests SET request_status = 'rejected' WHERE booking_id = ? AND request_status = 'pending' AND rider_user_id <> ?")
+            ->execute([$id, $riderUserId]);
+        $pdo->prepare("INSERT INTO rider_requests (booking_id, sender_user_id, rider_user_id, proposed_cost, request_status, created_at) VALUES (?, ?, ?, ?, 'pending', NOW())")
+            ->execute([$id, (int) $booking['sender_user_id'], $riderUserId, $proposedCost]);
+        $requestId = (int) $pdo->lastInsertId();
+        $newStatus = ($booking['booking_status'] ?? 'submitted') === 'draft' ? 'submitted' : ($booking['booking_status'] ?? 'submitted');
+        $pdo->prepare('UPDATE bookings SET agreed_cost = ?, booking_status = ?, updated_at = NOW() WHERE id = ?')
+            ->execute([$proposedCost, $newStatus, $id]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        error_log('api send_request failed: ' . $e->getMessage());
+        api_fail(503, 'REQUEST_FAILED', 'Could not send the request right now. Please try again.');
+    }
+
+    if (function_exists('send_web_push')) {
+        try { send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . ($booking['booking_code'] ?? '') . '.', url_path('rider/')); } catch (Throwable $e) {}
+    }
+    api_ok(['requestId' => $requestId, 'bookingId' => $id], [], 201);
+}
+
 function api_booking_track(PDO $pdo, int $id): void {
     $user = api_require($pdo, ['sender']);
     $booking = api_fetch_booking($pdo, $id);

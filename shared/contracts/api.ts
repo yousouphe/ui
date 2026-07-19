@@ -84,6 +84,11 @@ export interface CreateBookingRequest {
   pickup: { address: string } & LatLng;
   dropoff: { address: string } & LatLng;
   vehicleType: VehicleType;
+  recipientName: string;
+  recipientPhone: string;
+  itemName: string;
+  itemCategory?: string;
+  itemDescription?: string;
   notes?: string;
 }
 export type BookingListFilter = 'active' | 'unpaid' | 'history';

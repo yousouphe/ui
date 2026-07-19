@@ -55,6 +55,7 @@ $routes = [
     ['POST', '#^complaints$#',                          fn() => api_complaint_create($pdo)],
     ['POST', '#^bookings/(\d+)/rating$#',               fn($id) => api_booking_rating($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/riders$#',               fn($id) => api_riders_discover($pdo, (int) $id)],
+    ['POST', '#^bookings/(\d+)/request$#',              fn($id) => api_booking_request_rider($pdo, (int) $id)],
     ['GET',  '#^rider/banks$#',                         fn() => api_banks_list($pdo)],
     ['POST', '#^rider/withdrawals$#',                   fn() => api_rider_withdraw($pdo)],
     ['POST', '#^payments/init$#',                       fn() => api_payment_init($pdo)],

@@ -105,6 +105,30 @@ export interface CreateBookingRequest {
 export type BookingListFilter = 'active' | 'unpaid' | 'history';
 export type RiderJobFilter = 'active' | 'pending' | 'completed' | 'cancelled';
 
+export interface NotificationItem {
+  id: number;
+  title: string;
+  body: string;
+  url: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface WalletLedgerEntry {
+  type: string; // e.g. "earning", "withdrawal"
+  amount: number;
+  description: string;
+  createdAt: string;
+}
+
+export interface RiderWallet {
+  balance: number;
+  availableBalance: number;
+  ledger: WalletLedgerEntry[];
+}
+
+export type ComplaintCategory = 'damaged_item' | 'late_delivery' | 'wrong_item' | 'rider_behavior' | 'other';
+
 /** Unsafe writes carry an Idempotency-Key header; see docs/04. */
 export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
 export const AUTH_HEADER = 'Authorization';

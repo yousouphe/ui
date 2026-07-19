@@ -7,13 +7,16 @@ import type {
   AuthTokens,
   Booking,
   BookingListFilter,
+  ComplaintCategory,
   CreateBookingRequest,
   EstimateRequest,
   LoginRequest,
+  NotificationItem,
   PriceBreakdown,
   RiderCandidate,
   RiderJobFilter,
   RiderOffer,
+  RiderWallet,
   UserProfile,
 } from '@shared/contracts/api';
 
@@ -82,7 +85,7 @@ export const senderApi = {
   rate(id: number, rating: number, review?: string): Promise<{ message: string }> {
     return apiRequest(`/bookings/${id}/rating`, { method: 'POST', body: { rating, review } });
   },
-  complain(bookingId: number, category: string, message: string): Promise<{ message: string }> {
+  complain(bookingId: number, category: ComplaintCategory, message: string): Promise<{ message: string }> {
     return apiRequest('/complaints', { method: 'POST', body: { bookingId, category, message } });
   },
   payInit(bookingId: number, idempotencyKey: string): Promise<{ reference: string; accessCode: string | null; authorizationUrl: string | null }> {
@@ -121,7 +124,7 @@ export const riderApi = {
   jobs(filter: RiderJobFilter): Promise<{ bookings: Booking[] }> {
     return apiRequest(`/rider/bookings?filter=${filter}`);
   },
-  wallet(): Promise<{ balance: number; availableBalance: number; ledger: unknown[] }> {
+  wallet(): Promise<RiderWallet> {
     return apiRequest('/rider/wallet');
   },
   banks(): Promise<{ banks: { code: string; name: string }[] }> {
@@ -136,7 +139,7 @@ export const notificationsApi = {
   registerDevice(platform: 'android' | 'ios', token: string): Promise<void> {
     return apiRequest('/notifications/device', { method: 'POST', body: { platform, token } });
   },
-  list(before?: number): Promise<{ notifications: unknown[] }> {
+  list(before?: number): Promise<{ notifications: NotificationItem[] }> {
     return apiRequest(`/notifications${before ? `?before=${before}` : ''}`);
   },
   markRead(id: number): Promise<void> {

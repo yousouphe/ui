@@ -52,6 +52,9 @@ export function LoginScreen({ navigation }: { navigation?: { navigate: (s: strin
           accessibilityLabel={t('auth.password')}
         />
         <Button title={t('auth.signIn')} onPress={submit} loading={loading} style={{ marginTop: spacing.lg }} />
+        <Text style={styles.link} onPress={() => navigation?.navigate('ForgotPassword')} accessibilityRole="button">
+          {t('auth.forgot')}
+        </Text>
         <Text style={styles.link} onPress={() => navigation?.navigate('Register')} accessibilityRole="button">
           {t('auth.noAccount')} {t('auth.signUp')}
         </Text>

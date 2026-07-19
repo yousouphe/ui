@@ -3,6 +3,7 @@
 // screens call the endpoints and render results. Verified via backend endpoint tests + TS parse.
 import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
 import { CallButton } from '@/components/CallButton';
 import { riderApi } from '@/api/services';
@@ -91,6 +92,7 @@ const JOB_FILTERS: readonly RiderJobFilter[] = ['active', 'pending', 'completed'
 const JOB_FILTER_LABEL: Record<RiderJobFilter, string> = { active: 'Active', pending: 'Pending', completed: 'Completed', cancelled: 'Cancelled' };
 
 export function RiderActiveJobsScreen() {
+  const navigation = useNavigation<{ navigate: (s: string, p?: object) => void }>();
   const [filter, setFilter] = useState<RiderJobFilter>('active');
   const [state, setState] = useState<{ loading: boolean; error: string | null; jobs: Booking[] }>({ loading: true, error: null, jobs: [] });
   const [acting, setActing] = useState<number | null>(null);
@@ -175,6 +177,7 @@ export function RiderActiveJobsScreen() {
             <MoneyText amount={job.agreedCost} />
             <Button title="Navigate" variant="secondary" onPress={() => navigateTo(job)} />
             <CallButton bookingId={job.id} label="Call sender" />
+            <Button title="Message sender" variant="secondary" onPress={() => navigation.navigate('Chat', { bookingId: job.id })} />
             {step ? <Button title={step.label} onPress={() => advance(job, step.to)} loading={acting === job.id} /> : null}
             {delivered && job.paymentStatus === 'paid' ? (
               <Button title="Confirm payment received" onPress={() => confirmPay(job)} loading={acting === job.id} />

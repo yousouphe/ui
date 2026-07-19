@@ -7,17 +7,21 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/auth/AuthContext';
 import { LoginScreen } from '@/screens/LoginScreen';
+import { RegisterScreen } from '@/screens/auth/RegisterScreen';
+import { ForgotPasswordScreen } from '@/screens/auth/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '@/screens/auth/ResetPasswordScreen';
+import { NotificationsScreen } from '@/screens/NotificationsScreen';
 import {
-  NotificationsScreen,
   ProfileScreen,
-  RegisterScreen,
   RiderHomeScreen,
   RiderWalletScreen,
   SenderHomeScreen,
   SenderOrdersScreen,
 } from '@/screens';
 import { CreateBookingScreen, PayScreen, RateScreen, RidersScreen, TrackScreen } from '@/screens/sender/flow';
+import { ComplaintScreen } from '@/screens/sender/ComplaintScreen';
 import { RiderActiveJobsScreen, RiderOffersScreen } from '@/screens/rider/flow';
+import { WithdrawScreen } from '@/screens/rider/WithdrawScreen';
 import { colors } from '@/theme/theme';
 
 const Stack = createNativeStackNavigator();
@@ -33,6 +37,8 @@ function AuthStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: true, title: '' }} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: true, title: '' }} />
+      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: true, title: '' }} />
     </Stack.Navigator>
   );
 }
@@ -72,6 +78,7 @@ function SenderStack() {
       <Stack.Screen name="Track" component={TrackScreen} options={{ title: 'Track' }} />
       <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Payment' }} />
       <Stack.Screen name="Rate" component={RateScreen} options={{ title: 'Rate' }} />
+      <Stack.Screen name="Complaint" component={ComplaintScreen} options={{ title: 'Report a problem' }} />
     </Stack.Navigator>
   );
 }
@@ -82,7 +89,8 @@ function RiderStack() {
     <Stack.Navigator screenOptions={{ headerBackTitleVisible: false }}>
       <Stack.Screen name="RiderTabs" component={RiderTabs} options={{ headerShown: false }} />
       <Stack.Screen name="Offers" component={RiderOffersScreen} options={{ title: 'New offers' }} />
-      <Stack.Screen name="ActiveJobs" component={RiderActiveJobsScreen} options={{ title: 'Active jobs' }} />
+      <Stack.Screen name="ActiveJobs" component={RiderActiveJobsScreen} options={{ title: 'My jobs' }} />
+      <Stack.Screen name="Withdraw" component={WithdrawScreen} options={{ title: 'Withdraw' }} />
     </Stack.Navigator>
   );
 }

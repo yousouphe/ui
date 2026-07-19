@@ -2,14 +2,14 @@
 // -> navigate → confirm payment received. Trusted transitions/eligibility are the backend's; the
 // screens call the endpoints and render results. Verified via backend endpoint tests + TS parse.
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
 import { CallButton } from '@/components/CallButton';
 import { riderApi } from '@/api/services';
 import { ApiClientError } from '@/api/client';
 import { VEHICLE_LABEL, type VehicleType } from '@shared/constants/vehicles';
-import type { Booking, RiderOffer } from '@shared/contracts/api';
-import { colors, spacing, typography } from '@/theme/theme';
+import type { Booking, RiderJobFilter, RiderOffer } from '@shared/contracts/api';
+import { colors, radius, spacing, typography } from '@/theme/theme';
 
 type Nav = { navigate: (s: string, p?: object) => void };
 
@@ -41,7 +41,7 @@ export function RiderOffersScreen({ navigation }: { navigation: Nav }) {
       } else {
         await riderApi.rejectOffer(o.requestId);
       }
-      await load();
+      await load(filter);
     } catch (e) {
       setState((s) => ({ ...s, error: e instanceof ApiClientError ? e.message : 'Could not update the offer.' }));
     } finally {
@@ -87,13 +87,17 @@ function nextAction(status: string): { to: string; label: string } | null {
   }
 }
 
+const JOB_FILTERS: readonly RiderJobFilter[] = ['active', 'pending', 'completed', 'cancelled'];
+const JOB_FILTER_LABEL: Record<RiderJobFilter, string> = { active: 'Active', pending: 'Pending', completed: 'Completed', cancelled: 'Cancelled' };
+
 export function RiderActiveJobsScreen() {
+  const [filter, setFilter] = useState<RiderJobFilter>('active');
   const [state, setState] = useState<{ loading: boolean; error: string | null; jobs: Booking[] }>({ loading: true, error: null, jobs: [] });
   const [acting, setActing] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (f: RiderJobFilter) => {
     try {
-      const res = await riderApi.jobs('active');
+      const res = await riderApi.jobs(f);
       setState({ loading: false, error: null, jobs: res.bookings });
     } catch {
       setState((s) => ({ ...s, loading: false, error: 'Could not load your jobs.' }));
@@ -101,16 +105,21 @@ export function RiderActiveJobsScreen() {
   }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 12000);
-    return () => clearInterval(t);
-  }, [load]);
+    setState((s) => ({ ...s, loading: true }));
+    load(filter);
+    // Only the live buckets need polling; finished ones are static.
+    if (filter === 'active' || filter === 'pending') {
+      const t = setInterval(() => load(filter), 12000);
+      return () => clearInterval(t);
+    }
+    return undefined;
+  }, [filter, load]);
 
   async function advance(job: Booking, to: string) {
     setActing(job.id);
     try {
       await riderApi.transition(job.id, to);
-      await load();
+      await load(filter);
     } catch (e) {
       setState((s) => ({ ...s, error: e instanceof ApiClientError ? e.message : 'Could not update the delivery.' }));
     } finally {
@@ -122,7 +131,7 @@ export function RiderActiveJobsScreen() {
     setActing(job.id);
     try {
       await riderApi.confirmPayment(job.id);
-      await load();
+      await load(filter);
     } catch (e) {
       setState((s) => ({ ...s, error: e instanceof ApiClientError ? e.message : 'Could not confirm payment.' }));
     } finally {
@@ -137,14 +146,24 @@ export function RiderActiveJobsScreen() {
     }
   }
 
-  if (state.loading) return <LoadingState />;
-  if (state.error) return <ErrorState message={state.error} onRetry={load} />;
-  if (state.jobs.length === 0) return <EmptyState title="No active jobs" subtitle="Accepted deliveries will appear here." />;
-
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Active jobs</Text>
-      {state.jobs.map((job) => {
+      <Text style={styles.title}>My jobs</Text>
+      <View style={styles.tabs}>
+        {JOB_FILTERS.map((f) => (
+          <TouchableOpacity key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive]} accessibilityRole="button" accessibilityState={{ selected: filter === f }}>
+            <Text style={[styles.tabText, filter === f && styles.tabTextActive]}>{JOB_FILTER_LABEL[f]}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {state.loading ? (
+        <LoadingState />
+      ) : state.error ? (
+        <ErrorState message={state.error} onRetry={() => load(filter)} />
+      ) : state.jobs.length === 0 ? (
+        <EmptyState title={`No ${JOB_FILTER_LABEL[filter].toLowerCase()} jobs`} subtitle="Jobs in this list will appear here." />
+      ) : (
+      state.jobs.map((job) => {
         const step = nextAction(job.status);
         const delivered = job.status === 'delivered';
         return (
@@ -165,7 +184,8 @@ export function RiderActiveJobsScreen() {
             ) : null}
           </Card>
         );
-      })}
+      })
+      )}
     </ScrollView>
   );
 }
@@ -179,4 +199,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.md },
   actions: { flexDirection: 'row', gap: spacing.sm },
   flex: { flex: 1 },
+  tabs: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 3, gap: 3 },
+  tab: { flex: 1, paddingVertical: spacing.sm, borderRadius: radius.sm, alignItems: 'center' },
+  tabActive: { backgroundColor: colors.primary },
+  tabText: { ...typography.small, color: colors.textSoft, fontWeight: '700' },
+  tabTextActive: { color: '#fff' },
 });

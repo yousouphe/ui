@@ -202,6 +202,9 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
   const [rider, setRider] = useState<TrackRider | null>(null);
   const [ends, setEnds] = useState<{ pickup?: MapPoint; dropoff?: MapPoint }>({});
   const [error, setError] = useState<string | null>(null);
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
 
   // Booking endpoints (pickup/drop-off) are fixed — fetch once for the map.
   useEffect(() => {
@@ -231,6 +234,25 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, [load]);
+
+  // Cancellable pre-handover only; the backend enforces the exact rule and rejects otherwise.
+  const canCancel = ['submitted', 'matched', 'accepted', 'arrived_at_pickup'].includes(status) && payment !== 'paid';
+
+  async function doCancel() {
+    if (!cancelReason.trim()) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      await senderApi.cancel(bookingId, cancelReason.trim());
+      setShowCancel(false);
+      setCancelReason('');
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiClientError ? e.message : 'Could not cancel this booking.');
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   if (error) return <ErrorState message={error} onRetry={load} />;
 
@@ -266,6 +288,29 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
       ) : null}
       {status === 'delivered' && payment === 'paid' ? (
         <Button title="Rate your rider" onPress={() => navigation.navigate('Rate', { bookingId })} />
+      ) : null}
+      {status === 'delivered' ? (
+        <Button title="Report a problem" variant="secondary" onPress={() => navigation.navigate('Complaint', { bookingId })} />
+      ) : null}
+      {canCancel && !showCancel ? (
+        <Button title="Cancel booking" variant="secondary" onPress={() => setShowCancel(true)} />
+      ) : null}
+      {showCancel ? (
+        <Card>
+          <Text style={styles.label}>Reason for cancelling</Text>
+          <TextInput
+            style={[styles.input, { minHeight: 72 }]}
+            value={cancelReason}
+            onChangeText={setCancelReason}
+            placeholder="Let us know why…"
+            placeholderTextColor={colors.textSoft}
+            multiline
+          />
+          <View style={styles.priceRow}>
+            <Button title="Keep booking" variant="secondary" onPress={() => setShowCancel(false)} style={{ flex: 1 }} />
+            <Button title="Confirm cancel" variant="danger" onPress={doCancel} loading={cancelling} disabled={!cancelReason.trim()} style={{ flex: 1 }} />
+          </View>
+        </Card>
       ) : null}
     </ScrollView>
   );

@@ -105,7 +105,12 @@ function api_auth_google(PDO $pdo): void {
         [(string) ($config['google_client_id'] ?? '')],
         explode(',', (string) ($config['google_mobile_client_ids'] ?? ''))
     )), static fn($v) => $v !== '' && strpos($v, 'REDACTED') === false));
-    if (!empty($allowedAud) && !in_array((string) ($claims['aud'] ?? ''), $allowedAud, true)) {
+    // Fail closed: with no configured client IDs we cannot pin the audience, so a token minted for
+    // any other Google app would be accepted (audience confusion). Reject rather than skip the check.
+    if (empty($allowedAud)) {
+        api_fail(503, 'GOOGLE_NOT_CONFIGURED', 'Google sign-in is not configured for this app.');
+    }
+    if (!in_array((string) ($claims['aud'] ?? ''), $allowedAud, true)) {
         api_fail(401, 'GOOGLE_AUD', 'This Google sign-in is not authorised for this app.');
     }
     $emailVerified = ($claims['email_verified'] ?? '') === true || ($claims['email_verified'] ?? '') === 'true';

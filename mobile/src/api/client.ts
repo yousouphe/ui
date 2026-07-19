@@ -71,8 +71,11 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
   const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
   if (signal) signal.addEventListener('abort', () => controller.abort());
 
+  // Multipart (FormData) bodies: let fetch set the Content-Type + boundary itself and send the
+  // FormData as-is. JSON bodies are stringified with an explicit Content-Type.
+  const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !isMultipart) headers['Content-Type'] = 'application/json';
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
   if (auth) {
     const token = await getAccessToken();
@@ -84,7 +87,7 @@ export async function apiRequest<T>(path: string, opts: RequestOptions = {}): Pr
     res = await fetch(`${config.apiBaseUrl}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : isMultipart ? (body as FormData) : JSON.stringify(body),
       signal: controller.signal,
     });
   } catch (e) {

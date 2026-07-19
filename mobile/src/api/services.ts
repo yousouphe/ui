@@ -17,6 +17,7 @@ import type {
   PriceBreakdown,
   RiderCandidate,
   RiderBankAccount,
+  RiderKyc,
   RiderJobFilter,
   RiderOffer,
   RiderWallet,
@@ -162,6 +163,12 @@ export const riderApi = {
   },
   updateVehicle(vehicleType: VehicleType): Promise<{ vehicleType: string }> {
     return apiRequest('/rider/profile', { method: 'PATCH', body: { vehicleType } });
+  },
+  kyc(): Promise<RiderKyc> {
+    return apiRequest('/rider/kyc');
+  },
+  submitKyc(form: FormData): Promise<{ kycStatus: string }> {
+    return apiRequest('/rider/kyc', { method: 'POST', body: form });
   },
 };
 

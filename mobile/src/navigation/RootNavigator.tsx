@@ -11,6 +11,7 @@ import { RegisterScreen } from '@/screens/auth/RegisterScreen';
 import { ForgotPasswordScreen } from '@/screens/auth/ForgotPasswordScreen';
 import { ResetPasswordScreen } from '@/screens/auth/ResetPasswordScreen';
 import { NotificationsScreen } from '@/screens/NotificationsScreen';
+import { ChatScreen } from '@/screens/ChatScreen';
 import {
   ProfileScreen,
   RiderHomeScreen,
@@ -87,6 +88,7 @@ function SenderStack() {
       <Stack.Screen name="Complaint" component={ComplaintScreen} options={{ title: 'Report a problem' }} />
       <Stack.Screen name="EditBooking" component={EditBookingScreen} options={{ title: 'Edit booking' }} />
       <Stack.Screen name="Receipts" component={ReceiptsScreen} options={{ title: 'Receipts' }} />
+      <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
     </Stack.Navigator>
   );
 }
@@ -103,6 +105,7 @@ function RiderStack() {
       <Stack.Screen name="Withdrawals" component={WithdrawalsScreen} options={{ title: 'Withdrawals' }} />
       <Stack.Screen name="Vehicle" component={VehicleScreen} options={{ title: 'Vehicle' }} />
       <Stack.Screen name="Guidelines" component={GuidelinesScreen} options={{ title: 'Guidelines' }} />
+      <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
     </Stack.Navigator>
   );
 }

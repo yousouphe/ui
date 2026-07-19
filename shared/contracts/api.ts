@@ -129,6 +129,15 @@ export interface RiderWallet {
 
 export type ComplaintCategory = 'damaged_item' | 'late_delivery' | 'wrong_item' | 'rider_behavior' | 'other';
 
+export interface ChatMessage {
+  id: number;
+  mine: boolean;
+  message: string;
+  deliveredAt: string | null; // set → one tick ("sent")
+  readAt: string | null;      // set → two ticks ("read")
+  createdAt: string | null;
+}
+
 export interface PaymentReceipt {
   bookingId: number;
   bookingCode: string;

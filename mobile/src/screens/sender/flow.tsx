@@ -305,6 +305,9 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
         <Button title="Rebook this delivery" onPress={doRebook} loading={rebooking} />
       ) : null}
       {rider?.fullName ? <CallButton bookingId={bookingId} label="Call rider" /> : null}
+      {rider?.fullName ? (
+        <Button title="Message rider" variant="secondary" onPress={() => navigation.navigate('Chat', { bookingId })} />
+      ) : null}
       {status === 'delivered' && payment !== 'paid' ? (
         <Button title="Pay now" onPress={() => navigation.navigate('Pay', { bookingId })} />
       ) : null}

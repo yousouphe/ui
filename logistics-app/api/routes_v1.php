@@ -379,6 +379,95 @@ function api_booking_contact(PDO $pdo, int $id): void {
     ]);
 }
 
+// ---- Chat (booking_chat_messages) -----------------------------------------------------------
+
+/** Authorise the caller for a booking's chat and return [bookingRow, counterpartUserId]. */
+function api_chat_authorize(PDO $pdo, int $bookingId, array $user): array {
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, selected_rider_user_id FROM bookings
+                           WHERE id = ? AND (sender_user_id = ? OR selected_rider_user_id = ?) LIMIT 1');
+    $stmt->execute([$bookingId, $user['id'], $user['id']]);
+    $b = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$b) {
+        api_fail(403, 'FORBIDDEN', 'You are not part of this delivery chat.');
+    }
+    $isSender = (int) $b['sender_user_id'] === (int) $user['id'];
+    $counterpart = $isSender ? (int) ($b['selected_rider_user_id'] ?? 0) : (int) $b['sender_user_id'];
+    return [$b, $counterpart];
+}
+
+function api_messages_list(PDO $pdo, int $bookingId): void {
+    // Chat history for the booking's two parties. Marks the caller's incoming messages read (so the
+    // other side sees the read tick), then returns messages after `since`. Mirrors the auth + read
+    // semantics of chat/ajax_fetch_messages.php. delivered_at/read_at drive the sent/read ticks.
+    $user = api_require($pdo, ['sender', 'rider']);
+    api_chat_authorize($pdo, $bookingId, $user);
+    if (!db_table_exists($pdo, 'booking_chat_messages')) {
+        api_ok(['messages' => [], 'lastId' => 0]);
+    }
+    $sinceId = isset($_GET['since']) ? max(0, (int) $_GET['since']) : 0;
+
+    $pdo->prepare('UPDATE booking_chat_messages SET is_read = 1, read_at = NOW()
+                   WHERE booking_id = ? AND receiver_user_id = ? AND is_read = 0')
+        ->execute([$bookingId, $user['id']]);
+
+    $sql = 'SELECT id, sender_user_id, message, delivered_at, read_at, created_at
+            FROM booking_chat_messages WHERE booking_id = ?'
+        . ($sinceId > 0 ? ' AND id > ?' : '') . ' ORDER BY id ASC LIMIT 100';
+    $params = [$bookingId];
+    if ($sinceId > 0) { $params[] = $sinceId; }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $items = array_map(static fn(array $m): array => [
+        'id' => (int) $m['id'],
+        'mine' => (int) $m['sender_user_id'] === (int) $user['id'],
+        'message' => (string) $m['message'],
+        'deliveredAt' => $m['delivered_at'] !== null ? (string) $m['delivered_at'] : null,
+        'readAt' => $m['read_at'] !== null ? (string) $m['read_at'] : null,
+        'createdAt' => (string) $m['created_at'],
+    ], $rows);
+    $lastId = $rows ? (int) $rows[count($rows) - 1]['id'] : $sinceId;
+    api_ok(['messages' => $items, 'lastId' => $lastId]);
+}
+
+function api_messages_send(PDO $pdo, int $bookingId): void {
+    // Send a chat message. The receiver is derived server-side (the booking's other party), so the
+    // client can't target anyone else. Mirrors chat/ajax_send_message.php. Notifies the counterpart.
+    $user = api_require($pdo, ['sender', 'rider']);
+    [, $counterpart] = api_chat_authorize($pdo, $bookingId, $user);
+    if (!db_table_exists($pdo, 'booking_chat_messages')) {
+        api_fail(503, 'CHAT_UNAVAILABLE', 'Chat is temporarily unavailable.');
+    }
+    $message = trim((string) (api_body()['message'] ?? ''));
+    if ($message === '') {
+        api_fail(400, 'VALIDATION', 'Enter a message.', ['message' => 'Required']);
+    }
+    if (mb_strlen($message) > 2000) {
+        $message = mb_substr($message, 0, 2000);
+    }
+    if ($counterpart <= 0) {
+        api_fail(409, 'NO_COUNTERPART', 'No rider is assigned to this delivery yet.');
+    }
+    $pdo->prepare('INSERT INTO booking_chat_messages (booking_id, sender_user_id, receiver_user_id, message, delivered_at)
+                   VALUES (?, ?, ?, ?, NOW())')
+        ->execute([$bookingId, $user['id'], $counterpart, $message]);
+    $id = (int) $pdo->lastInsertId();
+    if (function_exists('send_web_push')) {
+        try { send_web_push($pdo, $counterpart, (string) $user['full_name'], $message, url_path('bookings/index.php?booking_id=' . $bookingId)); } catch (Throwable $e) {}
+    }
+    $stmt = $pdo->prepare('SELECT delivered_at, created_at FROM booking_chat_messages WHERE id = ?');
+    $stmt->execute([$id]);
+    $m = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    api_ok(['message' => [
+        'id' => $id,
+        'mine' => true,
+        'message' => $message,
+        'deliveredAt' => isset($m['delivered_at']) ? (string) $m['delivered_at'] : null,
+        'readAt' => null,
+        'createdAt' => isset($m['created_at']) ? (string) $m['created_at'] : null,
+    ]], [], 201);
+}
+
 function api_booking_request_rider(PDO $pdo, int $id): void {
     // Sender sends a delivery request to a chosen rider. Mirrors bookings/send_request.php:
     // row-locked booking, capacity cap, no duplicate pending, other pending requests rejected.

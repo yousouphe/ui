@@ -7,6 +7,7 @@ import type {
   AuthTokens,
   Booking,
   BookingListFilter,
+  ChatMessage,
   ComplaintCategory,
   CreateBookingRequest,
   EstimateRequest,
@@ -161,6 +162,17 @@ export const riderApi = {
   },
   updateVehicle(vehicleType: VehicleType): Promise<{ vehicleType: string }> {
     return apiRequest('/rider/profile', { method: 'PATCH', body: { vehicleType } });
+  },
+};
+
+// Chat is shared by both parties on a booking; the backend derives the receiver, so callers only
+// send a booking id + text. Poll `messages(id, since)` with the last id to fetch just new messages.
+export const chatApi = {
+  messages(bookingId: number, since = 0): Promise<{ messages: ChatMessage[]; lastId: number }> {
+    return apiRequest(`/bookings/${bookingId}/messages${since > 0 ? `?since=${since}` : ''}`);
+  },
+  send(bookingId: number, message: string): Promise<{ message: ChatMessage }> {
+    return apiRequest(`/bookings/${bookingId}/messages`, { method: 'POST', body: { message } });
   },
 };
 

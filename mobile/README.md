@@ -5,10 +5,14 @@ the existing backend in [`../logistics-app`](../logistics-app): it holds no busi
 secrets, and talks to the backend only through the versioned JSON API (`/api/v1`). The web app and
 this app run independently on the **same** backend and database.
 
-> **Status: Phase 1 (foundation).** This directory currently contains the discovery/audit
-> documentation ([`docs/`](docs)), the architecture + API plan, shared contracts, and the project
-> scaffold (config, theme, secure token storage, API client, connectivity). Screens and the backend
-> `/api/v1` layer land in later phases — see [`docs/06-roadmap-testing-deployment.md`](docs/06-roadmap-testing-deployment.md).
+> **Status: Phase 4 (design system + navigation shell).** The backend `/api/v1` layer exists
+> (see [`../logistics-app/api`](../logistics-app/api)). This app now has: secure token storage,
+> the token-aware API client + typed service layer (`src/api`), an auth context that restores the
+> session and selects the sender/rider tree by server-verified role, i18n (en/ha), core
+> design-system components (`src/components`), the branded splash/offline gate, and a role-based
+> navigation shell (`src/navigation`) with working Login + sender/rider tab screens wired to the
+> real API. The full booking wizard, rider job workflow, tracking map, chat, payments and push
+> integrations are Phases 5-7 — see [`docs/06-roadmap-testing-deployment.md`](docs/06-roadmap-testing-deployment.md).
 > No mock data ships in the production app.
 
 ## Directory layout

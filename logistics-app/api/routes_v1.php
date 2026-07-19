@@ -1050,6 +1050,114 @@ function api_banks_list(PDO $pdo): void {
     ], $banks)]);
 }
 
+function api_rider_profile_update(PDO $pdo): void {
+    // Change the rider's vehicle type. Mirrors the vehicle field the web KYC/profile flow manages;
+    // pricing/ETA per vehicle stay server-side, so this only records the rider's own vehicle.
+    $user = api_require($pdo, ['rider']);
+    $vehicleType = (string) (api_body()['vehicleType'] ?? '');
+    if (!in_array($vehicleType, ['bike', 'car', 'van'], true)) {
+        api_fail(400, 'VALIDATION', 'Choose a valid vehicle type.', ['vehicleType' => 'bike, car or van']);
+    }
+    $pdo->prepare('UPDATE rider_profiles SET vehicle_type = ? WHERE user_id = ?')->execute([$vehicleType, $user['id']]);
+    api_ok(['vehicleType' => $vehicleType]);
+}
+
+function api_rider_bank_get(PDO $pdo): void {
+    // The rider's saved payout account (if any). The account number is returned masked — only the
+    // last 4 digits — since the full number isn't needed on the client once it's verified.
+    $user = api_require($pdo, ['rider']);
+    $stmt = $pdo->prepare('SELECT bank_name, bank_code, account_number, account_name, verified_at FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    $bank = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$bank) {
+        api_ok(['bank' => null]);
+    }
+    $acct = (string) $bank['account_number'];
+    api_ok(['bank' => [
+        'bankName' => (string) $bank['bank_name'],
+        'bankCode' => (string) ($bank['bank_code'] ?? ''),
+        'accountNumberMasked' => strlen($acct) > 4 ? str_repeat('*', strlen($acct) - 4) . substr($acct, -4) : $acct,
+        'accountName' => (string) $bank['account_name'],
+        'verified' => !empty($bank['verified_at']),
+    ]]);
+}
+
+function api_rider_bank_verify(PDO $pdo): void {
+    // Resolve an account number + bank to the account holder's name via Paystack (read-only; no
+    // secret leaves the server). Mirrors rider/ajax_verify_bank_account.php. Lets the app preview
+    // the resolved name before saving.
+    $user = api_require($pdo, ['rider']);
+    $b = api_body();
+    $accountNumber = trim((string) ($b['accountNumber'] ?? ''));
+    $bankCode = trim((string) ($b['bankCode'] ?? ''));
+    if ($bankCode === '' || $accountNumber === '' || !ctype_digit($accountNumber)) {
+        api_fail(422, 'VALIDATION', 'A valid account number and bank are required.');
+    }
+    if (!function_exists('paystack_resolve_account')) {
+        api_fail(503, 'BANK_UNAVAILABLE', 'Bank verification is temporarily unavailable. Please try again shortly.');
+    }
+    $result = paystack_resolve_account($accountNumber, $bankCode);
+    if (!($result['ok'] ?? false)) {
+        api_fail(422, 'VERIFY_FAILED', $result['message'] ?: 'We could not verify that account. Check the number and bank.');
+    }
+    api_ok(['accountName' => (string) $result['account_name']]);
+}
+
+function api_rider_bank_save(PDO $pdo): void {
+    // Save/replace the rider's payout account. Mirrors rider/wallet.php save_bank_account: the name
+    // is always the one Paystack resolves (never client-supplied), and the row is upserted with a
+    // fresh verified_at and a cleared recipient code (recreated at transfer time).
+    $user = api_require($pdo, ['rider']);
+    $b = api_body();
+    $accountNumber = trim((string) ($b['accountNumber'] ?? ''));
+    $bankCode = trim((string) ($b['bankCode'] ?? ''));
+    if ($bankCode === '' || $accountNumber === '' || !ctype_digit($accountNumber)) {
+        api_fail(422, 'VALIDATION', 'A valid account number and bank are required.');
+    }
+    $stmt = $pdo->prepare('SELECT name FROM paystack_banks WHERE code = ? LIMIT 1');
+    $stmt->execute([$bankCode]);
+    $bankName = (string) ($stmt->fetchColumn() ?: '');
+    if ($bankName === '') {
+        api_fail(422, 'INVALID_BANK', 'Please choose a valid bank.');
+    }
+    if (!function_exists('paystack_resolve_account')) {
+        api_fail(503, 'BANK_UNAVAILABLE', 'Bank verification is temporarily unavailable. Please try again shortly.');
+    }
+    $result = paystack_resolve_account($accountNumber, $bankCode);
+    if (!($result['ok'] ?? false)) {
+        api_fail(422, 'VERIFY_FAILED', $result['message'] ?: 'We could not verify that account. Check the number and bank.');
+    }
+    $pdo->prepare('INSERT INTO rider_bank_accounts (rider_user_id, bank_name, bank_code, account_number, account_name, verified_at, paystack_recipient_code)
+                   VALUES (?, ?, ?, ?, ?, NOW(), NULL)
+                   ON DUPLICATE KEY UPDATE bank_name = VALUES(bank_name), bank_code = VALUES(bank_code),
+                       account_number = VALUES(account_number), account_name = VALUES(account_name),
+                       verified_at = VALUES(verified_at), paystack_recipient_code = NULL')
+        ->execute([$user['id'], $bankName, $bankCode, $accountNumber, $result['account_name']]);
+    api_ok(['bankName' => $bankName, 'accountName' => (string) $result['account_name']], [], 201);
+}
+
+function api_rider_withdrawals(PDO $pdo): void {
+    // The rider's withdrawal history + live status (webhook-driven on the transfer side). Account
+    // number is masked to its last 4 digits.
+    $user = api_require($pdo, ['rider']);
+    $stmt = $pdo->prepare('SELECT amount, status, bank_name, account_number, requested_at, processed_at, admin_note
+                           FROM withdrawal_requests WHERE rider_user_id = ? ORDER BY id DESC LIMIT 50');
+    $stmt->execute([$user['id']]);
+    $items = array_map(static function (array $w): array {
+        $acct = (string) $w['account_number'];
+        return [
+            'amount' => (float) $w['amount'],
+            'status' => (string) $w['status'],
+            'bankName' => (string) $w['bank_name'],
+            'accountNumberMasked' => strlen($acct) > 4 ? '****' . substr($acct, -4) : $acct,
+            'requestedAt' => (string) $w['requested_at'],
+            'processedAt' => $w['processed_at'] !== null ? (string) $w['processed_at'] : null,
+            'note' => $w['admin_note'] !== null ? (string) $w['admin_note'] : null,
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    api_ok(['withdrawals' => $items]);
+}
+
 function api_rider_withdraw(PDO $pdo): void {
     $user = api_require($pdo, ['rider']);
     api_idempotency_replay($pdo, (int) $user['id'], 'POST rider/withdrawals');

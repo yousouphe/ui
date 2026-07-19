@@ -24,6 +24,10 @@ import { EditBookingScreen } from '@/screens/sender/EditBookingScreen';
 import { ReceiptsScreen } from '@/screens/sender/ReceiptsScreen';
 import { RiderActiveJobsScreen, RiderOffersScreen } from '@/screens/rider/flow';
 import { WithdrawScreen } from '@/screens/rider/WithdrawScreen';
+import { BankAccountScreen } from '@/screens/rider/BankAccountScreen';
+import { WithdrawalsScreen } from '@/screens/rider/WithdrawalsScreen';
+import { VehicleScreen } from '@/screens/rider/VehicleScreen';
+import { GuidelinesScreen } from '@/screens/rider/GuidelinesScreen';
 import { colors } from '@/theme/theme';
 
 const Stack = createNativeStackNavigator();
@@ -95,6 +99,10 @@ function RiderStack() {
       <Stack.Screen name="Offers" component={RiderOffersScreen} options={{ title: 'New offers' }} />
       <Stack.Screen name="ActiveJobs" component={RiderActiveJobsScreen} options={{ title: 'My jobs' }} />
       <Stack.Screen name="Withdraw" component={WithdrawScreen} options={{ title: 'Withdraw' }} />
+      <Stack.Screen name="BankAccount" component={BankAccountScreen} options={{ title: 'Payout bank' }} />
+      <Stack.Screen name="Withdrawals" component={WithdrawalsScreen} options={{ title: 'Withdrawals' }} />
+      <Stack.Screen name="Vehicle" component={VehicleScreen} options={{ title: 'Vehicle' }} />
+      <Stack.Screen name="Guidelines" component={GuidelinesScreen} options={{ title: 'Guidelines' }} />
     </Stack.Navigator>
   );
 }

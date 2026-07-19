@@ -137,6 +137,26 @@ export interface PaymentReceipt {
   paidAt: string;
 }
 
+export interface RiderBankAccount {
+  bankName: string;
+  bankCode: string;
+  accountNumberMasked: string;
+  accountName: string;
+  verified: boolean;
+}
+
+export type WithdrawalStatus = 'pending' | 'processing' | 'paid' | 'rejected';
+
+export interface WithdrawalItem {
+  amount: number;
+  status: WithdrawalStatus;
+  bankName: string;
+  accountNumberMasked: string;
+  requestedAt: string;
+  processedAt: string | null;
+  note: string | null;
+}
+
 /** PATCH /bookings/{id}: any subset of editable detail fields and/or a new delivery point. */
 export interface UpdateBookingRequest {
   recipientName?: string;

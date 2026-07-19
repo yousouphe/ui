@@ -15,12 +15,15 @@ import type {
   PaymentReceipt,
   PriceBreakdown,
   RiderCandidate,
+  RiderBankAccount,
   RiderJobFilter,
   RiderOffer,
   RiderWallet,
   UpdateBookingRequest,
   UserProfile,
+  WithdrawalItem,
 } from '@shared/contracts/api';
+import type { VehicleType } from '@shared/constants/vehicles';
 
 type AuthResult = AuthTokens & { user: UserProfile };
 
@@ -143,6 +146,21 @@ export const riderApi = {
   },
   withdraw(amount: number, idempotencyKey: string): Promise<{ message: string }> {
     return apiRequest('/rider/withdrawals', { method: 'POST', body: { amount }, idempotencyKey });
+  },
+  withdrawals(): Promise<{ withdrawals: WithdrawalItem[] }> {
+    return apiRequest('/rider/withdrawals');
+  },
+  bank(): Promise<{ bank: RiderBankAccount | null }> {
+    return apiRequest('/rider/bank');
+  },
+  verifyBank(accountNumber: string, bankCode: string): Promise<{ accountName: string }> {
+    return apiRequest('/rider/bank/verify', { method: 'POST', body: { accountNumber, bankCode } });
+  },
+  saveBank(accountNumber: string, bankCode: string): Promise<{ bankName: string; accountName: string }> {
+    return apiRequest('/rider/bank', { method: 'POST', body: { accountNumber, bankCode } });
+  },
+  updateVehicle(vehicleType: VehicleType): Promise<{ vehicleType: string }> {
+    return apiRequest('/rider/profile', { method: 'PATCH', body: { vehicleType } });
   },
 };
 

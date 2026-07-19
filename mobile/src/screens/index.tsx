@@ -162,6 +162,10 @@ export function RiderWalletScreen() {
         <Text style={styles.soft}>Available to withdraw</Text>
         <MoneyText amount={state.available} />
         <Button title="Withdraw" onPress={() => navigation.navigate('Withdraw')} style={{ marginTop: spacing.sm }} />
+        <View style={styles.row}>
+          <Button title="Payout bank" variant="secondary" onPress={() => navigation.navigate('BankAccount')} style={styles.flex} />
+          <Button title="History" variant="secondary" onPress={() => navigation.navigate('Withdrawals')} style={styles.flex} />
+        </View>
       </Card>
       <Card>
         <Text style={styles.soft}>Total balance</Text>
@@ -235,6 +239,12 @@ export function ProfileScreen() {
       </Card>
       {user?.role === 'sender' ? (
         <Button title="Payment receipts" variant="secondary" onPress={() => navigation.navigate('Receipts')} />
+      ) : null}
+      {user?.role === 'rider' ? (
+        <>
+          <Button title="Vehicle" variant="secondary" onPress={() => navigation.navigate('Vehicle')} />
+          <Button title="Rider guidelines" variant="secondary" onPress={() => navigation.navigate('Guidelines')} />
+        </>
       ) : null}
       <Button title="Sign out" variant="danger" onPress={() => { void signOut(); }} />
     </Screen>

@@ -10,6 +10,7 @@ import { LoginScreen } from '@/screens/LoginScreen';
 import { RegisterScreen } from '@/screens/auth/RegisterScreen';
 import { ForgotPasswordScreen } from '@/screens/auth/ForgotPasswordScreen';
 import { ResetPasswordScreen } from '@/screens/auth/ResetPasswordScreen';
+import { CompleteProfileScreen } from '@/screens/auth/CompleteProfileScreen';
 import { NotificationsScreen } from '@/screens/NotificationsScreen';
 import { ChatScreen } from '@/screens/ChatScreen';
 import {
@@ -112,11 +113,27 @@ function RiderStack() {
   );
 }
 
+// A signed-in user whose profile isn't complete (e.g. after Google sign-up — no phone yet) must
+// finish it before reaching the app. This gate replaces the whole tree until profileCompleted.
+function CompleteProfileStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+    </Stack.Navigator>
+  );
+}
+
 export function RootNavigator() {
   const { user } = useAuth();
   return (
     <NavigationContainer theme={navTheme}>
-      {!user ? <AuthStack /> : user.role === 'rider' ? <RiderStack /> : <SenderStack />}
+      {!user
+        ? <AuthStack />
+        : !user.profileCompleted
+          ? <CompleteProfileStack />
+          : user.role === 'rider'
+            ? <RiderStack />
+            : <SenderStack />}
     </NavigationContainer>
   );
 }

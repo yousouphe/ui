@@ -59,6 +59,14 @@ export const authApi = {
   updateProfile(body: { fullName?: string; phone?: string }): Promise<UserProfile> {
     return apiRequest<UserProfile>('/profile', { method: 'PATCH', body });
   },
+  async google(idToken: string): Promise<UserProfile> {
+    const res = await apiRequest<AuthResult>('/auth/google', { method: 'POST', body: { idToken }, auth: false });
+    await saveTokens(res);
+    return res.user;
+  },
+  completeProfile(body: { phone: string; role?: 'sender' | 'rider'; vehicleType?: string }): Promise<UserProfile> {
+    return apiRequest<UserProfile>('/profile/complete', { method: 'POST', body });
+  },
 };
 
 export const senderApi = {

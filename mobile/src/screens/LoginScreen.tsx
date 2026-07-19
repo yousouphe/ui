@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { useAuth } from '@/auth/AuthContext';
 import { ApiClientError } from '@/api/client';
 import { colors, radius, spacing, typography } from '@/theme/theme';
@@ -52,6 +53,7 @@ export function LoginScreen({ navigation }: { navigation?: { navigate: (s: strin
           accessibilityLabel={t('auth.password')}
         />
         <Button title={t('auth.signIn')} onPress={submit} loading={loading} style={{ marginTop: spacing.lg }} />
+        <GoogleSignInButton onError={(m) => setError(m || null)} />
         <Text style={styles.link} onPress={() => navigation?.navigate('ForgotPassword')} accessibilityRole="button">
           {t('auth.forgot')}
         </Text>

@@ -69,6 +69,128 @@ function api_register(PDO $pdo): void {
     ], [], 201);
 }
 
+// ---- Auth: Google sign-in (native ID token → verify server-side) -----------------------------
+
+/** Verify a Google ID token via Google's tokeninfo endpoint. Returns the claims or null. Google
+ *  validates the signature + expiry and returns the verified claims (sub, email, aud, …). */
+function google_verify_id_token(string $idToken): ?array {
+    $ch = curl_init('https://oauth2.googleapis.com/tokeninfo?id_token=' . urlencode($idToken));
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_CONNECTTIMEOUT => 5]);
+    $resp = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($code !== 200 || $resp === false) {
+        return null;
+    }
+    $claims = json_decode((string) $resp, true);
+    return is_array($claims) && !empty($claims['sub']) ? $claims : null;
+}
+
+function api_auth_google(PDO $pdo): void {
+    // Native Google Sign-In: the app obtains a Google ID token and posts it here. We verify it
+    // server-side (no client secret involved), check the audience is our app, then link/create the
+    // user with the SAME rules as the web callback (auth/google_callback.php): match by google_id,
+    // else by email (link), else create a new sender with profile_completed=0. No duplicate account.
+    $body = api_body();
+    $idToken = trim((string) ($body['idToken'] ?? ''));
+    if ($idToken === '') {
+        api_fail(400, 'VALIDATION', 'A Google ID token is required.');
+    }
+    $claims = google_verify_id_token($idToken);
+    if (!$claims) {
+        api_fail(401, 'GOOGLE_INVALID', 'Could not verify your Google sign-in. Please try again.');
+    }
+    $config = config_app();
+    $allowedAud = array_values(array_filter(array_map('trim', array_merge(
+        [(string) ($config['google_client_id'] ?? '')],
+        explode(',', (string) ($config['google_mobile_client_ids'] ?? ''))
+    )), static fn($v) => $v !== '' && strpos($v, 'REDACTED') === false));
+    if (!empty($allowedAud) && !in_array((string) ($claims['aud'] ?? ''), $allowedAud, true)) {
+        api_fail(401, 'GOOGLE_AUD', 'This Google sign-in is not authorised for this app.');
+    }
+    $emailVerified = ($claims['email_verified'] ?? '') === true || ($claims['email_verified'] ?? '') === 'true';
+    $email = strtolower(trim((string) ($claims['email'] ?? '')));
+    $googleId = (string) $claims['sub'];
+    $name = trim((string) ($claims['name'] ?? $email));
+    if (!$emailVerified || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        api_fail(401, 'GOOGLE_EMAIL', 'Your Google account email is not verified.');
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE google_id = ? LIMIT 1');
+    $stmt->execute([$googleId]);
+    $u = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$u) {
+        $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        $u = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($u) {
+            $pdo->prepare('UPDATE users SET google_id = ? WHERE id = ?')->execute([$googleId, $u['id']]);
+            $u['google_id'] = $googleId;
+        }
+    }
+    if (!$u) {
+        $pdo->prepare('INSERT INTO users (full_name, email, phone, password_hash, role, status, google_id, profile_completed)
+                       VALUES (?, ?, "", ?, "sender", "active", ?, 0)')
+            ->execute([$name, $email, password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), $googleId]);
+        $newId = (int) $pdo->lastInsertId();
+        $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$newId]);
+        $u = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (function_exists('send_welcome_email')) {
+            try { send_welcome_email($u['email'], $u['full_name'], $u['role']); } catch (Throwable $e) {}
+        }
+    }
+    if (($u['status'] ?? '') !== 'active') {
+        api_fail(403, 'ACCOUNT_INACTIVE', 'This account is not active. Please contact support.');
+    }
+    $platform = isset($body['platform']) ? substr((string) $body['platform'], 0, 20) : null;
+    $device = isset($body['deviceLabel']) ? substr((string) $body['deviceLabel'], 0, 120) : null;
+    $tokens = api_issue_tokens($pdo, (int) $u['id'], $platform, $device);
+    api_ok([
+        'accessToken' => $tokens['accessToken'],
+        'refreshToken' => $tokens['refreshToken'],
+        'expiresInSeconds' => $tokens['expiresInSeconds'],
+        'user' => api_user_public($u),
+    ]);
+}
+
+function api_profile_complete(PDO $pdo): void {
+    // Finish a profile after Google sign-up (mirrors complete-profile.php: phone required, then
+    // profile_completed=1). Extends it for mobile parity by letting a brand-new Google user choose
+    // to become a rider (creates a pending-KYC rider_profiles row) — a plain sender just sets phone.
+    $user = api_require($pdo);
+    $b = api_body();
+    $phone = trim((string) ($b['phone'] ?? ''));
+    if ($phone === '') {
+        api_fail(400, 'VALIDATION', 'A phone number is required.', ['phone' => 'Required']);
+    }
+    $requestedRole = (string) ($b['role'] ?? ($user['role'] ?? 'sender'));
+    $becomingRider = $requestedRole === 'rider' && ($user['role'] ?? 'sender') === 'sender';
+    $vehicleType = (string) ($b['vehicleType'] ?? '');
+    if ($becomingRider && !in_array($vehicleType, ['bike', 'car', 'van'], true)) {
+        api_fail(400, 'VALIDATION', 'Choose a vehicle type to ride.', ['vehicleType' => 'bike, car or van']);
+    }
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE users SET phone = ?, profile_completed = 1' . ($becomingRider ? ", role = 'rider'" : '') . ' WHERE id = ?')
+            ->execute([$phone, $user['id']]);
+        if ($becomingRider) {
+            $pdo->prepare('INSERT INTO rider_profiles (user_id, vehicle_type, availability_status, kyc_status)
+                           VALUES (?, ?, "offline", "pending")
+                           ON DUPLICATE KEY UPDATE vehicle_type = VALUES(vehicle_type)')
+                ->execute([$user['id'], $vehicleType]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        error_log('api profile complete failed: ' . $e->getMessage());
+        api_fail(503, 'PROFILE_FAILED', 'We could not complete your profile right now. Please try again.');
+    }
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    api_ok(api_user_public($stmt->fetch(PDO::FETCH_ASSOC)));
+}
+
 // ---- Geo: route (backend Mapbox; secret token never leaves the server) -----------------------
 
 function api_geo_route(PDO $pdo): void {

@@ -13,6 +13,8 @@ type AuthState = {
   booting: boolean;
   signIn: (creds: LoginRequest) => Promise<void>;
   register: (body: Record<string, unknown>) => Promise<void>;
+  googleSignIn: (idToken: string) => Promise<void>;
+  completeProfile: (body: { phone: string; role?: 'sender' | 'rider'; vehicleType?: string }) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -51,6 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     booting,
     signIn: async (creds) => setUser(await authApi.login(creds)),
     register: async (body) => setUser(await authApi.register(body)),
+    googleSignIn: async (idToken) => setUser(await authApi.google(idToken)),
+    completeProfile: async (body) => setUser(await authApi.completeProfile(body)),
     signOut: async () => {
       await authApi.logout();
       setUser(null);

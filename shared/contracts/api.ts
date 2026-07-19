@@ -146,6 +146,35 @@ export interface PaymentReceipt {
   paidAt: string;
 }
 
+export type KycStatus = 'pending' | 'approved' | 'rejected';
+
+export interface RiderKycBiodata {
+  age: number | null;
+  stateOfOrigin: string | null;
+  lgaOfOrigin: string | null;
+  hometown: string | null;
+  nationalIdNumber: string | null;
+  address: string | null;
+  guarantorName: string | null;
+  guarantorPhone: string | null;
+  guarantorAddress: string | null;
+  guarantorRelationship: string | null;
+  vehiclePlate: string | null;
+  vehicleColor: string | null;
+}
+
+export interface RiderKyc {
+  kycStatus: KycStatus;
+  note: string | null;
+  biodata: RiderKycBiodata;
+  documents: {
+    idDocument: boolean;
+    proofOfAddress: boolean;
+    vehicleDocument: boolean;
+    drivingLicense: boolean;
+  };
+}
+
 export interface RiderBankAccount {
   bankName: string;
   bankCode: string;

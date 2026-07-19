@@ -1151,6 +1151,123 @@ function api_rider_profile_update(PDO $pdo): void {
     api_ok(['vehicleType' => $vehicleType]);
 }
 
+// ---- Rider KYC (secure document upload) -----------------------------------------------------
+
+function api_rider_kyc_get(PDO $pdo): void {
+    // Current KYC status, admin note, saved biodata, and which documents are on file (booleans —
+    // the document files themselves are never sent to the client).
+    $user = api_require($pdo, ['rider']);
+    $stmt = $pdo->prepare('SELECT kyc_status, kyc_note, kyc_age, kyc_state_of_origin, kyc_lga_of_origin,
+                                  kyc_hometown, kyc_national_id_number, kyc_address, kyc_guarantor_name,
+                                  kyc_guarantor_phone, kyc_guarantor_address, kyc_guarantor_relationship,
+                                  kyc_vehicle_plate, kyc_vehicle_color, kyc_id_document_path,
+                                  kyc_proof_of_address_path, kyc_vehicle_document_path, kyc_driving_license_path
+                           FROM rider_profiles WHERE user_id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    $p = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    api_ok([
+        'kycStatus' => (string) ($p['kyc_status'] ?? 'pending'),
+        'note' => $p['kyc_note'] ?? null,
+        'biodata' => [
+            'age' => isset($p['kyc_age']) && $p['kyc_age'] !== null ? (int) $p['kyc_age'] : null,
+            'stateOfOrigin' => $p['kyc_state_of_origin'] ?? null,
+            'lgaOfOrigin' => $p['kyc_lga_of_origin'] ?? null,
+            'hometown' => $p['kyc_hometown'] ?? null,
+            'nationalIdNumber' => $p['kyc_national_id_number'] ?? null,
+            'address' => $p['kyc_address'] ?? null,
+            'guarantorName' => $p['kyc_guarantor_name'] ?? null,
+            'guarantorPhone' => $p['kyc_guarantor_phone'] ?? null,
+            'guarantorAddress' => $p['kyc_guarantor_address'] ?? null,
+            'guarantorRelationship' => $p['kyc_guarantor_relationship'] ?? null,
+            'vehiclePlate' => $p['kyc_vehicle_plate'] ?? null,
+            'vehicleColor' => $p['kyc_vehicle_color'] ?? null,
+        ],
+        'documents' => [
+            'idDocument' => !empty($p['kyc_id_document_path']),
+            'proofOfAddress' => !empty($p['kyc_proof_of_address_path']),
+            'vehicleDocument' => !empty($p['kyc_vehicle_document_path']),
+            'drivingLicense' => !empty($p['kyc_driving_license_path']),
+        ],
+    ]);
+}
+
+function api_rider_kyc_submit(PDO $pdo): void {
+    // Multipart submission of KYC biodata + documents. Mirrors rider/kyc.php: reuses the same
+    // save_uploaded_image() validation (JPG/PNG/WEBP, ≤5MB, stored under uploads/kyc, never public
+    // paths returned) and sets the profile back to 'pending' for admin review. Only fields/documents
+    // actually supplied are updated. Documents are read from $_FILES, biodata from $_POST (multipart).
+    $user = api_require($pdo, ['rider']);
+    $sets = [];
+    $params = [];
+
+    $textMap = [
+        'age' => 'kyc_age',
+        'stateOfOrigin' => 'kyc_state_of_origin',
+        'lgaOfOrigin' => 'kyc_lga_of_origin',
+        'hometown' => 'kyc_hometown',
+        'nationalIdNumber' => 'kyc_national_id_number',
+        'address' => 'kyc_address',
+        'guarantorName' => 'kyc_guarantor_name',
+        'guarantorPhone' => 'kyc_guarantor_phone',
+        'guarantorAddress' => 'kyc_guarantor_address',
+        'guarantorRelationship' => 'kyc_guarantor_relationship',
+        'vehiclePlate' => 'kyc_vehicle_plate',
+        'vehicleColor' => 'kyc_vehicle_color',
+    ];
+    foreach ($textMap as $in => $col) {
+        if (isset($_POST[$in]) && trim((string) $_POST[$in]) !== '') {
+            $val = trim((string) $_POST[$in]);
+            if ($in === 'age') {
+                $age = (int) $val;
+                if ($age < 16 || $age > 100) {
+                    api_fail(400, 'VALIDATION', 'Enter a valid age.', ['age' => '16-100']);
+                }
+                $sets[] = "$col = ?";
+                $params[] = $age;
+                continue;
+            }
+            $sets[] = "$col = ?";
+            $params[] = mb_substr($val, 0, 250);
+        }
+    }
+
+    $fileMap = [
+        'idDocument' => ['kyc_id_document_path', 'id', 'ID document'],
+        'proofOfAddress' => ['kyc_proof_of_address_path', 'proof_address', 'Proof of address'],
+        'vehicleDocument' => ['kyc_vehicle_document_path', 'vehicle_doc', 'Vehicle document'],
+        'drivingLicense' => ['kyc_driving_license_path', 'license', 'Driving licence'],
+    ];
+    try {
+        foreach ($fileMap as $field => [$col, $prefix, $label]) {
+            if (!empty($_FILES[$field]['name'])) {
+                $path = save_uploaded_image($_FILES[$field], 'kyc', $prefix, $label);
+                if ($path !== null) {
+                    $sets[] = "$col = ?";
+                    $params[] = $path;
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        api_fail(422, 'UPLOAD_FAILED', $e->getMessage());
+    }
+
+    if (!$sets) {
+        api_fail(400, 'VALIDATION', 'Provide at least one detail or document to submit.');
+    }
+    // Back to pending for re-review; clear any prior review outcome.
+    $sets[] = "kyc_status = 'pending'";
+    $sets[] = 'kyc_note = NULL';
+    $sets[] = 'kyc_reviewed_by = NULL';
+    $sets[] = 'kyc_reviewed_at = NULL';
+    $params[] = $user['id'];
+    $pdo->prepare('UPDATE rider_profiles SET ' . implode(', ', $sets) . ' WHERE user_id = ?')->execute($params);
+    log_event($pdo, 'rider_kyc_submitted', 'Rider submitted KYC for review (mobile)', (int) $user['id'], (string) $user['role'], 'rider_profile', (int) $user['id']);
+    if (function_exists('notify_admins')) {
+        try { notify_admins($pdo, 'Rider KYC submitted for review', '<p><strong>' . e((string) $user['full_name']) . '</strong> submitted KYC details from the mobile app. Please review on the riders page.</p>'); } catch (Throwable $e) {}
+    }
+    api_ok(['kycStatus' => 'pending']);
+}
+
 function api_rider_bank_get(PDO $pdo): void {
     // The rider's saved payout account (if any). The account number is returned masked — only the
     // last 4 digits — since the full number isn't needed on the client once it's verified.

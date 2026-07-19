@@ -242,6 +242,7 @@ export function ProfileScreen() {
       ) : null}
       {user?.role === 'rider' ? (
         <>
+          <Button title="Verification" variant="secondary" onPress={() => navigation.navigate('Kyc')} />
           <Button title="Vehicle" variant="secondary" onPress={() => navigation.navigate('Vehicle')} />
           <Button title="Rider guidelines" variant="secondary" onPress={() => navigation.navigate('Guidelines')} />
         </>

@@ -12,11 +12,13 @@ import type {
   EstimateRequest,
   LoginRequest,
   NotificationItem,
+  PaymentReceipt,
   PriceBreakdown,
   RiderCandidate,
   RiderJobFilter,
   RiderOffer,
   RiderWallet,
+  UpdateBookingRequest,
   UserProfile,
 } from '@shared/contracts/api';
 
@@ -69,6 +71,15 @@ export const senderApi = {
   },
   cancel(id: number, reason: string): Promise<{ booking: Booking }> {
     return apiRequest(`/bookings/${id}/cancel`, { method: 'POST', body: { reason } });
+  },
+  updateBooking(id: number, patch: UpdateBookingRequest): Promise<{ booking: Booking; priceChanged: boolean }> {
+    return apiRequest(`/bookings/${id}`, { method: 'PATCH', body: patch });
+  },
+  rebook(id: number): Promise<{ booking: Booking }> {
+    return apiRequest(`/bookings/${id}/rebook`, { method: 'POST' });
+  },
+  payments(): Promise<{ payments: PaymentReceipt[] }> {
+    return apiRequest('/payments');
   },
   track(id: number): Promise<{ status: string; paymentStatus: string; rider: unknown }> {
     return apiRequest(`/bookings/${id}/track`);

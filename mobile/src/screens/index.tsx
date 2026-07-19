@@ -187,6 +187,7 @@ export function RiderWalletScreen() {
 
 export function ProfileScreen() {
   const { user, signOut, refreshUser } = useAuth();
+  const navigation = useNavigation<{ navigate: (s: string) => void }>();
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(user?.fullName ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
@@ -232,6 +233,9 @@ export function ProfileScreen() {
           </>
         )}
       </Card>
+      {user?.role === 'sender' ? (
+        <Button title="Payment receipts" variant="secondary" onPress={() => navigation.navigate('Receipts')} />
+      ) : null}
       <Button title="Sign out" variant="danger" onPress={() => { void signOut(); }} />
     </Screen>
   );

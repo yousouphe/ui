@@ -129,6 +129,25 @@ export interface RiderWallet {
 
 export type ComplaintCategory = 'damaged_item' | 'late_delivery' | 'wrong_item' | 'rider_behavior' | 'other';
 
+export interface PaymentReceipt {
+  bookingId: number;
+  bookingCode: string;
+  amount: number | null;
+  reference: string | null;
+  paidAt: string;
+}
+
+/** PATCH /bookings/{id}: any subset of editable detail fields and/or a new delivery point. */
+export interface UpdateBookingRequest {
+  recipientName?: string;
+  recipientPhone?: string;
+  itemName?: string;
+  itemCategory?: string;
+  itemDescription?: string;
+  notes?: string;
+  dropoff?: { address: string } & LatLng;
+}
+
 /** Unsafe writes carry an Idempotency-Key header; see docs/04. */
 export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
 export const AUTH_HEADER = 'Authorization';

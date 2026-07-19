@@ -36,7 +36,9 @@ $routes = [
     ['GET',  '#^bookings$#',                            fn() => api_list_bookings($pdo)],
     ['POST', '#^bookings$#',                            fn() => api_booking_create($pdo)],
     ['GET',  '#^bookings/(\d+)$#',                      fn($id) => api_booking_get($pdo, (int) $id)],
+    ['PATCH','#^bookings/(\d+)$#',                      fn($id) => api_booking_update($pdo, (int) $id)],
     ['POST', '#^bookings/(\d+)/cancel$#',               fn($id) => api_booking_cancel($pdo, (int) $id)],
+    ['POST', '#^bookings/(\d+)/rebook$#',               fn($id) => api_booking_rebook($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/track$#',                fn($id) => api_booking_track($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/contact$#',              fn($id) => api_booking_contact($pdo, (int) $id)],
     ['GET',  '#^rider/profile$#',                       fn() => api_rider_profile($pdo)],
@@ -64,6 +66,7 @@ $routes = [
     ['POST', '#^rider/withdrawals$#',                   fn() => api_rider_withdraw($pdo)],
     ['POST', '#^payments/init$#',                       fn() => api_payment_init($pdo)],
     ['POST', '#^payments/verify$#',                     fn() => api_payment_verify($pdo)],
+    ['GET',  '#^payments$#',                            fn() => api_payments_list($pdo)],
 ];
 
 $matchedPathButNotMethod = false;

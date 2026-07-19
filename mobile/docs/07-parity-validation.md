@@ -192,5 +192,3 @@ duplicating business logic — the trusted rules already live in the backend.
 - **Full parity is not yet reached**: the R1/R2 items above are the remaining implemented-vs-planned
   delta. This document is the authoritative punch-list for closing it before store submission
   (Phase 10). Device/runtime verification of the shipped flows is **Phase 9**.
-</content>
-</invoke>

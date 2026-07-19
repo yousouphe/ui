@@ -53,11 +53,28 @@ for the full plan; this documents what is **implemented so far**.
 | `GET /notifications?before=` | bearer | Notification history, paginated. |
 | `POST /notifications/{id}/read` | bearer | Mark read (ownership enforced) → 204. |
 
-## Not yet implemented (final Phase 3 slice — third-party gated)
-Payments (`/payments/init`, `/payments/verify` — Paystack), geo `search`/`reverse` (Mapbox proxy),
-Google OAuth (`/auth/google`), forgot/reset password, rider KYC upload, bank/withdrawals,
-rating/complaint. Each wraps existing backend logic and needs live third-party services (or the
-KYC/ratings table wiring) to test, so they ship in a dedicated follow-up.
+### Account, post-delivery, discovery, wallet & payments
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `PATCH /profile` | bearer | Update name / phone. |
+| `POST /auth/forgot` | none | Rate-limited; always a generic response (no email enumeration). |
+| `POST /auth/reset` | none | Reset via emailed token; single-use, 30-min expiry; revokes existing mobile sessions. |
+| `POST /bookings/{id}/rating` | sender | Rate a **delivered** booking 1-5 (one per booking; updates rider average). |
+| `POST /complaints` | sender | Report a problem on a delivered booking (category-validated; notifies admins). |
+| `GET /bookings/{id}/riders` | sender | Ranked rider discovery (mirrors `ajax_fetch_riders`: top-10, per-rider vehicle pricing, `lastSeenSecondsAgo`, `pricingPending`). |
+| `GET /rider/banks` | rider | Paystack bank list. |
+| `POST /rider/withdrawals` | rider | Request a payout. **Transactional** (row-locked available balance → no double-spend) + `Idempotency-Key`. |
+| `POST /payments/init` | sender | Initialise a Paystack charge for a booking (secret key stays server-side; returns reference + access code). `Idempotency-Key`. |
+| `POST /payments/verify` | sender | Verify a payment server-side and reconcile (webhook remains authoritative). |
+
+Geocoding (address search / reverse) is done **on the device** with the **public** Mapbox token
+(safe by design, same as the web), so it needs no backend endpoint. Only the secret-token
+Directions/pricing is server-side (`/pricing/estimate`, `/geo/route`).
+
+## Not yet implemented (dedicated follow-up)
+Google OAuth (`/auth/google` — native PKCE / backend code-exchange) and rider KYC document
+**upload** (multipart). Both wrap existing backend logic and are the last API items before the
+sender/rider apps consume everything.
 
 ## Security
 - Tokens stored **hashed** (`api_tokens`); suspended/inactive accounts are rejected even with a

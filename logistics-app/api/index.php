@@ -9,8 +9,10 @@ define('AIKE_STATELESS', true);
 require_once __DIR__ . '/../config/functions.php';
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/api.php';
-require_once __DIR__ . '/../config/mapbox.php'; // pricing_route_metrics + NoRouteFoundException
-require_once __DIR__ . '/../config/push.php';   // send_web_push for status notifications
+require_once __DIR__ . '/../config/mapbox.php';   // pricing_route_metrics + NoRouteFoundException
+require_once __DIR__ . '/../config/push.php';     // send_web_push for status notifications
+require_once __DIR__ . '/../config/paystack.php'; // payments init/verify + banks (secrets stay server-side)
+require_once __DIR__ . '/../config/emails.php';   // password reset + withdrawal emails
 require_once __DIR__ . '/routes_v1.php';
 
 // ---- Route parsing --------------------------------------------------------------------------
@@ -46,6 +48,17 @@ $routes = [
     ['POST', '#^notifications/device$#',                fn() => api_notif_device($pdo)],
     ['GET',  '#^notifications$#',                       fn() => api_notif_list($pdo)],
     ['POST', '#^notifications/(\d+)/read$#',            fn($id) => api_notif_read($pdo, (int) $id)],
+    // --- Phase 3 remaining ---
+    ['PATCH','#^profile$#',                             fn() => api_profile_update($pdo)],
+    ['POST', '#^auth/forgot$#',                         fn() => api_auth_forgot($pdo)],
+    ['POST', '#^auth/reset$#',                          fn() => api_auth_reset($pdo)],
+    ['POST', '#^complaints$#',                          fn() => api_complaint_create($pdo)],
+    ['POST', '#^bookings/(\d+)/rating$#',               fn($id) => api_booking_rating($pdo, (int) $id)],
+    ['GET',  '#^bookings/(\d+)/riders$#',               fn($id) => api_riders_discover($pdo, (int) $id)],
+    ['GET',  '#^rider/banks$#',                         fn() => api_banks_list($pdo)],
+    ['POST', '#^rider/withdrawals$#',                   fn() => api_rider_withdraw($pdo)],
+    ['POST', '#^payments/init$#',                       fn() => api_payment_init($pdo)],
+    ['POST', '#^payments/verify$#',                     fn() => api_payment_verify($pdo)],
 ];
 
 $matchedPathButNotMethod = false;

@@ -210,6 +210,41 @@ function api_booking_cancel(PDO $pdo, int $id): void {
     api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
 }
 
+function api_booking_contact(PDO $pdo, int $id): void {
+    // Returns the counterpart's phone so the app can open the DEVICE DIALLER. In-app calling is
+    // deliberately not offered on mobile (no WebRTC infra there — the web PeerJS path does not
+    // port), so the reliable path is a normal phone call. Only the two parties on the booking can
+    // read it: a sender gets the assigned rider's number, an assigned rider gets the sender's.
+    $user = api_require($pdo, ['sender', 'rider']);
+    $stmt = $pdo->prepare('SELECT sender_user_id, selected_rider_user_id FROM bookings WHERE id = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    $isSender = (int) $booking['sender_user_id'] === (int) $user['id'];
+    $isRider = (int) ($booking['selected_rider_user_id'] ?? 0) === (int) $user['id'];
+    if (!$isSender && !$isRider) {
+        api_fail(403, 'FORBIDDEN', 'You are not part of this delivery.');
+    }
+    $counterpartId = $isSender ? (int) ($booking['selected_rider_user_id'] ?? 0) : (int) $booking['sender_user_id'];
+    if ($counterpartId <= 0) {
+        api_fail(409, 'NO_COUNTERPART', 'No rider has been assigned to this delivery yet.');
+    }
+    $stmt = $pdo->prepare('SELECT full_name, phone FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$counterpartId]);
+    $u = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$u || empty($u['phone'])) {
+        api_fail(409, 'NO_PHONE', 'A phone number is not available for this contact.');
+    }
+    api_ok([
+        'role' => $isSender ? 'rider' : 'sender',
+        'fullName' => (string) $u['full_name'],
+        'phone' => (string) $u['phone'], // dial via the device dialler; in-app calling not offered
+        'canCallInApp' => false,
+    ]);
+}
+
 function api_booking_request_rider(PDO $pdo, int $id): void {
     // Sender sends a delivery request to a chosen rider. Mirrors bookings/send_request.php:
     // row-locked booking, capacity cap, no duplicate pending, other pending requests rejected.

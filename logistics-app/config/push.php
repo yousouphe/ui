@@ -134,7 +134,92 @@ function build_vapid_jwt(string $audienceOrigin): ?string {
 // must never break the caller's flow. Records the notification content first so the
 // service worker's "fetch the pending one" call has something to show even if the push
 // itself is slow or the browser's push service is temporarily unreachable.
+// Mobile push via the Expo push service (which fans out to FCM on Android and APNs on iOS).
+// Tokens are Expo push tokens stored in device_tokens (registered by the mobile app through
+// POST /api/v1/notifications/device). No FCM/APNs server secret is needed for the basic Expo
+// flow, so nothing sensitive lives here. Invalid tokens ("DeviceNotRegistered") are pruned.
+function send_expo_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+    $stmt = $pdo->prepare('SELECT id, token FROM device_tokens WHERE user_id = ?');
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return;
+    }
+    // Only send to well-formed Expo push tokens; ignore anything else defensively.
+    $messages = [];
+    $idByToken = [];
+    foreach ($rows as $row) {
+        $token = (string) $row['token'];
+        if (!preg_match('/^ExponentPushToken\[.+\]$|^ExpoPushToken\[.+\]$/', $token)) {
+            continue;
+        }
+        $idByToken[$token] = (int) $row['id'];
+        $messages[] = [
+            'to' => $token,
+            'title' => $title,
+            'body' => $body,
+            'sound' => 'default',
+            'data' => ['url' => $url],
+        ];
+    }
+    if (!$messages) {
+        return;
+    }
+
+    $ch = curl_init('https://exp.host/--/api/v2/push/send');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($messages),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+        CURLOPT_TIMEOUT => 5,
+        CURLOPT_CONNECTTIMEOUT => 3,
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($httpCode < 200 || $httpCode >= 300 || $resp === false) {
+        error_log('expo push http ' . $httpCode);
+        return;
+    }
+    // Prune tokens the push service reports as no longer registered.
+    $decoded = json_decode((string) $resp, true);
+    $tickets = is_array($decoded) && isset($decoded['data']) && is_array($decoded['data']) ? $decoded['data'] : [];
+    $i = 0;
+    foreach ($messages as $msg) {
+        $ticket = $tickets[$i] ?? null;
+        $i++;
+        if (is_array($ticket) && ($ticket['status'] ?? '') === 'error'
+            && (($ticket['details']['error'] ?? '') === 'DeviceNotRegistered')) {
+            $id = $idByToken[$msg['to']] ?? 0;
+            if ($id) {
+                try { $pdo->prepare('DELETE FROM device_tokens WHERE id = ?')->execute([$id]); } catch (Throwable $e) {}
+            }
+        }
+    }
+}
+
+// Unified per-user notification dispatch. Despite the historical name it now feeds BOTH web
+// (VAPID) and mobile (FCM/APNs via Expo), and always records the notification. Every existing
+// call site therefore reaches a user's mobile devices too, with no change at the call sites.
 function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+    // Record once - the source of truth for the web AND mobile in-app notification lists.
+    // Recorded unconditionally, even if no transport is configured, so history is never lost.
+    try {
+        $pdo->prepare('INSERT INTO push_notifications (user_id, title, body, url) VALUES (?, ?, ?, ?)')
+            ->execute([$userId, $title, $body, $url]);
+    } catch (Throwable $e) {
+        error_log('record notification failed: ' . $e->getMessage());
+    }
+
+    // Mobile push (FCM on Android / APNs on iOS, via the Expo push service) to any device tokens.
+    try {
+        send_expo_push($pdo, $userId, $title, $body, $url);
+    } catch (Throwable $e) {
+        error_log('send_expo_push failed: ' . $e->getMessage());
+    }
+
+    // Web push (unchanged) - only when VAPID is configured and the user has web subscriptions.
     try {
         if (!vapid_configured()) {
             return;
@@ -146,9 +231,6 @@ function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?stri
         if (!$subscriptions) {
             return;
         }
-
-        $stmt = $pdo->prepare('INSERT INTO push_notifications (user_id, title, body, url) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$userId, $title, $body, $url]);
 
         $publicKey = vapid_public_key_b64url();
         if ($publicKey === null) {

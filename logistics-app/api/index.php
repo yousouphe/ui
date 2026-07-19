@@ -38,6 +38,7 @@ $routes = [
     ['GET',  '#^bookings/(\d+)$#',                      fn($id) => api_booking_get($pdo, (int) $id)],
     ['POST', '#^bookings/(\d+)/cancel$#',               fn($id) => api_booking_cancel($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/track$#',                fn($id) => api_booking_track($pdo, (int) $id)],
+    ['GET',  '#^bookings/(\d+)/contact$#',              fn($id) => api_booking_contact($pdo, (int) $id)],
     ['GET',  '#^rider/profile$#',                       fn() => api_rider_profile($pdo)],
     ['POST', '#^rider/status$#',                        fn() => api_rider_status($pdo)],
     ['POST', '#^rider/location$#',                      fn() => api_rider_location($pdo)],

@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
+import { CallButton } from '@/components/CallButton';
 import { riderApi } from '@/api/services';
 import { ApiClientError } from '@/api/client';
 import { VEHICLE_LABEL, type VehicleType } from '@shared/constants/vehicles';
@@ -154,6 +155,7 @@ export function RiderActiveJobsScreen() {
             </View>
             <MoneyText amount={job.agreedCost} />
             <Button title="Navigate" variant="secondary" onPress={() => navigateTo(job)} />
+            <CallButton bookingId={job.id} label="Call sender" />
             {step ? <Button title={step.label} onPress={() => advance(job, step.to)} loading={acting === job.id} /> : null}
             {delivered && job.paymentStatus === 'paid' ? (
               <Button title="Confirm payment received" onPress={() => confirmPay(job)} loading={acting === job.id} />

@@ -70,6 +70,9 @@ export const senderApi = {
   track(id: number): Promise<{ status: string; paymentStatus: string; rider: unknown }> {
     return apiRequest(`/bookings/${id}/track`);
   },
+  contact(id: number): Promise<{ role: string; fullName: string; phone: string; canCallInApp: boolean }> {
+    return apiRequest(`/bookings/${id}/contact`);
+  },
   riders(id: number): Promise<{ pricingPending: boolean; riders: RiderCandidate[] }> {
     return apiRequest(`/bookings/${id}/riders`);
   },

@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useNavigation } from '@react-navigation/native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
 import { useAuth } from '@/auth/AuthContext';
 import { riderApi, senderApi } from '@/api/services';
@@ -26,12 +27,13 @@ function Screen({ title, children, onRefresh, refreshing }: { title: string; chi
 
 export function SenderHomeScreen() {
   const { t } = useTranslation();
+  const navigation = useNavigation<{ navigate: (s: string) => void }>();
   return (
     <Screen title={t('common.brand')}>
       <Card>
         <Text style={typography.h2 as object}>{t('sender.newDelivery')}</Text>
         <Text style={styles.soft}>Search a pickup and drop-off, pick a vehicle, compare riders and track live.</Text>
-        <Button title={t('sender.newDelivery')} onPress={() => { /* wizard: Phase 5 */ }} />
+        <Button title={t('sender.newDelivery')} onPress={() => navigation.navigate('CreateBooking')} />
       </Card>
     </Screen>
   );

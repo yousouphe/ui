@@ -72,6 +72,9 @@ export const senderApi = {
   riders(id: number): Promise<{ pricingPending: boolean; riders: RiderCandidate[] }> {
     return apiRequest(`/bookings/${id}/riders`);
   },
+  requestRider(id: number, riderUserId: number, proposedCost: number): Promise<{ requestId: number; bookingId: number }> {
+    return apiRequest(`/bookings/${id}/request`, { method: 'POST', body: { riderUserId, proposedCost } });
+  },
   rate(id: number, rating: number, review?: string): Promise<{ message: string }> {
     return apiRequest(`/bookings/${id}/rating`, { method: 'POST', body: { rating, review } });
   },

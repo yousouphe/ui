@@ -4,6 +4,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { authApi } from '@/api/services';
 import { getAccessToken } from '@/storage/secureTokens';
+import { registerForPush } from '@/services/push';
 import type { UserProfile } from '@shared/contracts/api';
 import type { LoginRequest } from '@shared/contracts/api';
 
@@ -37,6 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
   }, []);
+
+  // Once we have an authenticated user, register this device for push (best-effort).
+  useEffect(() => {
+    if (user) {
+      void registerForPush();
+    }
+  }, [user?.id]);
 
   const value = useMemo<AuthState>(() => ({
     user,

@@ -6,6 +6,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button, Card, EmptyState, ErrorState, LoadingState, MoneyText, StatusBadge } from '@/components';
 import { AddressSearch } from '@/components/AddressSearch';
+import { CallButton } from '@/components/CallButton';
+import { MapPreview, type MapPoint } from '@/components/MapPreview';
 import { senderApi, newIdempotencyKey } from '@/api/services';
 import { ApiClientError } from '@/api/client';
 import type { Place } from '@/api/geo';
@@ -191,19 +193,34 @@ export function RidersScreen({ navigation, route }: { navigation: Nav; route: Ro
   );
 }
 
+type TrackRider = { fullName?: string; lat?: number | null; lng?: number | null; lastSeenSecondsAgo?: number | null };
+
 export function TrackScreen({ navigation, route }: { navigation: Nav; route: Route<{ bookingId: number }> }) {
   const { bookingId } = route.params;
   const [status, setStatus] = useState<string>('');
   const [payment, setPayment] = useState<string>('');
-  const [rider, setRider] = useState<{ fullName?: string; lastSeenSecondsAgo?: number | null } | null>(null);
+  const [rider, setRider] = useState<TrackRider | null>(null);
+  const [ends, setEnds] = useState<{ pickup?: MapPoint; dropoff?: MapPoint }>({});
   const [error, setError] = useState<string | null>(null);
+
+  // Booking endpoints (pickup/drop-off) are fixed — fetch once for the map.
+  useEffect(() => {
+    senderApi.getBooking(bookingId).then(({ booking }) => {
+      setEnds({
+        pickup: booking.pickup.lat != null && booking.pickup.lng != null
+          ? { lat: booking.pickup.lat, lng: booking.pickup.lng, label: 'Pickup', kind: 'pickup' } : undefined,
+        dropoff: booking.dropoff.lat != null && booking.dropoff.lng != null
+          ? { lat: booking.dropoff.lat, lng: booking.dropoff.lng, label: 'Drop-off', kind: 'dropoff' } : undefined,
+      });
+    }).catch(() => undefined);
+  }, [bookingId]);
 
   const load = useCallback(async () => {
     try {
       const t = await senderApi.track(bookingId);
       setStatus(t.status);
       setPayment(t.paymentStatus);
-      setRider((t.rider as { fullName?: string; lastSeenSecondsAgo?: number | null }) ?? null);
+      setRider((t.rider as TrackRider) ?? null);
     } catch {
       setError('Could not load tracking.');
     }
@@ -217,9 +234,18 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
 
   if (error) return <ErrorState message={error} onRetry={load} />;
 
+  const points: MapPoint[] = [];
+  if (ends.pickup) points.push(ends.pickup);
+  if (ends.dropoff) points.push(ends.dropoff);
+  const riderStale = rider?.lastSeenSecondsAgo != null && rider.lastSeenSecondsAgo > 120;
+  if (rider?.lat != null && rider?.lng != null && !riderStale) {
+    points.push({ lat: rider.lat, lng: rider.lng, label: rider.fullName ?? 'Rider', kind: 'rider' });
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Your delivery</Text>
+      <MapPreview points={points} />
       <Card>
         <View style={styles.priceRow}>
           <Text style={styles.soft}>Status</Text>
@@ -234,6 +260,7 @@ export function TrackScreen({ navigation, route }: { navigation: Nav; route: Rou
           <Text style={styles.soft}>Waiting for a rider to accept…</Text>
         )}
       </Card>
+      {rider?.fullName ? <CallButton bookingId={bookingId} label="Call rider" /> : null}
       {status === 'delivered' && payment !== 'paid' ? (
         <Button title="Pay now" onPress={() => navigation.navigate('Pay', { bookingId })} />
       ) : null}

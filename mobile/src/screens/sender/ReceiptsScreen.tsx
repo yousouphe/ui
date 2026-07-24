@@ -1,13 +1,15 @@
 // Sender payment receipts: every booking they've paid for, newest first (GET /payments). There is
 // no separate charge ledger — a paid booking carries its Paystack reference and amount.
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Card, EmptyState, ErrorState, LoadingState, MoneyText } from '@/components';
 import { senderApi } from '@/api/services';
 import { colors, spacing, typography } from '@/theme/theme';
 import type { PaymentReceipt } from '@shared/contracts/api';
 
-export function ReceiptsScreen() {
+type Nav = { navigate: (screen: string, params?: object) => void };
+
+export function ReceiptsScreen({ navigation }: { navigation?: Nav }) {
   const [state, setState] = useState<{ loading: boolean; error: string | null; items: PaymentReceipt[] }>({ loading: true, error: null, items: [] });
 
   const load = useCallback(async () => {
@@ -31,14 +33,16 @@ export function ReceiptsScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}>
       <Text style={styles.title}>Receipts</Text>
       {state.items.map((r) => (
-        <Card key={`${r.bookingId}-${r.reference ?? ''}`}>
-          <View style={styles.row}>
-            <Text style={styles.code}>{r.bookingCode}</Text>
-            <MoneyText amount={r.amount} />
-          </View>
-          <Text style={styles.soft}>{new Date(r.paidAt).toLocaleString()}</Text>
-          {r.reference ? <Text style={styles.ref}>Ref: {r.reference}</Text> : null}
-        </Card>
+        <TouchableOpacity key={`${r.bookingId}-${r.reference ?? ''}`} activeOpacity={0.7} onPress={() => navigation?.navigate('Receipt', { bookingId: r.bookingId })}>
+          <Card>
+            <View style={styles.row}>
+              <Text style={styles.code}>{r.bookingCode}</Text>
+              <MoneyText amount={r.amount} />
+            </View>
+            <Text style={styles.soft}>{new Date(r.paidAt).toLocaleString()}</Text>
+            {r.reference ? <Text style={styles.ref}>Ref: {r.reference}</Text> : null}
+          </Card>
+        </TouchableOpacity>
       ))}
     </ScrollView>
   );

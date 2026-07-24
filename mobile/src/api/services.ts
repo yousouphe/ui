@@ -15,12 +15,15 @@ import type {
   NotificationItem,
   PaymentReceipt,
   PriceBreakdown,
+  ReceiptDetail,
   RiderCandidate,
   RiderBankAccount,
   RiderKyc,
   RiderJobFilter,
   RiderOffer,
   RiderWallet,
+  TransactionFilters,
+  TransactionsResult,
   UpdateBookingRequest,
   UserProfile,
   WithdrawalItem,
@@ -191,14 +194,20 @@ export const chatApi = {
   },
 };
 
-// Chat is shared by both parties on a booking; the backend derives the receiver, so callers only
-// send a booking id + text. Poll `messages(id, since)` with the last id to fetch just new messages.
-export const chatApi = {
-  messages(bookingId: number, since = 0): Promise<{ messages: ChatMessage[]; lastId: number }> {
-    return apiRequest(`/bookings/${bookingId}/messages${since > 0 ? `?since=${since}` : ''}`);
+// Transaction history + receipts, shared by senders and riders. Mirrors the web transactions.php
+// and payments/receipt.php; the backend derives the role-specific view.
+export const financeApi = {
+  transactions(filters: TransactionFilters = {}): Promise<TransactionsResult> {
+    const q = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') q.append(k, String(v)); });
+    const qs = q.toString();
+    return apiRequest(`/transactions${qs ? `?${qs}` : ''}`);
   },
-  send(bookingId: number, message: string): Promise<{ message: ChatMessage }> {
-    return apiRequest(`/bookings/${bookingId}/messages`, { method: 'POST', body: { message } });
+  receipt(bookingId: number): Promise<{ receipt: ReceiptDetail }> {
+    return apiRequest(`/bookings/${bookingId}/receipt`);
+  },
+  resendReceipt(bookingId: number): Promise<{ message: string }> {
+    return apiRequest(`/bookings/${bookingId}/receipt/resend`, { method: 'POST' });
   },
 };
 

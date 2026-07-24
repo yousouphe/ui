@@ -78,6 +78,9 @@ $routes = [
     ['POST', '#^payments/init$#',                       fn() => api_payment_init($pdo)],
     ['POST', '#^payments/verify$#',                     fn() => api_payment_verify($pdo)],
     ['GET',  '#^payments$#',                            fn() => api_payments_list($pdo)],
+    ['GET',  '#^transactions$#',                        fn() => api_transactions_list($pdo)],
+    ['GET',  '#^bookings/(\d+)/receipt$#',              fn($id) => api_booking_receipt($pdo, (int) $id)],
+    ['POST', '#^bookings/(\d+)/receipt/resend$#',       fn($id) => api_booking_receipt_resend($pdo, (int) $id)],
 ];
 
 $matchedPathButNotMethod = false;

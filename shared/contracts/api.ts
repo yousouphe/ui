@@ -146,6 +146,69 @@ export interface PaymentReceipt {
   paidAt: string;
 }
 
+// A full immutable receipt (GET /bookings/{id}/receipt), mirroring payment_receipts.
+export interface ReceiptDetail {
+  receiptNumber: string;
+  orderCode: string;
+  reference: string;
+  customerName: string;
+  riderName: string | null;
+  pickupAddress: string;
+  deliveryAddress: string;
+  amount: number;      // net (ex-VAT)
+  vatAmount: number;
+  vatPercent: number;
+  totalAmount: number; // VAT-inclusive total paid
+  paymentMethod: string;
+  paymentStatus: string;
+  createdAt: string;
+}
+
+// Normalised transaction history (GET /transactions) shared with the web transactions.php.
+export type TransactionDirection = 'credit' | 'debit';
+export type TransactionCategory = 'ride_payment' | 'withdrawal' | 'refund';
+export type TransactionStatus = 'successful' | 'pending' | 'failed' | 'refunded';
+
+export interface TransactionItem {
+  id: string;
+  date: string;
+  category: TransactionCategory | string;
+  direction: TransactionDirection;
+  description: string;
+  orderCode: string;
+  reference: string;
+  amount: number; // signed: credit positive, debit negative
+  status: TransactionStatus | string;
+}
+
+export interface TransactionSummary {
+  credits: number;
+  debits: number;
+  count: number;
+  hasBalance: boolean;
+  opening: number;
+  closing: number;
+}
+
+export interface TransactionsResult {
+  transactions: TransactionItem[];
+  summary: TransactionSummary;
+  page: number;
+  pages: number;
+  total: number;
+}
+
+export interface TransactionFilters {
+  range?: 'all' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+  from?: string;
+  to?: string;
+  type?: string;
+  status?: string;
+  q?: string;
+  sort?: 'newest' | 'oldest' | 'highest' | 'lowest';
+  page?: number;
+}
+
 export type KycStatus = 'pending' | 'approved' | 'rejected';
 
 export interface RiderKycBiodata {

@@ -791,3 +791,7 @@ function calculate_delivery_price(PDO $pdo, float $distanceKm, string $vehicleTy
         'total' => round($subtotal + $taxAmount, 2),
     ];
 }
+
+// Shared top-navigation renderer (render_app_nav) — the single source of truth for the role-based
+// nav bar. Required here so every page that includes functions.php can render it without its own copy.
+require_once __DIR__ . '/../partials/nav.php';

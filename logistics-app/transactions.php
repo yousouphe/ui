@@ -92,17 +92,7 @@ $statusBadge = static function (string $s): string {
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx no-print">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path($hub)) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path($hub)) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
-            <?php if ($user['role'] === 'rider'): ?><a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a><?php endif; ?>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), 'transactions', 'transactions.php') ?>
 
 <div class="container py-4">
     <!-- Printable statement header -->

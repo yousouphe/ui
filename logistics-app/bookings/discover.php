@@ -120,6 +120,7 @@ try {
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="<?= e(url_path('assets/js/aike-map.js')) ?>"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 
 <script>
@@ -132,9 +133,7 @@ const bookingId = <?= $bookingId ?>;
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
 
 document.addEventListener('DOMContentLoaded', function() {
-    map = L.map('radar_map').setView(pickupCoords, 14);
-    
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    map = AikeMap.create('radar_map', { center: pickupCoords, zoom: 14 });
     
     // Google Traffic Layer
     L.tileLayer('https://mt1.google.com/vt?lyrs=h@159000000,traffic|seconds_into_week:-1&style=3&x={x}&y={y}&z={z}', {

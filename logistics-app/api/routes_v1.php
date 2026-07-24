@@ -866,7 +866,9 @@ function api_rider_confirm_payment(PDO $pdo, int $id): void {
         api_fail(409, 'NOT_DELIVERED', 'Booking has not been delivered yet.');
     }
     if ((int) $booking['rider_payment_confirmed'] === 1) {
-        api_fail(409, 'ALREADY_CONFIRMED', 'Payment has already been confirmed for this booking.');
+        // Payment is now auto-settled at Paystack verification, so this endpoint is idempotent:
+        // if the booking is already settled, report success rather than a conflict.
+        api_ok(['payout' => rider_payout_amount((float) $booking['agreed_cost']), 'alreadySettled' => true]);
     }
     if (($booking['payment_status'] ?? 'unpaid') !== 'paid') {
         api_fail(409, 'NOT_PAID', 'The sender has not paid for this booking yet.');

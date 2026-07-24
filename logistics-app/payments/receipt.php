@@ -81,15 +81,7 @@ $money = static fn(float $n): string => '₦' . number_format($n, 2);
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx no-print">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path($hubUrl)) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path($hubUrl)) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), '', 'payments/receipt.php') ?>
 
 <div class="container py-5">
     <?php if ($success): ?><div class="alert alert-success border-0 mb-4 no-print" style="max-width:720px;margin:0 auto 1rem"><?= e($success) ?></div><?php endif; ?>

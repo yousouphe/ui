@@ -70,24 +70,7 @@ function order_card(array $b, string $badgeClass, string $badgeText, ?string $ex
 </head>
 <body>
 <?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('bookings/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('dashboard.sender_hub')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('transactions.php')) ?>"><i class="fa-solid fa-receipt me-1"></i><?= e(t('nav.transactions')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-            <div class="small">
-                <a href="<?= e(url_path('set_locale?locale=en&redirect=dashboard')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                &middot;
-                <a href="<?= e(url_path('set_locale?locale=ha&redirect=dashboard')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
-            </div>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), 'orders', 'dashboard') ?>
 
 <div class="container py-5" id="orders-page">
     <h1 class="h3 fw-bold mb-4"><?= e(t('dashboard.heading')) ?></h1>

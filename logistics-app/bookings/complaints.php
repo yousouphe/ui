@@ -142,23 +142,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
-            <a class="nav-link active" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-            <div class="small">
-                <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/complaints.php')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                &middot;
-                <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/complaints.php')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
-            </div>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), 'complaints', 'bookings/complaints.php') ?>
 
 <div class="container py-5">
     <h1 class="h3 fw-bold mb-4"><?= e(t('complaint.heading')) ?></h1>

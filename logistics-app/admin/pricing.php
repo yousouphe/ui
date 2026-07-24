@@ -78,23 +78,7 @@ foreach ($sampleDistances as $km) {
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('admin/')) ?>"><?= e(t('common.brand')) ?> <?= e(t('admin.brand_suffix')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('admin/')) ?>"><?= e(t('admin.nav_withdrawals')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/transactions.php')) ?>"><?= e(t('admin.nav_transactions')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/bookings.php')) ?>"><?= e(t('admin.nav_bookings')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/riders.php')) ?>"><?= e(t('admin.nav_riders')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/complaints.php')) ?>"><?= e(t('admin.nav_complaints')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/users.php')) ?>"><?= e(t('admin.nav_users')) ?></a>
-            <a class="nav-link fw-bold" href="<?= e(url_path('admin/pricing.php')) ?>"><?= e(t('admin.nav_pricing')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/logs.php')) ?>"><?= e(t('admin.nav_logs')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('admin/profile.php')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), 'pricing', 'admin/pricing.php') ?>
 
 <div class="container py-5">
     <h1 class="h3 fw-bold mb-2"><?= e(t('admin.pricing.heading')) ?></h1>

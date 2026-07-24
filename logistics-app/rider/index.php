@@ -66,14 +66,10 @@ function render_awaiting_confirmation_html(array $bookings): string
                         <i class="fa-solid fa-circle-check text-success me-2"></i><?= e(t('rider.payment_received_notice')) ?>
                     <?php endif; ?>
                 </div>
-                <button
-                    type="button"
-                    class="btn <?= $isPaid ? 'btn-success' : 'btn-secondary' ?> w-100 py-2 fw-bold confirm-payment-btn"
-                    <?= $isPaid ? '' : 'disabled' ?>
-                    data-booking-id="<?= (int) $b['id'] ?>"
-                >
-                    <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= e(t('rider.confirm_payment_received')) ?>
-                </button>
+                <div class="small text-soft d-flex align-items-start">
+                    <i class="fa-solid fa-shield-halved text-primary me-2 mt-1"></i>
+                    <span><?= e(t('rider.payment_secured_notice')) ?></span>
+                </div>
             </div>
         <?php endforeach; ?>
     </div>

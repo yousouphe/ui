@@ -42,4 +42,5 @@ if (!$result['ok'] && !$result['already_paid']) {
 }
 
 flash('success', $result['already_paid'] ? 'Payment has already been confirmed.' : 'Payment verified successfully.');
-go_to('/bookings/index.php?booking_id=' . (int)$result['booking_id']);
+// Land on the generated receipt so the sender can view / print / download it immediately.
+go_to('/payments/receipt.php?booking_id=' . (int)$result['booking_id']);

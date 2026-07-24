@@ -237,6 +237,7 @@ export function ProfileScreen() {
           </>
         )}
       </Card>
+      <Button title="Transactions" variant="secondary" onPress={() => navigation.navigate('Transactions')} />
       {user?.role === 'sender' ? (
         <Button title="Payment receipts" variant="secondary" onPress={() => navigation.navigate('Receipts')} />
       ) : null}

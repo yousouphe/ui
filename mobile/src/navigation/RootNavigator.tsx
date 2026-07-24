@@ -13,6 +13,8 @@ import { ResetPasswordScreen } from '@/screens/auth/ResetPasswordScreen';
 import { CompleteProfileScreen } from '@/screens/auth/CompleteProfileScreen';
 import { NotificationsScreen } from '@/screens/NotificationsScreen';
 import { ChatScreen } from '@/screens/ChatScreen';
+import { TransactionsScreen } from '@/screens/TransactionsScreen';
+import { ReceiptScreen } from '@/screens/ReceiptScreen';
 import {
   ProfileScreen,
   RiderHomeScreen,
@@ -90,6 +92,8 @@ function SenderStack() {
       <Stack.Screen name="Complaint" component={ComplaintScreen} options={{ title: 'Report a problem' }} />
       <Stack.Screen name="EditBooking" component={EditBookingScreen} options={{ title: 'Edit booking' }} />
       <Stack.Screen name="Receipts" component={ReceiptsScreen} options={{ title: 'Receipts' }} />
+      <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ title: 'Receipt' }} />
+      <Stack.Screen name="Transactions" component={TransactionsScreen} options={{ title: 'Transactions' }} />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
     </Stack.Navigator>
   );
@@ -108,6 +112,8 @@ function RiderStack() {
       <Stack.Screen name="Vehicle" component={VehicleScreen} options={{ title: 'Vehicle' }} />
       <Stack.Screen name="Kyc" component={KycScreen} options={{ title: 'Verification' }} />
       <Stack.Screen name="Guidelines" component={GuidelinesScreen} options={{ title: 'Guidelines' }} />
+      <Stack.Screen name="Transactions" component={TransactionsScreen} options={{ title: 'Transactions' }} />
+      <Stack.Screen name="Receipt" component={ReceiptScreen} options={{ title: 'Receipt' }} />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ title: 'Chat' }} />
     </Stack.Navigator>
   );

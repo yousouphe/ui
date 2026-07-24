@@ -471,6 +471,110 @@ function api_payments_list(PDO $pdo): void {
     api_ok(['payments' => $items]);
 }
 
+function api_transactions_list(PDO $pdo): void {
+    // Sender/rider transaction history, mirroring the web transactions.php: one normalised list with
+    // search, date/type/status filters, sort, and pagination. Shares config/transactions.php so the
+    // web and mobile histories can never drift.
+    require_once __DIR__ . '/../config/transactions.php';
+    $user = api_require($pdo, ['sender', 'rider']);
+    $filters = [
+        'range' => (string) ($_GET['range'] ?? 'all'),
+        'from' => (string) ($_GET['from'] ?? ''),
+        'to' => (string) ($_GET['to'] ?? ''),
+        'type' => (string) ($_GET['type'] ?? ''),
+        'status' => (string) ($_GET['status'] ?? ''),
+        'q' => (string) ($_GET['q'] ?? ''),
+        'sort' => (string) ($_GET['sort'] ?? 'newest'),
+    ];
+    $all = tx_rows_for_user($pdo, $user, $filters);
+    $summary = tx_summary($pdo, $user, $all);
+    $perPage = 25;
+    $total = count($all);
+    $pages = max(1, (int) ceil($total / $perPage));
+    $page = min(max(1, (int) ($_GET['page'] ?? 1)), $pages);
+    $slice = array_slice($all, ($page - 1) * $perPage, $perPage);
+    $items = array_map(static fn(array $r): array => [
+        'id' => (string) $r['id'],
+        'date' => (string) $r['date'],
+        'category' => (string) $r['category'],
+        'direction' => (string) $r['direction'],
+        'description' => (string) $r['description'],
+        'orderCode' => (string) $r['order_code'],
+        'reference' => (string) $r['reference'],
+        'amount' => (float) $r['amount'],
+        'status' => (string) $r['status'],
+    ], $slice);
+    api_ok([
+        'transactions' => $items,
+        'summary' => [
+            'credits' => (float) $summary['credits'],
+            'debits' => (float) $summary['debits'],
+            'count' => (int) $summary['count'],
+            'hasBalance' => (bool) $summary['has_balance'],
+            'opening' => (float) $summary['opening'],
+            'closing' => (float) $summary['closing'],
+        ],
+        'page' => $page,
+        'pages' => $pages,
+        'total' => $total,
+    ], ['page' => $page, 'pages' => $pages, 'total' => $total]);
+}
+
+/** Map an immutable receipt row to the public camelCase shape. */
+function api_receipt_public(array $r): array {
+    return [
+        'receiptNumber' => (string) $r['receipt_number'],
+        'orderCode' => (string) $r['order_code'],
+        'reference' => (string) $r['payment_reference'],
+        'customerName' => (string) $r['customer_name'],
+        'riderName' => $r['rider_name'] !== null ? (string) $r['rider_name'] : null,
+        'pickupAddress' => (string) $r['pickup_address'],
+        'deliveryAddress' => (string) $r['delivery_address'],
+        'amount' => (float) $r['amount'],
+        'vatAmount' => (float) $r['vat_amount'],
+        'vatPercent' => (float) $r['vat_percent'],
+        'totalAmount' => (float) $r['total_amount'],
+        'paymentMethod' => (string) $r['payment_method'],
+        'paymentStatus' => (string) $r['payment_status'],
+        'createdAt' => (string) $r['created_at'],
+    ];
+}
+
+/** Authorise the caller (customer or assigned rider) for a booking's receipt; returns the row. */
+function api_receipt_authorized(PDO $pdo, int $bookingId, array $user): array {
+    require_once __DIR__ . '/../config/receipts.php';
+    $receipt = get_receipt_for_booking($pdo, $bookingId);
+    if (!$receipt) {
+        api_fail(404, 'NOT_FOUND', 'No receipt is available for this booking yet.');
+    }
+    if ((int) ($receipt['customer_user_id'] ?? 0) !== (int) $user['id']
+        && (int) ($receipt['rider_user_id'] ?? 0) !== (int) $user['id']) {
+        api_fail(403, 'FORBIDDEN', 'You are not part of this receipt.');
+    }
+    return $receipt;
+}
+
+function api_booking_receipt(PDO $pdo, int $id): void {
+    $user = api_require($pdo, ['sender', 'rider']);
+    $receipt = api_receipt_authorized($pdo, $id, $user);
+    api_ok(['receipt' => api_receipt_public($receipt)]);
+}
+
+function api_booking_receipt_resend(PDO $pdo, int $id): void {
+    require_once __DIR__ . '/../config/emails.php';
+    require_once __DIR__ . '/../config/receipts.php';
+    $user = api_require($pdo, ['sender', 'rider']);
+    $receipt = api_receipt_authorized($pdo, $id, $user);
+    send_transaction_receipt_email(
+        (string) $receipt['customer_email'],
+        (string) $receipt['customer_name'],
+        ['booking_code' => (string) $receipt['order_code'], 'item_name' => 'Delivery', 'agreed_cost' => (float) $receipt['total_amount']],
+        (string) $receipt['payment_reference']
+    );
+    audit_financial_event($pdo, 'receipt_email_sent', 'Receipt ' . $receipt['receipt_number'] . ' resent (mobile)', (int) $user['id'], (string) $user['role'], (int) $id, (string) $receipt['payment_reference'], ['receipt_number' => $receipt['receipt_number'], 'resend' => true]);
+    api_ok(['message' => 'Receipt sent to the customer email.']);
+}
+
 function api_booking_contact(PDO $pdo, int $id): void {
     // Returns the counterpart's phone so the app can open the DEVICE DIALLER. In-app calling is
     // deliberately not offered on mobile (no WebRTC infra there — the web PeerJS path does not

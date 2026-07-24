@@ -797,7 +797,7 @@ return [
     'push.blocked_hint' => 'An toshe sanarwa a burauzarku don wannan shafin. Danna alamar kulle ko bayani kusa da adireshin, ku ba da izinin Sanarwa (Notifications), sannan ku sake loda wannan shafin.',
 
     // Payment receipts + settlement (module19)
-    'rider.payment_secured_notice' => 'Aike ne ke tabbatar da biyan kuɗi. Da zarar mai aikawa ya biya, za a ƙara maka kuɗin shiga kai tsaye — ba sai ka tabbatar ba. Ana riƙe kuɗin sannan a saka bisa ƙa\'idodin dandamali.',
+    'rider.payment_secured_notice' => 'Aike ne ke tabbatar da biyan kuɗi. Da zarar mai aikawa ya biya, za a ƙara kuɗin shiga cikin walat ɗinka na cikin manhaja kai tsaye — ba sai ka tabbatar ba. Kana iya neman cirewa zuwa bankinka a kowane lokaci; admin ne ke amincewa da cirewar.',
     'receipt.title' => 'Rasidin Biyan Kuɗi',
     'receipt.subtitle' => 'Rasidin biyan kuɗi na hukuma',
     'receipt.receipt_no' => 'Lambar Rasidi',

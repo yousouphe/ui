@@ -796,7 +796,7 @@ return [
     'push.blocked_hint' => 'Notifications are blocked in your browser for this site. Click the lock or info icon next to the address bar, allow Notifications, then reload this page.',
 
     // Payment receipts + settlement (module19)
-    'rider.payment_secured_notice' => 'Payment is secured by Aike. Once the sender pays, your earnings are credited automatically — no confirmation needed. Funds are held and settled per platform rules.',
+    'rider.payment_secured_notice' => 'Payment is secured by Aike. Once the sender pays, your earnings are added to your in-app wallet balance automatically — no confirmation needed. You can request a withdrawal to your bank anytime; withdrawals are approved by an admin.',
     'receipt.title' => 'Payment Receipt',
     'receipt.subtitle' => 'Official payment receipt',
     'receipt.receipt_no' => 'Receipt No.',

@@ -49,13 +49,13 @@ if ($exists) {
                 <?php if (is_array($data)): ?>
                     <dl class="row">
                         <dt class="col-sm-3">Timestamp</dt>
-                        <dd class="col-sm-9"><?= e(($data['timestamp'] ?? '')) ?></dd>
-                        <dt class="col-sm-3">Reason</dt>
-                        <dd class="col-sm-9"><?= e(($data['reason'] ?? 'Unknown')) ?></dd>
+                        <dd class="col-sm-9"><?= e(!empty($data['ts']) ? date('Y-m-d H:i:s', (int) $data['ts']) : '') ?></dd>
+                        <dt class="col-sm-3">Note</dt>
+                        <dd class="col-sm-9"><?= e(($data['note'] ?? 'Unknown')) ?></dd>
                         <dt class="col-sm-3">Speed (km/h)</dt>
-                        <dd class="col-sm-9"><?= e(($data['haversine_speed_kmh'] ?? '')) ?></dd>
-                        <dt class="col-sm-3">Sample Booking</dt>
-                        <dd class="col-sm-9"><?= e(json_encode($data['sample'] ?? [])) ?></dd>
+                        <dd class="col-sm-9"><?= e(($data['speed_kmh'] ?? '')) ?></dd>
+                        <dt class="col-sm-3">Distance (km)</dt>
+                        <dd class="col-sm-9"><?= e(($data['distance_km'] ?? '')) ?></dd>
                     </dl>
                 <?php else: ?>
                     <div class="small text-muted">Unable to parse flag file.</div>

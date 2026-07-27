@@ -157,21 +157,26 @@ function paystack_verify_transaction(string $reference): array {
 // caller's data, and is a safe no-op to call repeatedly once the booking is already paid.
 function finalize_booking_payment(PDO $pdo, string $reference): array {
     require_once __DIR__ . '/emails.php';
+    require_once __DIR__ . '/receipts.php';
 
     $stmt = $pdo->prepare("
         SELECT
             bp.*,
             b.id AS booking_id,
             b.sender_user_id,
+            b.selected_rider_user_id,
             b.booking_code,
             b.item_name,
             b.payment_status AS booking_payment_status,
             b.agreed_cost,
             u.full_name AS sender_full_name,
-            u.email AS sender_email
+            u.email AS sender_email,
+            r.full_name AS rider_full_name,
+            r.email AS rider_email
         FROM booking_payments bp
         INNER JOIN bookings b ON b.id = bp.booking_id
         INNER JOIN users u ON u.id = b.sender_user_id
+        LEFT JOIN users r ON r.id = b.selected_rider_user_id
         WHERE bp.reference = ?
         LIMIT 1
     ");
@@ -207,12 +212,33 @@ function finalize_booking_payment(PDO $pdo, string $reference): array {
         $pdo->beginTransaction();
     }
 
+    $riderCredited = false;
+    $riderId = $payment['selected_rider_user_id'] !== null ? (int) $payment['selected_rider_user_id'] : 0;
+    $payoutAmount = $riderId > 0 ? rider_payout_amount((float) $payment['agreed_cost']) : 0.0;
+
     try {
         $stmt = $pdo->prepare("UPDATE booking_payments SET status = 'success', paid_at = NOW() WHERE id = ?");
         $stmt->execute([$payment['id']]);
 
         $stmt = $pdo->prepare("UPDATE bookings SET payment_status = 'paid', paystack_reference = ? WHERE id = ?");
         $stmt->execute([$reference, $payment['booking_id']]);
+
+        // Order completion is decoupled from the rider's manual acknowledgement: Paystack
+        // verification is the source of truth, so we settle the rider here automatically. This is
+        // idempotent — only credit if a rider is assigned and no earning row exists yet for this
+        // booking — and we auto-set rider_payment_confirmed so nothing downstream waits on the
+        // rider pressing a button.
+        if ($riderId > 0) {
+            $exists = $pdo->prepare("SELECT 1 FROM wallet_transactions WHERE booking_id = ? AND type = 'earning' LIMIT 1");
+            $exists->execute([$payment['booking_id']]);
+            if (!$exists->fetchColumn()) {
+                $pdo->prepare("INSERT INTO wallet_transactions (rider_user_id, booking_id, type, amount, description) VALUES (?, ?, 'earning', ?, ?)")
+                    ->execute([$riderId, $payment['booking_id'], $payoutAmount, 'Delivery ' . $payment['booking_code']]);
+                $pdo->prepare("UPDATE bookings SET rider_payment_confirmed = 1, rider_payment_confirmed_at = NOW() WHERE id = ? AND rider_payment_confirmed = 0")
+                    ->execute([$payment['booking_id']]);
+                $riderCredited = true;
+            }
+        }
 
         if (!$wasInTransaction) {
             $pdo->commit();
@@ -224,13 +250,33 @@ function finalize_booking_payment(PDO $pdo, string $reference): array {
         return ['ok' => false, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Database update failed: ' . $e->getMessage()];
     }
 
+    // Immutable receipt (idempotent), then email it to the customer.
+    $receipt = generate_payment_receipt($pdo, (int) $payment['booking_id'], $reference);
+
     send_transaction_receipt_email((string)$payment['sender_email'], (string)$payment['sender_full_name'], [
         'booking_code' => $payment['booking_code'],
         'item_name' => $payment['item_name'],
         'agreed_cost' => $payment['agreed_cost'],
     ], $reference);
 
-    log_event($pdo, 'payment_confirmed', 'Payment confirmed for booking ' . $payment['booking_code'], (int)$payment['sender_user_id'], 'sender', 'booking', (int)$payment['booking_id'], ['reference' => $reference, 'amount' => (float)$payment['agreed_cost']]);
+    audit_financial_event($pdo, 'payment_verified', 'Payment verified for booking ' . $payment['booking_code'], (int)$payment['sender_user_id'], 'sender', (int)$payment['booking_id'], $reference, ['amount' => (float)$payment['agreed_cost']]);
+    if ($receipt) {
+        audit_financial_event($pdo, 'receipt_generated', 'Receipt ' . $receipt['receipt_number'] . ' generated', (int)$payment['sender_user_id'], 'system', (int)$payment['booking_id'], $reference, ['receipt_number' => $receipt['receipt_number']]);
+        audit_financial_event($pdo, 'receipt_email_sent', 'Receipt emailed to ' . $payment['sender_email'], (int)$payment['sender_user_id'], 'system', (int)$payment['booking_id'], $reference, ['receipt_number' => $receipt['receipt_number']]);
+    }
+
+    // Notify + audit the rider settlement (only on the transition that actually credited).
+    if ($riderCredited && $riderId > 0) {
+        audit_financial_event($pdo, 'wallet_credit', 'Rider credited ' . number_format($payoutAmount, 2) . ' for booking ' . $payment['booking_code'], $riderId, 'rider', (int)$payment['booking_id'], $reference, ['amount' => $payoutAmount]);
+        if (function_exists('send_rider_earning_email') && !empty($payment['rider_email'])) {
+            try {
+                send_rider_earning_email((string)$payment['rider_email'], (string)$payment['rider_full_name'], [
+                    'booking_code' => $payment['booking_code'],
+                    'item_name' => $payment['item_name'],
+                ], $payoutAmount);
+            } catch (Throwable $e) { /* email is best-effort */ }
+        }
+    }
 
     return ['ok' => true, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Payment verified successfully.'];
 }

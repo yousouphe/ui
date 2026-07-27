@@ -37,8 +37,19 @@ return [
     // set to {app_url}/auth/google_callback.php
     'google_client_id' => 'REDACTED_GOOGLE_CLIENT_ID',
     'google_client_secret' => 'REDACTED_GOOGLE_CLIENT_SECRET',
+    // Mobile Google OAuth client IDs (iOS / Android / Expo web), comma-separated. The mobile
+    // /api/v1/auth/google endpoint verifies the ID token's `aud` against this list (plus the web
+    // client id above). Leave blank to skip the aud check (any valid Google ID token accepted).
+    'google_mobile_client_ids' => 'REDACTED_GOOGLE_MOBILE_CLIENT_IDS',
     // Web Push (browser notifications for senders/riders). Generate once with
     // `php scripts/generate_vapid_keys.php` and paste the PEM below - the public key is
     // derived from it automatically, there is nothing else to configure.
     'vapid_private_key_pem' => 'REDACTED_VAPID_PRIVATE_KEY_PEM',
+    // Trusted reverse-proxy IPs/CIDR ranges (e.g. your Cloudflare or load-balancer ranges).
+    // client_ip() only honours the CF-Connecting-IP / X-Forwarded-For headers when the direct
+    // peer (REMOTE_ADDR) is listed here; otherwise it uses REMOTE_ADDR directly. This stops a
+    // client from spoofing its IP to evade rate limits/bans. Leave empty when the app is
+    // reached directly (no proxy in front). Accepts exact IPs and CIDR (IPv4 and IPv6), e.g.
+    // ['173.245.48.0/20', '103.21.244.0/22', '2400:cb00::/32'].
+    'trusted_proxies' => [],
 ];

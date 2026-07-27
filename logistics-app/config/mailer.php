@@ -133,8 +133,14 @@ function mailer_send(string $toEmail, string $toName, string $subject, string $h
         $send($socket, 'DATA');
         $expect($socket, '354');
 
+        // A unique Message-ID is REQUIRED by RFC 5322 - Gmail (and others) now reject messages
+        // without one ("550-5.7.1 ... missing a valid Message-ID header"). Use the sender's domain.
+        $msgIdDomain = substr((string) strrchr($fromEmail, '@'), 1);
+        if ($msgIdDomain === '') { $msgIdDomain = $localHost !== '' ? $localHost : 'localhost'; }
+
         $headers = [];
         $headers[] = 'Date: ' . date('r');
+        $headers[] = 'Message-ID: <' . bin2hex(random_bytes(16)) . '.' . time() . '@' . $msgIdDomain . '>';
         $headers[] = 'From: ' . mailer_encode_header($fromName) . ' <' . $fromEmail . '>';
         $headers[] = 'To: ' . mailer_encode_header($toName) . ' <' . $toEmail . '>';
         $headers[] = 'Subject: ' . mailer_encode_header($subject);

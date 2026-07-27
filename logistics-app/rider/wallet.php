@@ -63,15 +63,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($formAction === 'request_withdrawal') {
         $amount = (float) ($_POST['amount'] ?? 0);
-        $available = rider_available_balance($pdo, (int) $user['id']);
 
         if (!$bankAccount || empty($bankAccount['bank_code']) || empty($bankAccount['verified_at'])) {
             flash('error', t('wallet.add_bank_details_first'));
-        } elseif ($amount <= 0) {
+            redirect_to('rider/wallet');
+        }
+        if ($amount <= 0) {
             flash('error', t('wallet.invalid_withdrawal_amount'));
-        } elseif ($amount > $available) {
-            flash('error', t('wallet.withdrawal_exceeds_balance'));
-        } else {
+            redirect_to('rider/wallet');
+        }
+
+        // Create the withdrawal under a transaction so the balance check and the insert are
+        // atomic. rider_available_balance_locked() takes row locks on this rider's ledger and
+        // pending withdrawals, so two withdrawal submissions racing each other serialise here
+        // instead of both reading the same balance and both inserting (TOCTOU double-spend).
+        $withdrawalCreated = false;
+        try {
+            $pdo->beginTransaction();
+            $available = rider_available_balance_locked($pdo, (int) $user['id']);
+
+            if ($amount > $available) {
+                $pdo->rollBack();
+                flash('error', t('wallet.withdrawal_exceeds_balance'));
+                redirect_to('rider/wallet');
+            }
+
             $stmt = $pdo->prepare('
                 INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status)
                 VALUES (?, ?, ?, ?, ?, ?, "pending")
@@ -84,8 +100,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bankAccount['account_number'],
                 $bankAccount['account_name'],
             ]);
-            flash('success', t('wallet.withdrawal_request_submitted'));
+            $pdo->commit();
+            $withdrawalCreated = true;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('withdrawal request failed: ' . $e->getMessage());
+            flash('error', t('wallet.withdrawal_exceeds_balance'));
+            redirect_to('rider/wallet');
+        }
 
+        if ($withdrawalCreated) {
+            flash('success', t('wallet.withdrawal_request_submitted'));
+            // Notifications run after commit so a failed/rolled-back attempt never emails a
+            // "request received" message for a withdrawal that was not actually recorded.
             send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount);
             notify_admins($pdo, 'New withdrawal request', '<p><strong>' . e((string) $user['full_name']) . '</strong> requested a withdrawal of ₦' . number_format($amount, 2) . '.</p><p>Review it from the admin portal.</p>');
         }
@@ -211,25 +240,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('rider/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('rider/')) ?>"><i class="fa-solid fa-house me-1"></i><?= e(t('nav.dashboard')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
-            <a class="nav-link active" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-            <div class="small">
-                <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/wallet')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                &middot;
-                <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/wallet')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
-            </div>
-        </div>
-    </div>
-</nav>
+<?= render_app_nav(current_user(), 'wallet', 'rider/wallet') ?>
 
 <div class="container py-5">
     <h1 class="h3 fw-bold mb-4"><?= e(t('wallet.heading')) ?></h1>

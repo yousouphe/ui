@@ -1,0 +1,25 @@
+# User-writable content directory: static files are served, code is never executed.
+#
+# Item photos, voice notes and realtime JSON land here from user input. If an attacker
+# smuggles a .php payload into an "image" or note, it must be handed back as an inert file,
+# never run as code. We deny access to script extensions outright (blocks both execution and
+# source disclosure) and turn off directory listings so the file inventory is not browsable.
+Options -Indexes
+
+<FilesMatch "(?i)\.(php|phtml|phtm|php3|php4|php5|php7|php8|phps|pht|phar|cgi|pl|py|shtml)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Belt and braces where mod_php is in use - do not treat anything here as PHP.
+<IfModule mod_php.c>
+    php_admin_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_admin_flag engine off
+</IfModule>

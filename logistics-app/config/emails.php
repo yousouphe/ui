@@ -66,6 +66,16 @@ function send_rider_earning_email(string $toEmail, string $fullName, array $book
     mailer_dispatch($toEmail, $fullName, 'Earning Credited - ' . $booking['booking_code'], mailer_layout('Earning Credited', $body));
 }
 
+// One-time code an admin must enter to reveal a user/rider's wallet balance (module19). The code is
+// never stored in plaintext — only emailed here — and expires in 5 minutes.
+function send_admin_balance_otp_email(string $toEmail, string $fullName, string $code): void {
+    $body = '<p>Hi ' . e($fullName) . ',</p>'
+        . '<p>Use this one-time code to view the requested wallet balance. It expires in 5 minutes and can be used once.</p>'
+        . '<p style="text-align:center;margin:24px 0;"><span style="font-size:30px;font-weight:800;letter-spacing:8px;color:#0284c7;">' . e($code) . '</span></p>'
+        . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, no balance has been shown — you can ignore this email and consider changing your password.</p>';
+    mailer_dispatch($toEmail, $fullName, 'Your Aike balance-view code', mailer_layout('Balance View Verification', $body));
+}
+
 function send_kyc_decision_email(string $toEmail, string $fullName, bool $approved, ?string $note = null): void {
     $body = '<p>Hi ' . e($fullName) . ',</p>'
         . ($approved

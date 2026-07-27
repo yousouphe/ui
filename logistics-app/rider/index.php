@@ -66,14 +66,10 @@ function render_awaiting_confirmation_html(array $bookings): string
                         <i class="fa-solid fa-circle-check text-success me-2"></i><?= e(t('rider.payment_received_notice')) ?>
                     <?php endif; ?>
                 </div>
-                <button
-                    type="button"
-                    class="btn <?= $isPaid ? 'btn-success' : 'btn-secondary' ?> w-100 py-2 fw-bold confirm-payment-btn"
-                    <?= $isPaid ? '' : 'disabled' ?>
-                    data-booking-id="<?= (int) $b['id'] ?>"
-                >
-                    <i class="fa-solid fa-hand-holding-dollar me-2"></i><?= e(t('rider.confirm_payment_received')) ?>
-                </button>
+                <div class="small text-soft d-flex align-items-start">
+                    <i class="fa-solid fa-shield-halved text-primary me-2 mt-1"></i>
+                    <span><?= e(t('rider.payment_secured_notice')) ?></span>
+                </div>
             </div>
         <?php endforeach; ?>
     </div>
@@ -260,6 +256,17 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
             if ($receiverUserId <= 0 || $receiverUserId !== $counterpartId) {
                 respond_json(['success' => false, 'message' => 'Invalid voice note recipient.'], 422);
             }
+
+            // Cap the size (voice notes are short clips) so this endpoint can't be used to
+            // fill the disk, and throttle per user so it can't be spammed - both are outage
+            // vectors when the volume fills up.
+            if ((int) ($_FILES['voice_note']['size'] ?? 0) > 2 * 1024 * 1024) {
+                respond_json(['success' => false, 'message' => 'Voice note is too large (max 2MB).'], 413);
+            }
+            if (is_rate_limited($pdo, 'voice_upload', (string) $currentUserId, 20, 1)) {
+                respond_json(['success' => false, 'message' => 'Too many voice notes. Please wait a moment.'], 429);
+            }
+            record_rate_limit_attempt($pdo, 'voice_upload', (string) $currentUserId);
 
             $tmp = $_FILES['voice_note']['tmp_name'];
             $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp) ?: 'audio/webm';
@@ -487,7 +494,9 @@ $targetLabel = t('map.delivery_pin');
 $targetAddress = '';
 
 if ($activeBooking) {
-    if (in_array($currentStatus, ['matched', 'accepted'], true)) {
+    // Navigate to PICKUP until the package is actually collected (package_received). Reaching the
+    // pickup point (arrived_at_pickup) is not yet "picked up", so it stays on the pickup target.
+    if (in_array($currentStatus, ['matched', 'accepted', 'arrived_at_pickup'], true)) {
         $targetLat = $pickupLat;
         $targetLng = $pickupLng;
         $targetLabel = t('map.pickup_pin');
@@ -693,6 +702,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
         'pending_offers_count' => count($pendingOffers),
         'pending_offer_ids' => $pendingIds,
         'popup_request' => $popupRequest,
+        'active_status' => $currentStatus, // lets the client re-sync the navigation leg on reconnect
         'offers_html' => $offersHtml,
         'awaiting_confirmation_html' => $awaitingConfirmationHtml,
         'awaiting_confirmation_signature' => $awaitingConfirmationSignature,
@@ -830,28 +840,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </style>
 </head>
 <body>
-
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('rider/dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_deliveries')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/wallet')) ?>"><i class="fa-solid fa-wallet me-1"></i><?= e(t('wallet.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/kyc.php')) ?>"><i class="fa-solid fa-id-card me-1"></i><?= e(t('kyc.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('rider/training.php')) ?>"><i class="fa-solid fa-graduation-cap me-1"></i><?= e(t('training.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e($logoutUrl) ?>"><i class="fa-solid fa-right-from-bracket me-1"></i><?= e(t('common.logout')) ?></a>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
-                <div class="small">
-                    <a href="<?= e(url_path('set_locale?locale=en&redirect=rider/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                    &middot;
-                    <a href="<?= e(url_path('set_locale?locale=ha&redirect=rider/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
-                </div>
-            </div>
-        </div>
-    </div>
-</nav>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
+<?= render_app_nav(current_user(), 'home', 'rider/') ?>
 
 <div class="toast-container-custom" id="toast-container"></div>
 
@@ -999,7 +989,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
                                     <i class="fa-solid fa-phone"></i>
                                 </a>
                                 <?php if ($targetLat !== null && $targetLng !== null): ?>
-                                    <a href="<?= e($mapLink) ?>" target="_blank" class="btn btn-sm btn-primary rounded-pill px-3 fw-bold">
+                                    <a id="nav-deeplink" href="<?= e($mapLink) ?>" target="_blank" class="btn btn-sm btn-primary rounded-pill px-3 fw-bold">
                                         <i class="fa-solid fa-diamond-turn-right me-1"></i> <?= e(t('rider.navigate')) ?>
                                     </a>
                                 <?php endif; ?>
@@ -1142,6 +1132,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="<?= e(url_path('assets/js/aike-map.js')) ?>"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
@@ -1459,7 +1450,9 @@ function showToast(message, type = 'success') {
 function getCurrentTarget() {
     if (!bookingId) return null;
 
-    if (currentStatus === 'matched' || currentStatus === 'accepted') {
+    // Guide to PICKUP until the package is collected (package_received); reaching pickup
+    // (arrived_at_pickup) is not yet "picked up", so it keeps the pickup target.
+    if (currentStatus === 'matched' || currentStatus === 'accepted' || currentStatus === 'arrived_at_pickup') {
         return {
             type: 'pickup',
             lat: pickup.lat,
@@ -1469,7 +1462,7 @@ function getCurrentTarget() {
         };
     }
 
-    if (currentStatus === 'arrived_at_pickup' || currentStatus === 'package_received' || currentStatus === 'in_transit') {
+    if (currentStatus === 'package_received' || currentStatus === 'in_transit') {
         return {
             type: 'delivery',
             lat: dest.lat,
@@ -1508,12 +1501,7 @@ function initMap() {
     const navMap = document.getElementById('nav_map');
     if (!navMap) return;
 
-    state.map = L.map('nav_map', { zoomControl: true }).setView([initialRider.lat, initialRider.lng], 13);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(state.map);
+    state.map = AikeMap.create('nav_map', { center: [initialRider.lat, initialRider.lng], zoom: 13 });
 
     state.riderMarker = L.marker([initialRider.lat, initialRider.lng], { title: I18N.riderPin }).addTo(state.map);
 
@@ -1619,9 +1607,19 @@ function buildRoute(fromLat, fromLng, toLat, toLng) {
     });
 }
 
-function updateMapAndTargetUI(lat, lng) {
-    if (!state.map || !state.riderMarker) return;
+// Google Maps turn-by-turn deep-link for the CURRENT target (pickup before collection, delivery
+// after). Kept in sync with the in-app route so the "Navigate" button never points at a stale leg.
+function buildMapLink(target) {
+    if (!target || target.lat === null || target.lng === null) return '#';
+    return 'https://www.google.com/maps/dir/?api=1&destination=' + target.lat + ',' + target.lng + '&travelmode=driving';
+}
 
+function updateNavDeepLink(target) {
+    const link = document.getElementById('nav-deeplink');
+    if (link) link.href = buildMapLink(target);
+}
+
+function updateMapAndTargetUI(lat, lng) {
     const target = getCurrentTarget();
     if (!target || target.lat === null || target.lng === null) return;
 
@@ -1631,7 +1629,36 @@ function updateMapAndTargetUI(lat, lng) {
     const targetText = document.getElementById('target_address_text');
     if (targetText) targetText.textContent = target.address;
 
+    // Keep the external "Navigate" deep-link on the current leg even before the map is ready.
+    updateNavDeepLink(target);
+
+    if (!state.map || !state.riderMarker) return;
+    if (state.targetMarker) {
+        state.targetMarker.setLatLng([target.lat, target.lng]);
+    }
     buildRoute(lat, lng, target.lat, target.lng);
+}
+
+// Apply a booking-status change in place (no page reload): update the badge, workflow button, map
+// target, route and the Navigate deep-link. Used by the workflow action AND the live snapshot poll
+// (so a reconnect or a server-side change — e.g. the sender edits the delivery address — re-syncs
+// the correct navigation leg automatically). Delivery is terminal, so it still does a full reload.
+function applyStatus(newStatus) {
+    if (!newStatus || newStatus === currentStatus) return;
+    currentStatus = newStatus;
+
+    const activeBadge = document.getElementById('active-booking-status-badge');
+    if (activeBadge) activeBadge.textContent = statusBadgeText(currentStatus);
+
+    if (currentStatus === 'delivered') {
+        window.location.reload();
+        return;
+    }
+
+    const lat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
+    const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
+    updateMapAndTargetUI(lat, lng);
+    updateWorkflowButton(state.latestRouteDistanceMeters);
 }
 
 function updateWorkflowButton(distance) {
@@ -1716,22 +1743,10 @@ async function runWorkflowAction() {
             throw new Error(data.message || I18N.workflowFailed);
         }
 
-        currentStatus = data.new_status;
         if (geoMessage) geoMessage.textContent = data.message || I18N.statusUpdated;
-
-        const activeBadge = document.getElementById('active-booking-status-badge');
-        if (activeBadge) {
-            activeBadge.textContent = statusBadgeText(currentStatus);
-        }
-
-        if (currentStatus === 'delivered') {
-            window.location.reload();
-            return;
-        }
-
-        const lat = lastKnownPosition ? lastKnownPosition.lat : initialRider.lat;
-        const lng = lastKnownPosition ? lastKnownPosition.lng : initialRider.lng;
-        updateMapAndTargetUI(lat, lng);
+        // In-place transition — no page reload. On package_received the target, route and the
+        // Navigate deep-link flip from pickup to delivery instantly (Uber/Bolt behaviour).
+        applyStatus(data.new_status);
     } catch (err) {
         if (geoMessage) geoMessage.textContent = err.message || I18N.actionFailed;
         btnWorkflow.disabled = false;
@@ -2139,6 +2154,13 @@ async function refreshSnapshot() {
         const newIds = incomingIds.filter(id => !knownIds.includes(id));
 
         updateSummaryUI(data);
+
+        // Re-sync the active booking's navigation leg from the server. Handles reconnect after an
+        // offline gap and server-side changes (e.g. the sender edits the delivery address) without
+        // a manual refresh. applyStatus() is a no-op when the status is unchanged.
+        if (data.active_status) {
+            applyStatus(data.active_status);
+        }
 
         if (newIds.length > 0) {
             playNewRequestSound();

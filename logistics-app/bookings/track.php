@@ -176,6 +176,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
 
 <?php if ($hasRider && $hasRouteCoords): ?>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="<?= e(url_path('assets/js/aike-map.js')) ?>"></script>
 <script>
     const MAPBOX_TOKEN = <?= json_encode(mapbox_token()) ?>;
     const pickupCoords = <?= json_encode([(float) $booking['pickup_latitude'], (float) $booking['pickup_longitude']]) ?>;
@@ -200,8 +201,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
         }
     }
 
-    const map = L.map('tracking_map').setView(pickupCoords, 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    const map = AikeMap.create('tracking_map', { center: pickupCoords, zoom: 13 });
 
     const pickupIcon = L.divIcon({
         html: '<div style="color:#f59e0b;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box"></i></div>',

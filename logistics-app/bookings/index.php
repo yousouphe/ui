@@ -226,6 +226,17 @@ if (in_array($realtimeAction, ['call_create', 'call_poll', 'call_accept', 'call_
                 respond_json(['success' => false, 'message' => 'Invalid voice note recipient.'], 422);
             }
 
+            // Cap the size (voice notes are short clips) so this endpoint can't be used to
+            // fill the disk, and throttle per user so it can't be spammed - both are outage
+            // vectors when the volume fills up.
+            if ((int) ($_FILES['voice_note']['size'] ?? 0) > 2 * 1024 * 1024) {
+                respond_json(['success' => false, 'message' => 'Voice note is too large (max 2MB).'], 413);
+            }
+            if (is_rate_limited($pdo, 'voice_upload', (string) $currentUserId, 20, 1)) {
+                respond_json(['success' => false, 'message' => 'Too many voice notes. Please wait a moment.'], 429);
+            }
+            record_rate_limit_attempt($pdo, 'voice_upload', (string) $currentUserId);
+
             $tmp = $_FILES['voice_note']['tmp_name'];
             $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp) ?: 'audio/webm';
             $extMap = [
@@ -645,26 +656,8 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light navx">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= e(url_path('bookings/')) ?>"><?= e(t('common.brand')) ?></a>
-        <div class="navbar-nav ms-auto flex-row flex-wrap gap-3 align-items-lg-center">
-            <a class="nav-link" href="<?= e(url_path('dashboard')) ?>"><i class="fa-solid fa-list-ul me-1"></i><?= e(t('nav.my_orders')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('bookings/?new=1')) ?>"><i class="fa-solid fa-plus me-1"></i><?= e(t('nav.new_order')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('bookings/complaints.php')) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i><?= e(t('complaint.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('profile')) ?>"><i class="fa-solid fa-user me-1"></i><?= e(t('profile.nav_label')) ?></a>
-            <a class="nav-link" href="<?= e(url_path('logout')) ?>"><?= e(t('common.logout')) ?></a>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" id="notif-enable-btn" class="btn btn-sm btn-outline-primary d-none" title="<?= e(t('push.enable_button')) ?>"><i class="fa-solid fa-bell me-1"></i><?= e(t('push.enable_button')) ?></button>
-                <div class="small">
-                    <a href="<?= e(url_path('set_locale?locale=en&redirect=bookings/')) ?>" class="<?= current_locale() === 'en' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">EN</a>
-                    &middot;
-                    <a href="<?= e(url_path('set_locale?locale=ha&redirect=bookings/')) ?>" class="<?= current_locale() === 'ha' ? 'fw-bold text-dark' : 'text-soft' ?> text-decoration-none">HA</a>
-                </div>
-            </div>
-        </div>
-    </div>
-</nav>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
+<?= render_app_nav(current_user(), 'home', 'bookings/') ?>
 
 <div class="container py-5">
     <div
@@ -1315,6 +1308,7 @@ $selectedDeliveryLng = $selectedBooking['delivery_longitude'] ?? '';
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="<?= e(url_path('assets/js/aike-map.js')) ?>"></script>
 <script src="https://js.paystack.co/v1/inline.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
@@ -1675,11 +1669,7 @@ function initSenderWorkspace() {
                 const center = [initialLat || 9.0820, initialLng || 8.6753];
                 const pickerEl = root.querySelector('#leaflet-map-picker');
                 if (!mapPickerMap) {
-                    mapPickerMap = L.map(pickerEl, { tap: false }).setView(center, initialLat ? 15 : 6);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        maxZoom: 19,
-                        attribution: '© OpenStreetMap'
-                    }).addTo(mapPickerMap);
+                    mapPickerMap = AikeMap.create(pickerEl, { center: center, zoom: initialLat ? 15 : 6 });
                     mapPickerMarker = L.marker(center, { draggable: true }).addTo(mapPickerMap);
                     mapPickerMap.on('click', (e) => mapPickerMarker.setLatLng(e.latlng));
                 } else {
@@ -2015,14 +2005,10 @@ function initSenderWorkspace() {
     if (bookingMapEl) {
         function ensureBookingMap() {
             if (workspaceState.bookingMap) return workspaceState.bookingMap;
-            workspaceState.bookingMap = L.map(bookingMapEl, { tap: false }).setView([
+            workspaceState.bookingMap = AikeMap.create(bookingMapEl, { center: [
                 parseFloat(pickupLat?.value) || 9.0820,
                 parseFloat(pickupLng?.value) || 8.6753
-            ], 6);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '© OpenStreetMap'
-            }).addTo(workspaceState.bookingMap);
+            ], zoom: 6 });
             workspaceState.bookingMap.on('click', async function (e) {
                 if (!mapMode) return;
                 const { lat, lng } = e.latlng;
@@ -2215,11 +2201,7 @@ function initSenderWorkspace() {
         const pickupCoords = [pickupLatVal, pickupLngVal];
         const deliveryCoords = [deliveryLatVal, deliveryLngVal];
 
-        workspaceState.detailMap = L.map(detailMapEl).setView(pickupCoords, 13);
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(workspaceState.detailMap);
+        workspaceState.detailMap = AikeMap.create(detailMapEl, { center: pickupCoords, zoom: 13 });
 
         const pickupIcon = L.divIcon({
             html: '<div style="color:#f59e0b;font-size:22px;text-shadow:0 0 4px #fff;"><i class="fa-solid fa-box"></i></div>',

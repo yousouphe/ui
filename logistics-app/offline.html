@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Aike</title>
+<!--
+  Aike offline / splash fallback page.
+
+  Served by the service worker (sw.js) as the navigation fallback when a page load fails
+  because the device is offline. It is FULLY SELF-CONTAINED - inline CSS, inline SVG, inline
+  JS, system fonts, no external requests - so it renders reliably from cache with no network.
+
+  Behaviour:
+   - Shows the Aike splash: wordmark, animated Loading indicator, rotating feature messages,
+     and a small sender/rider route illustration.
+   - Detects connectivity with the browser online/offline events AND a real reachability probe
+     (ping.php) - navigator.onLine alone is not trusted.
+   - When connectivity is confirmed it automatically reloads the originally-requested page
+     (the address bar still shows it), with no user interaction required.
+   - Offers a "Try again" button as a manual fallback; guards against duplicate/looping
+     reloads and simultaneous checks; uses a short backoff rather than hammering the network.
+-->
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.1rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: linear-gradient(180deg, #eaf5ff, #dbeeff 42%, #eef8ff);
+    color: #0f2c44;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wordmark {
+    font-weight: 800;
+    font-size: clamp(2.4rem, 9vw, 3.4rem);
+    letter-spacing: 0.14em;
+    line-height: 1;
+    color: #0b6ec9;
+    text-transform: uppercase;
+  }
+  .illus { position: relative; width: min(15rem, 74vw); height: 3.4rem; }
+  .illus::before, .illus::after {
+    content: ""; position: absolute; top: 50%; width: 0.9rem; height: 0.9rem;
+    margin-top: -0.45rem; border-radius: 50%;
+  }
+  .illus::before { left: 0; background: #0b6ec9; }
+  .illus::after  { right: 0; background: #16a34a; }
+  .illus .line {
+    position: absolute; top: 50%; left: 0.9rem; right: 0.9rem; height: 3px; margin-top: -1.5px;
+    border-radius: 2px;
+    background: repeating-linear-gradient(90deg, #9cc6ea 0 8px, transparent 8px 16px);
+    background-size: 16px 3px; animation: dash 700ms linear infinite;
+  }
+  .illus .courier {
+    position: absolute; top: 50%; left: 0.9rem; width: 1.5rem; height: 1.5rem; margin-top: -0.75rem;
+    border-radius: 50%; background: #fff; border: 2px solid #0b6ec9;
+    box-shadow: 0 4px 10px rgba(11,110,201,.25); display: flex; align-items: center; justify-content: center;
+    animation: ride 2.6s ease-in-out infinite;
+  }
+  .illus .courier::before { content: ""; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #0b6ec9; }
+  .spinner {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: 4px solid rgba(11,110,201,.22); border-top-color: #0b6ec9; animation: spin 900ms linear infinite;
+  }
+  .loading { font-size: 0.8rem; letter-spacing: 0.16em; text-transform: uppercase; color: #5c7a91; }
+  .msg { min-height: 2.6em; max-width: 22rem; font-size: 1rem; font-weight: 500; transition: opacity .3s ease; }
+  .msg.out { opacity: 0; }
+  .offline-box {
+    max-width: 24rem; background: rgba(255,255,255,.78); border: 1px solid rgba(15,42,68,.12);
+    border-radius: 1rem; padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: 0.6rem;
+    align-items: center; margin-top: 0.4rem;
+  }
+  .offline-title { font-weight: 700; color: #b45309; }
+  .offline-sub { font-size: 0.9rem; color: #5c7a91; margin: 0; }
+  .status { font-size: 0.82rem; color: #5c7a91; min-height: 1.2em; }
+  .retry {
+    appearance: none; border: 0; border-radius: 0.6rem; background: #0b6ec9; color: #fff; font-weight: 600;
+    padding: 0.55rem 1.4rem; font-size: 0.95rem; cursor: pointer; min-height: 44px;
+  }
+  .retry:hover { background: #095ca8; }
+  .retry:focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+  .retry[disabled] { opacity: 0.6; cursor: progress; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes dash { to { background-position: 16px 0; } }
+  @keyframes ride { 0% { left: 0.9rem; } 50% { left: calc(100% - 0.9rem - 1.5rem); } 100% { left: 0.9rem; } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .illus .line, .illus .courier { animation: none !important; }
+    .illus .courier { left: calc(50% - 0.75rem); }
+    .msg { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="wordmark">Aike</div>
+  <div class="illus" aria-hidden="true"><span class="line"></span><span class="courier"></span></div>
+  <div class="spinner" role="status" aria-label="Loading"></div>
+  <div class="loading">Loading&hellip;</div>
+  <p class="msg" id="msg" aria-live="polite">Request a rider in just a few taps.</p>
+
+  <div class="offline-box">
+    <div class="offline-title" role="alert">You&rsquo;re currently offline.</div>
+    <p class="offline-sub">Some features may be unavailable until your connection is restored.</p>
+    <button type="button" class="retry" id="retry">Try again</button>
+    <div class="status" id="status" aria-live="polite"></div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  var messages = [
+    'Request a rider in just a few taps.',
+    'Set your pickup and drop-off in seconds.',
+    'Compare riders by distance, vehicle and price.',
+    'Track your delivery live, every step of the way.',
+    'Chat or call your rider without leaving the app.',
+    'Riders: get delivery requests when you are online.',
+    'Riders: review the trip details before you accept.',
+    'Riders: navigate to pickup and drop-off with ease.',
+    'Riders: watch your earnings grow with every trip.',
+    'Stay connected, even on a shaky network.'
+  ];
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Rotate feature messages continuously (also while offline).
+  var msgEl = document.getElementById('msg');
+  var mi = 0;
+  setInterval(function () {
+    mi = (mi + 1) % messages.length;
+    if (reduceMotion) { msgEl.textContent = messages[mi]; return; }
+    msgEl.classList.add('out');
+    setTimeout(function () { msgEl.textContent = messages[mi]; msgEl.classList.remove('out'); }, 300);
+  }, 2600);
+
+  var statusEl = document.getElementById('status');
+  var retryBtn = document.getElementById('retry');
+
+  // Resolve the probe URL from the service-worker scope so it is correct regardless of the
+  // sub-path the app is deployed under. Falls back to a root-relative guess.
+  function pingUrl() {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      try { return new URL('ping.php', navigator.serviceWorker.controller.scriptURL).href; } catch (e) {}
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) { /* handled async below */ }
+    return 'ping.php';
+  }
+
+  var checking = false;
+  var recovered = false; // guard so we never reload more than once
+
+  function confirmOnline() {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 3500);
+    var url = pingUrl();
+    return fetch(url + (url.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now(), {
+      method: 'GET', cache: 'no-store', credentials: 'omit', signal: controller.signal
+    }).then(function (res) {
+      clearTimeout(timer);
+      return res && (res.ok || res.status === 204);
+    }).catch(function () {
+      clearTimeout(timer);
+      return false;
+    });
+  }
+
+  function recover() {
+    if (recovered) { return; }
+    recovered = true;
+    statusEl.textContent = 'Connection restored — loading Aike…';
+    // Reload the originally-requested page (address bar still points at it).
+    setTimeout(function () { location.reload(); }, 300);
+  }
+
+  function attempt(manual) {
+    if (checking || recovered) { return; }
+    checking = true;
+    if (manual) { retryBtn.disabled = true; statusEl.textContent = 'Checking connection…'; }
+    confirmOnline().then(function (online) {
+      checking = false;
+      if (manual) { retryBtn.disabled = false; }
+      if (online) {
+        recover();
+      } else if (manual) {
+        statusEl.textContent = 'Still offline. We’ll keep trying automatically.';
+      }
+    });
+  }
+
+  // Manual fallback.
+  retryBtn.addEventListener('click', function () { attempt(true); });
+
+  // Automatic recovery: react to the browser regaining connectivity, and poll on a short
+  // capped backoff as a safety net (navigator.onLine can be wrong / events can be missed).
+  window.addEventListener('online', function () { attempt(false); });
+
+  var delays = [2000, 3000, 5000, 8000, 12000, 15000];
+  var di = 0;
+  (function loop() {
+    if (recovered) { return; }
+    attempt(false);
+    var d = delays[Math.min(di, delays.length - 1)];
+    di++;
+    setTimeout(loop, d);
+  })();
+
+  // If we somehow already have connectivity when this page shows, recover promptly.
+  if (navigator.onLine) { setTimeout(function () { attempt(false); }, 400); }
+})();
+</script>
+</body>
+</html>

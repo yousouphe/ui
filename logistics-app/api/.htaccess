@@ -1,0 +1,9 @@
+# Route every /api/** request that is not a real file to the JSON front controller.
+# The front controller (index.php) parses the version + path and dispatches.
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+# The API is JSON + bearer tokens only; never serve directory listings here.
+Options -Indexes

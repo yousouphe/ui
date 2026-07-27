@@ -45,6 +45,18 @@ return [
     // `php scripts/generate_vapid_keys.php` and paste the PEM below - the public key is
     // derived from it automatically, there is nothing else to configure.
     'vapid_private_key_pem' => 'REDACTED_VAPID_PRIVATE_KEY_PEM',
+    // Native push for the native Android app (Firebase Cloud Messaging, HTTP v1 API) - distinct
+    // from the Expo-based mobile push above. Generate at Firebase Console -> Project Settings ->
+    // Service accounts -> Generate new private key, then paste the ENTIRE downloaded JSON file's
+    // contents here as a single-line string. Leave REDACTED to leave native push disabled (the
+    // app still records in-app notifications either way; only the OS push notification is gated
+    // on this).
+    'firebase_service_account_json' => 'REDACTED_FIREBASE_SERVICE_ACCOUNT_JSON',
+    // Shared secret for api/opcache_reset.php - visit that URL with ?key=<this value> once after
+    // a deploy if PHP still runs old code despite updated files on disk (opcache.validate_timestamps=0
+    // on hosts with no PHP-FPM restart access). Generate any long random string, e.g.
+    // `php -r "echo bin2hex(random_bytes(24));"`.
+    'opcache_reset_key' => 'REDACTED_OPCACHE_RESET_KEY',
     // Trusted reverse-proxy IPs/CIDR ranges (e.g. your Cloudflare or load-balancer ranges).
     // client_ip() only honours the CF-Connecting-IP / X-Forwarded-For headers when the direct
     // peer (REMOTE_ADDR) is listed here; otherwise it uses REMOTE_ADDR directly. This stops a

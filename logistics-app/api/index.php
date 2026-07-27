@@ -46,6 +46,7 @@ $routes = [
     ['PATCH','#^bookings/(\d+)$#',                      fn($id) => api_booking_update($pdo, (int) $id)],
     ['POST', '#^bookings/(\d+)/cancel$#',               fn($id) => api_booking_cancel($pdo, (int) $id)],
     ['POST', '#^bookings/(\d+)/rebook$#',               fn($id) => api_booking_rebook($pdo, (int) $id)],
+    ['POST', '#^bookings/(\d+)/confirm-handover$#',     fn($id) => api_booking_confirm_handover($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/track$#',                fn($id) => api_booking_track($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/contact$#',              fn($id) => api_booking_contact($pdo, (int) $id)],
     ['GET',  '#^bookings/(\d+)/messages$#',             fn($id) => api_messages_list($pdo, (int) $id)],
@@ -96,6 +97,8 @@ $routes = [
     ['GET',  '#^notifications$#',                       fn() => api_notif_list($pdo)],
     ['POST', '#^notifications/(\d+)/read$#',            fn($id) => api_notif_read($pdo, (int) $id)],
     ['POST', '#^complaints$#',                          fn() => api_complaint_create($pdo)],
+    ['GET',  '#^complaints$#',                          fn() => api_complaints_list($pdo)],
+    ['POST', '#^complaints/(\d+)/feedback$#',           fn($id) => api_complaint_feedback($pdo, (int) $id)],
 ];
 
 $matchedPathButNotMethod = false;

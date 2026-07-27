@@ -437,6 +437,29 @@ function api_booking_update(PDO $pdo, int $id): void {
     api_ok(api_booking_public(api_fetch_booking($pdo, $id)), ['priceChanged' => $priceChanged]);
 }
 
+function api_booking_confirm_handover(PDO $pdo, int $id): void {
+    // Sender confirms they've physically handed the item to the rider. Mirrors
+    // bookings/ajax_confirm_handover.php: only once the rider has arrived at pickup and is
+    // actually assigned; sets sender_handover_confirmed, which then blocks later cancellation.
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare('SELECT id, booking_status, selected_rider_user_id FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1');
+    $stmt->execute([$id, $user['id']]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    if (($booking['booking_status'] ?? '') !== 'arrived_at_pickup') {
+        api_fail(422, 'NOT_ARRIVED', 'Item can only be issued once the rider has arrived at pickup.');
+    }
+    if (empty($booking['selected_rider_user_id'])) {
+        api_fail(422, 'NO_RIDER', 'No rider is assigned to this booking.');
+    }
+    $pdo->prepare('UPDATE bookings SET sender_handover_confirmed = 1, sender_handover_confirmed_at = NOW() WHERE id = ?')
+        ->execute([$id]);
+    log_event($pdo, 'booking_handover_confirmed', 'Sender confirmed handover for booking #' . $id . ' (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
+    api_ok(api_booking_public(api_fetch_booking($pdo, $id)));
+}
+
 function api_booking_rebook(PDO $pdo, int $id): void {
     // Reopen a cancelled booking for rider matching. Mirrors bookings/ajax_rebook.php: only a
     // cancelled booking can be rebooked; it returns to 'submitted' with the rider cleared.
@@ -1313,6 +1336,65 @@ function api_complaint_create(PDO $pdo): void {
             '<p><strong>' . e((string) $user['full_name']) . '</strong> reported an issue with booking <strong>' . e((string) $booking['booking_code']) . '</strong> (mobile).</p><p><strong>Category:</strong> ' . e($category) . '</p><p>' . nl2br(e($message)) . '</p>'); } catch (Throwable $e) {}
     }
     api_ok(['message' => 'Your report has been submitted. Our team will follow up.'], [], 201);
+}
+
+function api_complaints_list(PDO $pdo): void {
+    // A sender's own complaint history + resolution status. Mirrors bookings/complaints.php's
+    // listing query and ordering (open/reviewing first, then resolved, newest first within each).
+    $user = api_require($pdo, ['sender']);
+    $stmt = $pdo->prepare('
+        SELECT bc.*, b.booking_code
+        FROM booking_complaints bc
+        INNER JOIN bookings b ON b.id = bc.booking_id
+        WHERE bc.sender_user_id = ?
+        ORDER BY FIELD(bc.status, "open", "reviewing", "resolved"), bc.created_at DESC
+        LIMIT 50
+    ');
+    $stmt->execute([$user['id']]);
+    api_ok(array_map(static function (array $c): array {
+        return [
+            'id' => (int) $c['id'],
+            'bookingId' => (int) $c['booking_id'],
+            'bookingCode' => (string) $c['booking_code'],
+            'category' => (string) $c['category'],
+            'message' => (string) $c['message'],
+            'status' => (string) $c['status'],
+            'adminNote' => $c['admin_note'] !== null ? (string) $c['admin_note'] : null,
+            'createdAt' => (string) $c['created_at'],
+            'resolvedAt' => $c['resolved_at'] !== null ? (string) $c['resolved_at'] : null,
+            'feedbackSubmittedAt' => $c['feedback_submitted_at'] !== null ? (string) $c['feedback_submitted_at'] : null,
+            'senderSatisfied' => $c['sender_satisfied'] !== null ? ((int) $c['sender_satisfied'] === 1) : null,
+            'senderFeedbackText' => $c['sender_feedback_text'] !== null ? (string) $c['sender_feedback_text'] : null,
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC)));
+}
+
+function api_complaint_feedback(PDO $pdo, int $id): void {
+    // Sender rates how their resolved complaint was handled. Mirrors the "feedback" branch of
+    // bookings/complaints.php: only once, only after the admin has marked it resolved.
+    $user = api_require($pdo, ['sender']);
+    $b = api_body();
+    if (!array_key_exists('satisfied', $b) || !is_bool($b['satisfied'])) {
+        api_fail(400, 'VALIDATION', 'satisfied (true/false) is required.');
+    }
+    $satisfied = (bool) $b['satisfied'];
+    $feedbackText = trim((string) ($b['feedbackText'] ?? ''));
+
+    $stmt = $pdo->prepare('SELECT id, status, feedback_submitted_at FROM booking_complaints WHERE id = ? AND sender_user_id = ? LIMIT 1');
+    $stmt->execute([$id, $user['id']]);
+    $complaint = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$complaint) {
+        api_fail(404, 'NOT_FOUND', 'Complaint not found.');
+    }
+    if ($complaint['status'] !== 'resolved') {
+        api_fail(409, 'NOT_RESOLVED', 'Feedback can only be left once this complaint is resolved.');
+    }
+    if ($complaint['feedback_submitted_at'] !== null) {
+        api_fail(409, 'ALREADY_SUBMITTED', 'Feedback has already been submitted for this complaint.');
+    }
+    $pdo->prepare('UPDATE booking_complaints SET sender_satisfied = ?, sender_feedback_text = ?, feedback_submitted_at = NOW() WHERE id = ?')
+        ->execute([$satisfied ? 1 : 0, $feedbackText !== '' ? $feedbackText : null, $id]);
+    api_ok(null);
 }
 
 // ---- Rider discovery (mirrors bookings/ajax_fetch_riders.php ranking) ------------------------

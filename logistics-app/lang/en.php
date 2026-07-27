@@ -82,7 +82,7 @@ return [
     'register.subheading' => 'Register to start booking and tracking deliveries.',
     'register.error.fix_fields' => 'Please fix the highlighted fields.',
     'register.error.invalid_email' => 'Enter a valid email address.',
-    'register.error.password_length' => 'Password must be at least 6 characters.',
+    'register.error.password_length' => 'Password must be at least 8 characters.',
     'register.error.password_mismatch' => 'Passwords do not match.',
     'register.error.email_exists' => 'That email already exists.',
     'register.error.vehicle_plate_required' => 'Enter your vehicle plate number.',

@@ -52,7 +52,10 @@ if ($registerRateLimited) {
     $guarantorRelationship = trim($_POST['guarantor_relationship'] ?? '');
 
     if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = t('register.error.invalid_email');
-    if ($password && strlen($password) < 6) $errors['password'] = t('register.error.password_length');
+    // Matches the /api/v1/auth/register minimum (routes_v1.php) - previously 6 here vs 8 there,
+    // so an account rejected by the mobile API could still be created through this exact same
+    // form. Strengthened the weaker side rather than loosening the API's rule.
+    if ($password && strlen($password) < 8) $errors['password'] = t('register.error.password_length');
     if ($password !== $confirm) $errors['password_confirmation'] = t('register.error.password_mismatch');
 
     if ($accountType === 'rider') {

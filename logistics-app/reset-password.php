@@ -37,7 +37,8 @@ if (!$tokenValid) {
     $password = (string)($_POST['password'] ?? '');
     $confirm = (string)($_POST['password_confirmation'] ?? '');
 
-    if (strlen($password) < 6) {
+    // Matches /api/v1/auth/reset's minimum (routes_v1.php) - same reasoning as register.php.
+    if (strlen($password) < 8) {
         $error = t('register.error.password_length');
     } elseif ($password !== $confirm) {
         $error = t('register.error.password_mismatch');

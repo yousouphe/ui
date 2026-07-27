@@ -199,9 +199,162 @@ function send_expo_push(PDO $pdo, int $userId, string $title, string $body, ?str
     }
 }
 
-// Unified per-user notification dispatch. Despite the historical name it now feeds BOTH web
-// (VAPID) and mobile (FCM/APNs via Expo), and always records the notification. Every existing
-// call site therefore reaches a user's mobile devices too, with no change at the call sites.
+// ---- Native FCM (HTTP v1 API) for the native Android app ------------------------------------
+// The native Kotlin app registers a raw FCM registration token (POST /api/v1/notifications/device),
+// not an Expo push token - Expo tokens only exist for apps built through Expo's own
+// infrastructure, which this app isn't. send_expo_push() above correctly ignores anything that
+// isn't Expo-shaped rather than misdirecting it, which meant native tokens were silently never
+// sent to at all. This sends to those tokens directly via Google's FCM HTTP v1 API instead.
+//
+// The legacy "server key" FCM API (Authorization: key=...) was fully retired by Google in June
+// 2024 - HTTP v1 is now the only option, and it authenticates with a short-lived OAuth2 access
+// token minted from a Firebase service account (Firebase Console -> Project Settings -> Service
+// accounts -> Generate new private key), not a static secret. Hand-rolled here (RS256 JWT +
+// token exchange) rather than pulling in the Firebase Admin SDK, consistent with this app having
+// no Composer/vendor directory - the same reasoning behind send_web_push()'s hand-rolled VAPID.
+
+function firebase_service_account(): ?array {
+    static $cached = false;
+    if ($cached !== false) {
+        return $cached;
+    }
+    $json = trim((string) (config_app()['firebase_service_account_json'] ?? ''));
+    if ($json === '' || str_starts_with($json, 'REDACTED')) {
+        return $cached = null;
+    }
+    $decoded = json_decode($json, true);
+    if (!is_array($decoded) || empty($decoded['private_key']) || empty($decoded['client_email']) || empty($decoded['project_id'])) {
+        error_log('FCM: firebase_service_account_json is set but is not a valid service-account key (missing private_key/client_email/project_id).');
+        return $cached = null;
+    }
+    return $cached = $decoded;
+}
+
+function firebase_configured(): bool {
+    return firebase_service_account() !== null;
+}
+
+// Mints a fresh OAuth2 access token via the JWT Bearer Token flow (RFC 7523). Not cached beyond
+// this request - PHP-FPM processes are short-lived and this only runs when there's an actual
+// native token to notify, so re-minting per request is simple and correct here rather than a
+// premature optimisation needing a shared cache.
+function firebase_access_token(): ?string {
+    $account = firebase_service_account();
+    if ($account === null) {
+        return null;
+    }
+    $now = time();
+    $header = base64url_encode((string) json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    $claims = base64url_encode((string) json_encode([
+        'iss' => $account['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+        'aud' => 'https://oauth2.googleapis.com/token',
+        'iat' => $now,
+        'exp' => $now + 3600,
+    ]));
+    $signingInput = $header . '.' . $claims;
+
+    $key = openssl_pkey_get_private($account['private_key']);
+    if ($key === false) {
+        error_log('FCM: failed to parse the service account private key - ' . (openssl_error_string() ?: 'no OpenSSL error detail available'));
+        return null;
+    }
+    $signature = '';
+    if (!openssl_sign($signingInput, $signature, $key, OPENSSL_ALGO_SHA256)) {
+        error_log('FCM: openssl_sign() failed while building the OAuth2 assertion JWT - ' . (openssl_error_string() ?: 'no OpenSSL error detail available'));
+        return null;
+    }
+    $assertion = $signingInput . '.' . base64url_encode($signature);
+
+    $ch = curl_init('https://oauth2.googleapis.com/token');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query([
+            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion' => $assertion,
+        ]),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+        CURLOPT_TIMEOUT => 5,
+        CURLOPT_CONNECTTIMEOUT => 3,
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($httpCode < 200 || $httpCode >= 300 || $resp === false) {
+        error_log('FCM: OAuth2 token exchange failed, http ' . $httpCode);
+        return null;
+    }
+    $decoded = json_decode((string) $resp, true);
+    return is_array($decoded) ? (($decoded['access_token'] ?? null) ?: null) : null;
+}
+
+// Sends to every raw (non-Expo) FCM token on file for a user via the HTTP v1 API. Mirrors
+// send_expo_push()'s shape: fire-and-forget, prunes tokens FCM reports as gone.
+function send_fcm_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+    if (!firebase_configured()) {
+        return;
+    }
+    $stmt = $pdo->prepare('SELECT id, token FROM device_tokens WHERE user_id = ?');
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return;
+    }
+    $rawTokenRows = array_values(array_filter($rows, static fn(array $r): bool =>
+        !preg_match('/^ExponentPushToken\[.+\]$|^ExpoPushToken\[.+\]$/', (string) $r['token'])));
+    if (!$rawTokenRows) {
+        return;
+    }
+
+    $accessToken = firebase_access_token();
+    if ($accessToken === null) {
+        return;
+    }
+    $projectId = (string) firebase_service_account()['project_id'];
+
+    foreach ($rawTokenRows as $row) {
+        $token = (string) $row['token'];
+        $payload = [
+            'message' => [
+                'token' => $token,
+                'notification' => ['title' => $title, 'body' => $body],
+                'data' => ['url' => (string) ($url ?? '')],
+            ],
+        ];
+        $ch = curl_init("https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_TIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => 3,
+        ]);
+        $resp = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($httpCode >= 200 && $httpCode < 300) {
+            continue;
+        }
+        // UNREGISTERED (404) = app uninstalled / token rotated - stop sending to it.
+        $decodedErr = json_decode((string) $resp, true);
+        $status = is_array($decodedErr) ? (string) ($decodedErr['error']['status'] ?? '') : '';
+        if ($httpCode === 404 || $status === 'UNREGISTERED') {
+            try { $pdo->prepare('DELETE FROM device_tokens WHERE id = ?')->execute([(int) $row['id']]); } catch (Throwable $e) {}
+        } else {
+            error_log('FCM push http ' . $httpCode . ' status=' . $status);
+        }
+    }
+}
+
+// Unified per-user notification dispatch. Despite the historical name it now feeds web (VAPID)
+// and BOTH mobile push transports (Expo and native FCM), and always records the notification.
+// Every existing call site therefore reaches a user's mobile devices too, with no change needed
+// at the call sites.
 function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
     // Record once - the source of truth for the web AND mobile in-app notification lists.
     // Recorded unconditionally, even if no transport is configured, so history is never lost.
@@ -217,6 +370,13 @@ function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?stri
         send_expo_push($pdo, $userId, $title, $body, $url);
     } catch (Throwable $e) {
         error_log('send_expo_push failed: ' . $e->getMessage());
+    }
+
+    // Native FCM (HTTP v1) for the native Android app's raw registration tokens - see above.
+    try {
+        send_fcm_push($pdo, $userId, $title, $body, $url);
+    } catch (Throwable $e) {
+        error_log('send_fcm_push failed: ' . $e->getMessage());
     }
 
     // Web push (unchanged) - only when VAPID is configured and the user has web subscriptions.

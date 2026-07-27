@@ -83,7 +83,7 @@ return [
     'register.subheading' => 'Yi rijista don fara tura kaya da bin diddigin delivery.',
     'register.error.fix_fields' => 'Da fatan za a gyara guraren da aka yiwa alama.',
     'register.error.invalid_email' => 'Shigar da adireshin imel na gaskiya.',
-    'register.error.password_length' => 'Kalmar sirri dole ta kai aƙalla haruffa 6.',
+    'register.error.password_length' => 'Kalmar sirri dole ta kai aƙalla haruffa 8.',
     'register.error.password_mismatch' => 'Kalmomin sirri ba su dace ba.',
     'register.error.email_exists' => 'Wannan imel ɗin an riga an yi amfani da shi.',
     'register.error.vehicle_plate_required' => 'Shigar da lambar kwentin abin hawanku.',

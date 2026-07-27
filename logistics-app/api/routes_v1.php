@@ -69,6 +69,67 @@ function api_register(PDO $pdo): void {
     ], [], 201);
 }
 
+// ---- Auth: login / refresh / logout ----------------------------------------------------------
+
+function api_login(PDO $pdo): void {
+    // Mirrors login.php: same dual rate limit (by IP and by email), same generic invalid-credential
+    // message, same active-status gate — then issues a bearer token pair instead of a session.
+    $b = api_body();
+    $email = strtolower(trim((string) ($b['email'] ?? '')));
+    $password = (string) ($b['password'] ?? '');
+    $ip = client_ip();
+
+    if (is_rate_limited($pdo, 'login_ip', $ip, 10, 15) || ($email !== '' && is_rate_limited($pdo, 'login_email', $email, 5, 15))) {
+        api_fail(429, 'TOO_MANY_ATTEMPTS', 'Too many attempts. Please try again later.');
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
+    $stmt->execute([$email]);
+    $u = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$u || !password_verify($password, $u['password_hash'])) {
+        record_rate_limit_attempt($pdo, 'login_ip', $ip);
+        if ($email !== '') {
+            record_rate_limit_attempt($pdo, 'login_email', $email);
+        }
+        api_fail(401, 'INVALID_CREDENTIALS', 'Incorrect email or password.');
+    }
+    if (($u['status'] ?? '') !== 'active') {
+        api_fail(403, 'ACCOUNT_INACTIVE', 'This account is not active. Please contact support.');
+    }
+
+    $platform = isset($b['platform']) ? substr((string) $b['platform'], 0, 20) : null;
+    $device = isset($b['deviceLabel']) ? substr((string) $b['deviceLabel'], 0, 120) : null;
+    $tokens = api_issue_tokens($pdo, (int) $u['id'], $platform, $device);
+    api_ok([
+        'accessToken' => $tokens['accessToken'],
+        'refreshToken' => $tokens['refreshToken'],
+        'expiresInSeconds' => $tokens['expiresInSeconds'],
+        'user' => api_user_public($u),
+    ]);
+}
+
+function api_auth_refresh(PDO $pdo): void {
+    $refreshToken = (string) (api_body()['refreshToken'] ?? '');
+    if ($refreshToken === '') {
+        api_fail(400, 'VALIDATION', 'A refresh token is required.');
+    }
+    $result = api_refresh_tokens($pdo, $refreshToken);
+    if ($result === null) {
+        api_fail(401, 'INVALID_REFRESH_TOKEN', 'Your session has expired. Please sign in again.');
+    }
+    api_ok(['accessToken' => $result['accessToken'], 'expiresInSeconds' => $result['expiresInSeconds']]);
+}
+
+function api_auth_logout(PDO $pdo): void {
+    $token = api_bearer_token();
+    api_require($pdo); // must present a currently-valid access token to revoke its own device family
+    if ($token !== null) {
+        api_revoke_by_access($pdo, $token);
+    }
+    api_ok(null);
+}
+
 // ---- Auth: Google sign-in (native ID token → verify server-side) -----------------------------
 
 /** Verify a Google ID token via Google's tokeninfo endpoint. Returns the claims or null. Google
@@ -196,6 +257,61 @@ function api_profile_complete(PDO $pdo): void {
     api_ok(api_user_public($stmt->fetch(PDO::FETCH_ASSOC)));
 }
 
+// ---- Coordinate validation (shared by geo/route, pricing/estimate, booking create/update) ----
+
+/**
+ * Validate and extract [pickupLat, pickupLng, dropoffLat, dropoffLng] from pickup/dropoff arrays
+ * (each expected to carry numeric 'lat'/'lng'). Returns null if either point is missing or falls
+ * outside Nigeria's bounding box (same range already enforced for delivery-address edits).
+ */
+function api_valid_coords($pickup, $dropoff): ?array {
+    if (!is_array($pickup) || !is_array($dropoff)) {
+        return null;
+    }
+    $plat = isset($pickup['lat']) && is_numeric($pickup['lat']) ? (float) $pickup['lat'] : null;
+    $plng = isset($pickup['lng']) && is_numeric($pickup['lng']) ? (float) $pickup['lng'] : null;
+    $dlat = isset($dropoff['lat']) && is_numeric($dropoff['lat']) ? (float) $dropoff['lat'] : null;
+    $dlng = isset($dropoff['lng']) && is_numeric($dropoff['lng']) ? (float) $dropoff['lng'] : null;
+    if ($plat === null || $plng === null || $dlat === null || $dlng === null) {
+        return null;
+    }
+    foreach ([[$plat, $plng], [$dlat, $dlng]] as [$lat, $lng]) {
+        if ($lat < 3 || $lat > 15 || $lng < 2 || $lng > 15) {
+            return null;
+        }
+    }
+    return [$plat, $plng, $dlat, $dlng];
+}
+
+// ---- Pricing estimate (backend-computed; mirrors bookings/ajax_estimate_pricing.php) ----------
+
+function api_pricing_estimate(PDO $pdo): void {
+    api_require($pdo, ['sender']);
+    $b = api_body();
+    $vehicleType = (string) ($b['vehicleType'] ?? '');
+    if (!in_array($vehicleType, ['bike', 'car', 'van'], true)) {
+        api_fail(400, 'VALIDATION', 'Choose a vehicle type.', ['vehicleType' => 'bike, car or van']);
+    }
+    $coords = api_valid_coords($b['pickup'] ?? null, $b['dropoff'] ?? null);
+    if ($coords === null) {
+        api_fail(400, 'VALIDATION', 'Valid pickup and drop-off coordinates are required.');
+    }
+    [$plat, $plng, $dlat, $dlng] = $coords;
+    try {
+        $m = cached_route_metrics($pdo, $plat, $plng, $dlat, $dlng);
+    } catch (NoRouteFoundException $e) {
+        api_fail(422, 'NO_ROUTE', 'No route could be found between these locations. Please check the addresses.');
+    } catch (Throwable $e) {
+        api_fail(503, 'PRICING_UNAVAILABLE', 'Unable to calculate pricing right now. Please try again shortly.');
+    }
+    $priced = calculate_delivery_price($pdo, (float) $m['distance_km'], $vehicleType);
+    api_ok([
+        'distanceKm' => round((float) $m['distance_km'], 2),
+        'durationMinutes' => (int) round((float) ($m['duration_min'] ?? 0)),
+        'total' => (float) $priced['total'],
+    ]);
+}
+
 // ---- Geo: route (backend Mapbox; secret token never leaves the server) -----------------------
 
 function api_geo_route(PDO $pdo): void {
@@ -218,6 +334,22 @@ function api_geo_route(PDO $pdo): void {
 }
 
 // ---- Sender: bookings -----------------------------------------------------------------------
+
+function api_list_bookings(PDO $pdo): void {
+    // Sender's bookings grouped exactly like bookings/index.php (load_sender_bookings), so the
+    // mobile lists can never drift from what the web sender hub shows for the same account.
+    $user = api_require($pdo, ['sender']);
+    $filter = (string) ($_GET['filter'] ?? 'active');
+    $grouped = load_sender_bookings($pdo, (int) $user['id']);
+    $rows = $grouped[$filter] ?? $grouped['active'];
+
+    $before = isset($_GET['before']) ? (int) $_GET['before'] : 0;
+    if ($before > 0) {
+        $rows = array_values(array_filter($rows, static fn(array $r): bool => (int) $r['id'] < $before));
+    }
+    $rows = array_slice($rows, 0, 30);
+    api_ok(array_map('api_booking_public', $rows));
+}
 
 function api_booking_create(PDO $pdo): void {
     $user = api_require($pdo, ['sender']);
@@ -287,8 +419,8 @@ function api_booking_create(PDO $pdo): void {
     }
 
     $booking = api_fetch_booking($pdo, $id);
-    $env = ['ok' => true, 'data' => ['booking' => api_booking_public($booking), 'pricingPending' => $pricingPending],
-            'error' => null, 'meta' => ['requestId' => bin2hex(random_bytes(8))]];
+    $env = ['ok' => true, 'data' => api_booking_public($booking),
+            'error' => null, 'meta' => ['requestId' => bin2hex(random_bytes(8)), 'pricingPending' => $pricingPending]];
     $body = json_encode($env);
     api_idempotency_store($pdo, (int) $user['id'], 'POST bookings', 201, $body);
     if (!headers_sent()) {
@@ -306,7 +438,7 @@ function api_booking_get(PDO $pdo, int $id): void {
     if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
         api_fail(404, 'NOT_FOUND', 'Booking not found.');
     }
-    api_ok(['booking' => api_booking_public($booking)]);
+    api_ok(api_booking_public($booking));
 }
 
 function api_booking_cancel(PDO $pdo, int $id): void {
@@ -334,7 +466,7 @@ function api_booking_cancel(PDO $pdo, int $id): void {
     $pdo->prepare("UPDATE bookings SET booking_status = 'cancelled', cancellation_reason = ?, cancelled_by = 'sender' WHERE id = ?")
         ->execute([$reason, $id]);
     log_event($pdo, 'booking_cancelled', 'Booking #' . $id . ' cancelled by sender (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id, ['reason' => $reason]);
-    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
+    api_ok(api_booking_public(api_fetch_booking($pdo, $id)));
 }
 
 function api_booking_update(PDO $pdo, int $id): void {
@@ -427,7 +559,7 @@ function api_booking_update(PDO $pdo, int $id): void {
     $params[] = $id;
     $pdo->prepare('UPDATE bookings SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
     log_event($pdo, 'booking_updated', 'Booking #' . $id . ' edited by sender (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
-    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id)), 'priceChanged' => $priceChanged]);
+    api_ok(api_booking_public(api_fetch_booking($pdo, $id)), ['priceChanged' => $priceChanged]);
 }
 
 function api_booking_rebook(PDO $pdo, int $id): void {
@@ -450,7 +582,7 @@ function api_booking_rebook(PDO $pdo, int $id): void {
                    WHERE id = ?")->execute([$id]);
     $pdo->prepare("UPDATE rider_requests SET request_status = 'rejected' WHERE booking_id = ? AND request_status = 'accepted'")->execute([$id]);
     log_event($pdo, 'booking_rebooked', 'Booking #' . $id . ' reopened for matching (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
-    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
+    api_ok(api_booking_public(api_fetch_booking($pdo, $id)));
 }
 
 function api_payments_list(PDO $pdo): void {
@@ -468,7 +600,7 @@ function api_payments_list(PDO $pdo): void {
         'reference' => $r['paystack_reference'] !== null ? (string) $r['paystack_reference'] : null,
         'paidAt' => (string) $r['updated_at'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
-    api_ok(['payments' => $items]);
+    api_ok($items);
 }
 
 function api_transactions_list(PDO $pdo): void {
@@ -557,7 +689,7 @@ function api_receipt_authorized(PDO $pdo, int $bookingId, array $user): array {
 function api_booking_receipt(PDO $pdo, int $id): void {
     $user = api_require($pdo, ['sender', 'rider']);
     $receipt = api_receipt_authorized($pdo, $id, $user);
-    api_ok(['receipt' => api_receipt_public($receipt)]);
+    api_ok(api_receipt_public($receipt));
 }
 
 function api_booking_receipt_resend(PDO $pdo, int $id): void {
@@ -633,7 +765,7 @@ function api_messages_list(PDO $pdo, int $bookingId): void {
     $user = api_require($pdo, ['sender', 'rider']);
     api_chat_authorize($pdo, $bookingId, $user);
     if (!db_table_exists($pdo, 'booking_chat_messages')) {
-        api_ok(['messages' => [], 'lastId' => 0]);
+        api_ok([], ['lastId' => 0]);
     }
     $sinceId = isset($_GET['since']) ? max(0, (int) $_GET['since']) : 0;
 
@@ -658,7 +790,7 @@ function api_messages_list(PDO $pdo, int $bookingId): void {
         'createdAt' => (string) $m['created_at'],
     ], $rows);
     $lastId = $rows ? (int) $rows[count($rows) - 1]['id'] : $sinceId;
-    api_ok(['messages' => $items, 'lastId' => $lastId]);
+    api_ok($items, ['lastId' => $lastId]);
 }
 
 function api_messages_send(PDO $pdo, int $bookingId): void {
@@ -689,23 +821,26 @@ function api_messages_send(PDO $pdo, int $bookingId): void {
     $stmt = $pdo->prepare('SELECT delivered_at, created_at FROM booking_chat_messages WHERE id = ?');
     $stmt->execute([$id]);
     $m = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    api_ok(['message' => [
+    api_ok([
         'id' => $id,
         'mine' => true,
         'message' => $message,
         'deliveredAt' => isset($m['delivered_at']) ? (string) $m['delivered_at'] : null,
         'readAt' => null,
         'createdAt' => isset($m['created_at']) ? (string) $m['created_at'] : null,
-    ]], [], 201);
+    ], [], 201);
 }
 
 function api_booking_request_rider(PDO $pdo, int $id): void {
     // Sender sends a delivery request to a chosen rider. Mirrors bookings/send_request.php:
-    // row-locked booking, capacity cap, no duplicate pending, other pending requests rejected.
+    // row-locked booking, capacity cap, other pending requests rejected. forceMatch mirrors the
+    // web fallback picker's force-assign path: bypasses the duplicate-pending block and jumps
+    // straight to an accepted/matched booking instead of waiting for the rider to respond.
     $user = api_require($pdo, ['sender']);
     $b = api_body();
     $riderUserId = (int) ($b['riderUserId'] ?? 0);
     $proposedCost = (float) ($b['proposedCost'] ?? 0);
+    $forceMatch = ($b['forceMatch'] ?? false) === true;
     if ($riderUserId <= 0) {
         api_fail(400, 'VALIDATION', 'Choose a rider.');
     }
@@ -713,6 +848,7 @@ function api_booking_request_rider(PDO $pdo, int $id): void {
         api_fail(400, 'VALIDATION', 'A valid fee is required.', ['proposedCost' => 'Must be greater than zero']);
     }
 
+    $matched = false;
     try {
         $pdo->beginTransaction();
         $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND sender_user_id = ? LIMIT 1 FOR UPDATE');
@@ -740,19 +876,33 @@ function api_booking_request_rider(PDO $pdo, int $id): void {
         }
         $stmt = $pdo->prepare("SELECT id FROM rider_requests WHERE booking_id = ? AND rider_user_id = ? AND request_status = 'pending' LIMIT 1");
         $stmt->execute([$id, $riderUserId]);
-        if ($stmt->fetchColumn()) {
+        $existingPending = $stmt->fetchColumn();
+        if ($existingPending && !$forceMatch) {
             $pdo->rollBack();
             api_fail(409, 'DUPLICATE_REQUEST', 'A pending request has already been sent to this rider.');
         }
-        // Supersede any other pending requests on this booking, then create this one.
+        // Supersede any other pending requests on this booking, then create/refresh this one.
         $pdo->prepare("UPDATE rider_requests SET request_status = 'rejected' WHERE booking_id = ? AND request_status = 'pending' AND rider_user_id <> ?")
             ->execute([$id, $riderUserId]);
-        $pdo->prepare("INSERT INTO rider_requests (booking_id, sender_user_id, rider_user_id, proposed_cost, request_status, created_at) VALUES (?, ?, ?, ?, 'pending', NOW())")
-            ->execute([$id, (int) $booking['sender_user_id'], $riderUserId, $proposedCost]);
-        $requestId = (int) $pdo->lastInsertId();
+        if ($existingPending) {
+            $pdo->prepare('UPDATE rider_requests SET proposed_cost = ? WHERE id = ?')->execute([$proposedCost, $existingPending]);
+            $requestId = (int) $existingPending;
+        } else {
+            $pdo->prepare("INSERT INTO rider_requests (booking_id, sender_user_id, rider_user_id, proposed_cost, request_status, created_at) VALUES (?, ?, ?, ?, 'pending', NOW())")
+                ->execute([$id, (int) $booking['sender_user_id'], $riderUserId, $proposedCost]);
+            $requestId = (int) $pdo->lastInsertId();
+        }
         $newStatus = ($booking['booking_status'] ?? 'submitted') === 'draft' ? 'submitted' : ($booking['booking_status'] ?? 'submitted');
-        $pdo->prepare('UPDATE bookings SET agreed_cost = ?, booking_status = ?, updated_at = NOW() WHERE id = ?')
-            ->execute([$proposedCost, $newStatus, $id]);
+        if ($forceMatch) {
+            $pdo->prepare('UPDATE rider_requests SET request_status = "accepted" WHERE id = ?')->execute([$requestId]);
+            $newStatus = $newStatus === 'submitted' ? 'matched' : $newStatus;
+            $pdo->prepare('UPDATE bookings SET agreed_cost = ?, booking_status = ?, selected_rider_user_id = ?, matched_at = COALESCE(matched_at, NOW()), updated_at = NOW() WHERE id = ?')
+                ->execute([$proposedCost, $newStatus, $riderUserId, $id]);
+            $matched = true;
+        } else {
+            $pdo->prepare('UPDATE bookings SET agreed_cost = ?, booking_status = ?, updated_at = NOW() WHERE id = ?')
+                ->execute([$proposedCost, $newStatus, $id]);
+        }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
@@ -761,9 +911,15 @@ function api_booking_request_rider(PDO $pdo, int $id): void {
     }
 
     if (function_exists('send_web_push')) {
-        try { send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . ($booking['booking_code'] ?? '') . '.', url_path('rider/')); } catch (Throwable $e) {}
+        try {
+            if ($matched) {
+                send_web_push($pdo, $riderUserId, 'Delivery assigned', 'You have been assigned booking ' . ($booking['booking_code'] ?? '') . '. Please complete the delivery.', url_path('rider/'));
+            } else {
+                send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . ($booking['booking_code'] ?? '') . '.', url_path('rider/'));
+            }
+        } catch (Throwable $e) {}
     }
-    api_ok(['requestId' => $requestId, 'bookingId' => $id], [], 201);
+    api_ok(['requestId' => $requestId, 'bookingId' => $id, 'matched' => $matched], [], 201);
 }
 
 function api_booking_track(PDO $pdo, int $id): void {
@@ -868,10 +1024,7 @@ function api_rider_location(PDO $pdo): void {
         $pdo->prepare('UPDATE rider_profiles SET last_latitude = ?, last_longitude = ?, availability_status = ?, last_location_updated_at = NOW() WHERE user_id = ?')
             ->execute([$lat, $lng, $status, $user['id']]);
     }
-    if (!headers_sent()) {
-        http_response_code(204);
-    }
-    exit;
+    api_ok(null);
 }
 
 function api_rider_offers(PDO $pdo): void {
@@ -896,7 +1049,7 @@ function api_rider_offers(PDO $pdo): void {
             'proposedCost' => $o['proposed_cost'] !== null ? (float) $o['proposed_cost'] : null,
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
-    api_ok(['offers' => $offers]);
+    api_ok($offers);
 }
 
 function api_rider_offer_respond(PDO $pdo, int $requestId, string $action): void {
@@ -972,7 +1125,7 @@ function api_rider_confirm_payment(PDO $pdo, int $id): void {
     if ((int) $booking['rider_payment_confirmed'] === 1) {
         // Payment is now auto-settled at Paystack verification, so this endpoint is idempotent:
         // if the booking is already settled, report success rather than a conflict.
-        api_ok(['payout' => rider_payout_amount((float) $booking['agreed_cost']), 'alreadySettled' => true]);
+        api_ok(rider_payout_amount((float) $booking['agreed_cost']), ['alreadySettled' => true]);
     }
     if (($booking['payment_status'] ?? 'unpaid') !== 'paid') {
         api_fail(409, 'NOT_PAID', 'The sender has not paid for this booking yet.');
@@ -990,7 +1143,7 @@ function api_rider_confirm_payment(PDO $pdo, int $id): void {
         api_fail(503, 'CONFIRM_FAILED', 'Unable to confirm payment right now. Please try again.');
     }
     log_event($pdo, 'booking_concluded', 'Booking ' . $booking['booking_code'] . ' concluded - rider confirmed payment (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id, ['payout' => $payout]);
-    api_ok(['payout' => (float) $payout]);
+    api_ok((float) $payout);
 }
 
 function api_rider_transition(PDO $pdo, int $id): void {
@@ -1032,7 +1185,7 @@ function api_rider_transition(PDO $pdo, int $id): void {
             try { send_web_push($pdo, (int) $booking['sender_user_id'], $titles[$to][0], $titles[$to][1], url_path('bookings/index.php?booking_id=' . $id)); } catch (Throwable $e) {}
         }
     }
-    api_ok(['booking' => api_booking_public(api_fetch_booking($pdo, $id))]);
+    api_ok(api_booking_public(api_fetch_booking($pdo, $id)));
 }
 
 function api_rider_bookings(PDO $pdo): void {
@@ -1049,7 +1202,7 @@ function api_rider_bookings(PDO $pdo): void {
     }
     $stmt = $pdo->prepare("SELECT * FROM bookings WHERE selected_rider_user_id = ? AND $where ORDER BY id DESC LIMIT 30");
     $stmt->execute([$user['id']]);
-    api_ok(['bookings' => array_map('api_booking_public', $stmt->fetchAll(PDO::FETCH_ASSOC))]);
+    api_ok(array_map('api_booking_public', $stmt->fetchAll(PDO::FETCH_ASSOC)));
 }
 
 function api_rider_wallet(PDO $pdo): void {
@@ -1080,10 +1233,7 @@ function api_notif_device(PDO $pdo): void {
     $pdo->prepare('INSERT INTO device_tokens (user_id, platform, token) VALUES (?, ?, ?)
                    ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), platform = VALUES(platform), last_seen_at = NOW()')
         ->execute([$user['id'], $platform, $token]);
-    if (!headers_sent()) {
-        http_response_code(204);
-    }
-    exit;
+    api_ok(null);
 }
 
 function api_notif_list(PDO $pdo): void {
@@ -1105,7 +1255,7 @@ function api_notif_list(PDO $pdo): void {
         'createdAt' => (string) $n['created_at'],
     ], $rows);
     $cursor = count($rows) === 30 ? (string) $rows[count($rows) - 1]['id'] : null;
-    api_ok(['notifications' => $items], ['cursor' => $cursor]);
+    api_ok($items, ['cursor' => $cursor]);
 }
 
 function api_notif_read(PDO $pdo, int $id): void {
@@ -1305,10 +1455,23 @@ function api_riders_discover(PDO $pdo, int $bookingId): void {
     $dlat = (float) $booking['delivery_latitude'];
     $dlng = (float) $booking['delivery_longitude'];
 
+    // Surface whether pricing is currently a haversine approximation (Mapbox unreachable),
+    // exactly as bookings/ajax_fetch_riders.php does for the web rider cards.
+    $haversineUsed = false;
+    $fallbackFile = __DIR__ . '/../assets/pricing_fallback.json';
+    if (file_exists($fallbackFile)) {
+        try {
+            $fallbackData = json_decode(file_get_contents($fallbackFile), true);
+            $haversineUsed = is_array($fallbackData) && isset($fallbackData['ts']);
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+
     try {
         $metrics = cached_route_metrics($pdo, $plat, $plng, $dlat, $dlng);
     } catch (Throwable $e) {
-        api_ok(['pricingPending' => true, 'riders' => []]);
+        api_ok([], ['pricingPending' => true, 'haversineUsed' => $haversineUsed]);
     }
     $routeKm = (float) $metrics['distance_km'];
 
@@ -1336,6 +1499,9 @@ function api_riders_discover(PDO $pdo, int $bookingId): void {
         }
         $r['eta_minutes'] = $r['distance_km'] !== null ? estimated_eta_minutes((float) $r['distance_km'], $vt) : null;
         $stats = rider_delivery_stats($pdo, (int) $r['id']);
+        $r['avg_delivery_minutes'] = $stats['avg_actual_minutes'];
+        $r['avg_planned_minutes'] = $stats['avg_planned_minutes'];
+        $r['performance_ratio'] = $stats['ratio'];
         $r['score'] = rider_match_score($r['rating'] !== null ? (float) $r['rating'] : null, $stats['ratio']);
         $r['last_seen_seconds_ago'] = !empty($r['last_location_updated_at'])
             ? max(0, time() - strtotime((string) $r['last_location_updated_at'])) : null;
@@ -1355,8 +1521,11 @@ function api_riders_discover(PDO $pdo, int $bookingId): void {
         'suggestedFee' => $r['suggested_fee'],
         'pricingAvailable' => (bool) $r['pricing_available'],
         'lastSeenSecondsAgo' => $r['last_seen_seconds_ago'],
+        'avgDeliveryMinutes' => $r['avg_delivery_minutes'] !== null ? round((float) $r['avg_delivery_minutes'], 1) : null,
+        'avgPlannedMinutes' => $r['avg_planned_minutes'] !== null ? round((float) $r['avg_planned_minutes'], 1) : null,
+        'performanceRatio' => $r['performance_ratio'] !== null ? round((float) $r['performance_ratio'], 2) : null,
     ], $riders);
-    api_ok(['pricingPending' => false, 'riders' => $out]);
+    api_ok($out, ['pricingPending' => false, 'haversineUsed' => $haversineUsed]);
 }
 
 function MAX_RIDERS_RETURNED_API(): int { return 10; }
@@ -1366,10 +1535,10 @@ function MAX_RIDERS_RETURNED_API(): int { return 10; }
 function api_banks_list(PDO $pdo): void {
     api_require($pdo, ['rider']);
     $banks = function_exists('paystack_banks_list') ? paystack_banks_list($pdo) : [];
-    api_ok(['banks' => array_map(static fn(array $b): array => [
+    api_ok(array_map(static fn(array $b): array => [
         'code' => (string) $b['code'],
         'name' => (string) $b['name'],
-    ], $banks)]);
+    ], $banks));
 }
 
 function api_rider_profile_update(PDO $pdo): void {
@@ -1509,16 +1678,16 @@ function api_rider_bank_get(PDO $pdo): void {
     $stmt->execute([$user['id']]);
     $bank = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$bank) {
-        api_ok(['bank' => null]);
+        api_ok(null);
     }
     $acct = (string) $bank['account_number'];
-    api_ok(['bank' => [
+    api_ok([
         'bankName' => (string) $bank['bank_name'],
         'bankCode' => (string) ($bank['bank_code'] ?? ''),
         'accountNumberMasked' => strlen($acct) > 4 ? str_repeat('*', strlen($acct) - 4) . substr($acct, -4) : $acct,
         'accountName' => (string) $bank['account_name'],
         'verified' => !empty($bank['verified_at']),
-    ]]);
+    ]);
 }
 
 function api_rider_bank_verify(PDO $pdo): void {
@@ -1594,7 +1763,7 @@ function api_rider_withdrawals(PDO $pdo): void {
             'note' => $w['admin_note'] !== null ? (string) $w['admin_note'] : null,
         ];
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
-    api_ok(['withdrawals' => $items]);
+    api_ok($items);
 }
 
 function api_rider_withdraw(PDO $pdo): void {
@@ -1711,4 +1880,211 @@ function api_payment_verify(PDO $pdo): void {
     $stmt->execute([$reference]);
     $fresh = $stmt->fetch(PDO::FETCH_ASSOC);
     api_ok(['paymentStatus' => (string) ($fresh['payment_status'] ?? 'pending')]);
+}
+
+// ---- Admin (web-first; mirrors admin/*.php business rules exactly, wrapped for mobile) --------
+
+function api_admin_stats(PDO $pdo): void {
+    api_require($pdo, ['admin', 'super_admin']);
+    $activeStatuses = "'" . implode("','", RIDER_ACTIVE_BOOKING_STATUSES) . "'";
+    api_ok([
+        'totalUsers' => (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn(),
+        'totalSenders' => (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'sender'")->fetchColumn(),
+        'totalRiders' => (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'rider'")->fetchColumn(),
+        'activeBookings' => (int) $pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_status IN ($activeStatuses)")->fetchColumn(),
+        'pendingKyc' => (int) $pdo->query("SELECT COUNT(*) FROM rider_profiles WHERE kyc_status = 'pending'")->fetchColumn(),
+        'pendingWithdrawals' => (int) $pdo->query("SELECT COUNT(*) FROM withdrawal_requests WHERE status IN ('pending','processing')")->fetchColumn(),
+        'openComplaints' => (int) $pdo->query("SELECT COUNT(*) FROM booking_complaints WHERE status = 'open'")->fetchColumn(),
+    ]);
+}
+
+function api_admin_users(PDO $pdo): void {
+    api_require($pdo, ['admin', 'super_admin']);
+    $allowedRoles = ['sender', 'rider', 'admin', 'super_admin'];
+    $role = (string) ($_GET['role'] ?? '');
+    $sql = 'SELECT * FROM users WHERE 1=1';
+    $params = [];
+    if (in_array($role, $allowedRoles, true)) {
+        $sql .= ' AND role = ?';
+        $params[] = $role;
+    }
+    $sql .= ' ORDER BY id DESC LIMIT 200';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    api_ok(array_map('api_user_public', $stmt->fetchAll(PDO::FETCH_ASSOC)));
+}
+
+function api_admin_riders(PDO $pdo): void {
+    api_require($pdo, ['admin', 'super_admin']);
+    $kycStatus = (string) ($_GET['kyc_status'] ?? '');
+    $sql = "SELECT rp.*, u.full_name, u.email, u.phone, u.status AS account_status,
+                (SELECT COUNT(*) FROM bookings b WHERE b.selected_rider_user_id = u.id AND b.booking_status = 'delivered') AS completed_count,
+                (SELECT COUNT(*) FROM booking_complaints bc INNER JOIN bookings b2 ON b2.id = bc.booking_id WHERE b2.selected_rider_user_id = u.id) AS complaint_count
+            FROM rider_profiles rp INNER JOIN users u ON u.id = rp.user_id WHERE 1=1";
+    $params = [];
+    if (in_array($kycStatus, ['pending', 'approved', 'rejected'], true)) {
+        $sql .= ' AND rp.kyc_status = ?';
+        $params[] = $kycStatus;
+    }
+    $sql .= ' ORDER BY u.full_name ASC';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // Field naming here matches what AdminRidersScreen/AdminRiderVerificationScreen already read
+    // (snake_case identity fields; biodata/documents mirror api_rider_kyc_get()'s camelCase shape,
+    // which InfoRow's label formatter is written to expect).
+    api_ok(array_map(static fn(array $r): array => [
+        'id' => (int) $r['user_id'],
+        'full_name' => (string) $r['full_name'],
+        'email' => (string) $r['email'],
+        'phone' => $r['phone'] !== null ? (string) $r['phone'] : null,
+        'vehicle_type' => $r['vehicle_type'] !== null ? (string) $r['vehicle_type'] : null,
+        'rating' => $r['rating'] !== null ? (float) $r['rating'] : null,
+        'kyc_status' => (string) $r['kyc_status'],
+        'account_status' => (string) $r['account_status'],
+        'completed_count' => (int) $r['completed_count'],
+        'complaint_count' => (int) $r['complaint_count'],
+        'available_balance' => (float) rider_available_balance($pdo, (int) $r['user_id']),
+        'biodata' => [
+            'age' => isset($r['kyc_age']) && $r['kyc_age'] !== null ? (int) $r['kyc_age'] : null,
+            'stateOfOrigin' => $r['kyc_state_of_origin'] ?? null,
+            'lgaOfOrigin' => $r['kyc_lga_of_origin'] ?? null,
+            'hometown' => $r['kyc_hometown'] ?? null,
+            'nationalIdNumber' => $r['kyc_national_id_number'] ?? null,
+            'address' => $r['kyc_address'] ?? null,
+            'guarantorName' => $r['kyc_guarantor_name'] ?? null,
+            'guarantorPhone' => $r['kyc_guarantor_phone'] ?? null,
+            'guarantorAddress' => $r['kyc_guarantor_address'] ?? null,
+            'guarantorRelationship' => $r['kyc_guarantor_relationship'] ?? null,
+            'vehiclePlate' => $r['kyc_vehicle_plate'] ?? null,
+            'vehicleColor' => $r['kyc_vehicle_color'] ?? null,
+        ],
+        'documents' => [
+            'idDocument' => !empty($r['kyc_id_document_path']),
+            'proofOfAddress' => !empty($r['kyc_proof_of_address_path']),
+            'vehicleDocument' => !empty($r['kyc_vehicle_document_path']),
+            'drivingLicense' => !empty($r['kyc_driving_license_path']),
+        ],
+    ], $rows));
+}
+
+function api_admin_bookings(PDO $pdo): void {
+    api_require($pdo, ['admin', 'super_admin']);
+    $status = (string) ($_GET['status'] ?? '');
+    $sql = 'SELECT * FROM bookings WHERE 1=1';
+    $params = [];
+    if ($status !== '') {
+        $sql .= ' AND booking_status = ?';
+        $params[] = $status;
+    }
+    $sql .= ' ORDER BY id DESC LIMIT 100';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    api_ok(array_map('api_booking_public', $stmt->fetchAll(PDO::FETCH_ASSOC)));
+}
+
+function api_admin_rider_verify(PDO $pdo, int $userId): void {
+    // Mirrors admin/riders.php approve_kyc/reject_kyc.
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    $b = api_body();
+    $status = (string) ($b['status'] ?? '');
+    if (!in_array($status, ['approved', 'rejected'], true)) {
+        api_fail(400, 'VALIDATION', 'status must be approved or rejected.');
+    }
+    $note = trim((string) ($b['note'] ?? ''));
+    $stmt = $pdo->prepare('SELECT rp.user_id, u.full_name, u.email FROM rider_profiles rp INNER JOIN users u ON u.id = rp.user_id WHERE rp.user_id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $rider = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$rider) {
+        api_fail(404, 'NOT_FOUND', 'Rider not found.');
+    }
+    $pdo->prepare('UPDATE rider_profiles SET kyc_status = ?, kyc_note = ?, kyc_reviewed_by = ?, kyc_reviewed_at = NOW() WHERE user_id = ?')
+        ->execute([$status, $note !== '' ? $note : null, $admin['id'], $userId]);
+    if (function_exists('send_kyc_decision_email')) {
+        try { send_kyc_decision_email((string) $rider['email'], (string) $rider['full_name'], $status === 'approved', $note !== '' ? $note : null); } catch (Throwable $e) {}
+    }
+    if (function_exists('send_web_push')) {
+        try {
+            if ($status === 'approved') {
+                send_web_push($pdo, $userId, 'KYC approved', 'You can now go online and start accepting deliveries.', url_path('rider/'));
+            } else {
+                send_web_push($pdo, $userId, 'KYC not approved', 'Your registration documents were not approved. Check your email for details.', url_path('rider/kyc.php'));
+            }
+        } catch (Throwable $e) {}
+    }
+    log_event($pdo, 'kyc_' . $status, ucfirst($status) . ' KYC for ' . $rider['full_name'] . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId, ['note' => $note]);
+    api_ok(null);
+}
+
+function api_admin_user_suspend(PDO $pdo, int $userId): void {
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    if ($userId === (int) $admin['id']) {
+        api_fail(422, 'CANNOT_MODIFY_SELF', 'You cannot suspend your own account.');
+    }
+    $stmt = $pdo->prepare('SELECT id, full_name, role FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $target = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$target) {
+        api_fail(404, 'NOT_FOUND', 'User not found.');
+    }
+    if (in_array($target['role'], ['admin', 'super_admin'], true)) {
+        $activeAdmins = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','super_admin') AND status = 'active'")->fetchColumn();
+        if ($activeAdmins <= 1) {
+            api_fail(422, 'CANNOT_SUSPEND_LAST_ADMIN', 'You cannot suspend the only remaining admin.');
+        }
+    }
+    $pdo->prepare('UPDATE users SET status = "suspended" WHERE id = ?')->execute([$userId]);
+    $pdo->prepare('UPDATE rider_profiles SET availability_status = "offline" WHERE user_id = ?')->execute([$userId]);
+    $pdo->prepare('UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL')->execute([$userId]);
+    log_event($pdo, 'user_suspended', 'Suspended ' . $target['full_name'] . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId);
+    api_ok(null);
+}
+
+function api_admin_user_activate(PDO $pdo, int $userId): void {
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    $stmt = $pdo->prepare('SELECT id, full_name FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $target = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$target) {
+        api_fail(404, 'NOT_FOUND', 'User not found.');
+    }
+    $pdo->prepare('UPDATE users SET status = "active" WHERE id = ?')->execute([$userId]);
+    log_event($pdo, 'user_activated', 'Activated ' . $target['full_name'] . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId);
+    api_ok(null);
+}
+
+function api_admin_user_role(PDO $pdo, int $userId): void {
+    // Role changes are super-admin-only, exactly as admin/users.php enforces.
+    $admin = api_require($pdo, ['super_admin']);
+    $allowedRoles = ['sender', 'rider', 'admin', 'super_admin'];
+    $adminLevelRoles = ['admin', 'super_admin'];
+    $newRole = (string) (api_body()['role'] ?? '');
+    if (!in_array($newRole, $allowedRoles, true)) {
+        api_fail(400, 'VALIDATION', 'Invalid role.', ['role' => implode('|', $allowedRoles)]);
+    }
+    if ($userId === (int) $admin['id']) {
+        api_fail(422, 'CANNOT_MODIFY_SELF', 'You cannot change your own role.');
+    }
+    $stmt = $pdo->prepare('SELECT id, full_name, role FROM users WHERE id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $target = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$target) {
+        api_fail(404, 'NOT_FOUND', 'User not found.');
+    }
+    if (in_array($target['role'], $adminLevelRoles, true) && !in_array($newRole, $adminLevelRoles, true)) {
+        $activeAdmins = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','super_admin') AND status = 'active'")->fetchColumn();
+        if ($activeAdmins <= 1) {
+            api_fail(422, 'CANNOT_DEMOTE_LAST_ADMIN', 'You cannot demote the only remaining admin.');
+        }
+    }
+    $pdo->prepare('UPDATE users SET role = ? WHERE id = ?')->execute([$newRole, $userId]);
+    if ($newRole === 'rider') {
+        $stmt = $pdo->prepare('SELECT id FROM rider_profiles WHERE user_id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        if (!$stmt->fetch()) {
+            $pdo->prepare('INSERT INTO rider_profiles (user_id, kyc_status) VALUES (?, "pending")')->execute([$userId]);
+        }
+    }
+    log_event($pdo, 'role_changed', 'Changed role of ' . $target['full_name'] . ' from ' . $target['role'] . ' to ' . $newRole . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId, ['from' => $target['role'], 'to' => $newRole]);
+    api_ok(null);
 }

@@ -69,66 +69,8 @@ function api_register(PDO $pdo): void {
     ], [], 201);
 }
 
-// ---- Auth: login / refresh / logout ----------------------------------------------------------
-
-function api_login(PDO $pdo): void {
-    // Mirrors login.php: same dual rate limit (by IP and by email), same generic invalid-credential
-    // message, same active-status gate — then issues a bearer token pair instead of a session.
-    $b = api_body();
-    $email = strtolower(trim((string) ($b['email'] ?? '')));
-    $password = (string) ($b['password'] ?? '');
-    $ip = client_ip();
-
-    if (is_rate_limited($pdo, 'login_ip', $ip, 10, 15) || ($email !== '' && is_rate_limited($pdo, 'login_email', $email, 5, 15))) {
-        api_fail(429, 'TOO_MANY_ATTEMPTS', 'Too many attempts. Please try again later.');
-    }
-
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
-    $stmt->execute([$email]);
-    $u = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$u || !password_verify($password, $u['password_hash'])) {
-        record_rate_limit_attempt($pdo, 'login_ip', $ip);
-        if ($email !== '') {
-            record_rate_limit_attempt($pdo, 'login_email', $email);
-        }
-        api_fail(401, 'INVALID_CREDENTIALS', 'Incorrect email or password.');
-    }
-    if (($u['status'] ?? '') !== 'active') {
-        api_fail(403, 'ACCOUNT_INACTIVE', 'This account is not active. Please contact support.');
-    }
-
-    $platform = isset($b['platform']) ? substr((string) $b['platform'], 0, 20) : null;
-    $device = isset($b['deviceLabel']) ? substr((string) $b['deviceLabel'], 0, 120) : null;
-    $tokens = api_issue_tokens($pdo, (int) $u['id'], $platform, $device);
-    api_ok([
-        'accessToken' => $tokens['accessToken'],
-        'refreshToken' => $tokens['refreshToken'],
-        'expiresInSeconds' => $tokens['expiresInSeconds'],
-        'user' => api_user_public($u),
-    ]);
-}
-
-function api_auth_refresh(PDO $pdo): void {
-    $refreshToken = (string) (api_body()['refreshToken'] ?? '');
-    if ($refreshToken === '') {
-        api_fail(400, 'VALIDATION', 'A refresh token is required.');
-    }
-    $result = api_refresh_tokens($pdo, $refreshToken);
-    if ($result === null) {
-        api_fail(401, 'INVALID_REFRESH_TOKEN', 'Your session has expired. Please sign in again.');
-    }
-    api_ok(['accessToken' => $result['accessToken'], 'expiresInSeconds' => $result['expiresInSeconds']]);
-}
-
-function api_auth_logout(PDO $pdo): void {
-    $token = api_bearer_token();
-    api_require($pdo); // must present a currently-valid access token to revoke its own device family
-    if ($token !== null) {
-        api_revoke_by_access($pdo, $token);
-    }
-    api_ok(null);
-}
+// ---- Auth: login / refresh / logout are defined inline in api/index.php -----------------------
+// (kept there, not here, to match the deployed front controller; do not redefine them here).
 
 // ---- Auth: Google sign-in (native ID token → verify server-side) -----------------------------
 
@@ -257,60 +199,8 @@ function api_profile_complete(PDO $pdo): void {
     api_ok(api_user_public($stmt->fetch(PDO::FETCH_ASSOC)));
 }
 
-// ---- Coordinate validation (shared by geo/route, pricing/estimate, booking create/update) ----
-
-/**
- * Validate and extract [pickupLat, pickupLng, dropoffLat, dropoffLng] from pickup/dropoff arrays
- * (each expected to carry numeric 'lat'/'lng'). Returns null if either point is missing or falls
- * outside Nigeria's bounding box (same range already enforced for delivery-address edits).
- */
-function api_valid_coords($pickup, $dropoff): ?array {
-    if (!is_array($pickup) || !is_array($dropoff)) {
-        return null;
-    }
-    $plat = isset($pickup['lat']) && is_numeric($pickup['lat']) ? (float) $pickup['lat'] : null;
-    $plng = isset($pickup['lng']) && is_numeric($pickup['lng']) ? (float) $pickup['lng'] : null;
-    $dlat = isset($dropoff['lat']) && is_numeric($dropoff['lat']) ? (float) $dropoff['lat'] : null;
-    $dlng = isset($dropoff['lng']) && is_numeric($dropoff['lng']) ? (float) $dropoff['lng'] : null;
-    if ($plat === null || $plng === null || $dlat === null || $dlng === null) {
-        return null;
-    }
-    foreach ([[$plat, $plng], [$dlat, $dlng]] as [$lat, $lng]) {
-        if ($lat < 3 || $lat > 15 || $lng < 2 || $lng > 15) {
-            return null;
-        }
-    }
-    return [$plat, $plng, $dlat, $dlng];
-}
-
-// ---- Pricing estimate (backend-computed; mirrors bookings/ajax_estimate_pricing.php) ----------
-
-function api_pricing_estimate(PDO $pdo): void {
-    api_require($pdo, ['sender']);
-    $b = api_body();
-    $vehicleType = (string) ($b['vehicleType'] ?? '');
-    if (!in_array($vehicleType, ['bike', 'car', 'van'], true)) {
-        api_fail(400, 'VALIDATION', 'Choose a vehicle type.', ['vehicleType' => 'bike, car or van']);
-    }
-    $coords = api_valid_coords($b['pickup'] ?? null, $b['dropoff'] ?? null);
-    if ($coords === null) {
-        api_fail(400, 'VALIDATION', 'Valid pickup and drop-off coordinates are required.');
-    }
-    [$plat, $plng, $dlat, $dlng] = $coords;
-    try {
-        $m = cached_route_metrics($pdo, $plat, $plng, $dlat, $dlng);
-    } catch (NoRouteFoundException $e) {
-        api_fail(422, 'NO_ROUTE', 'No route could be found between these locations. Please check the addresses.');
-    } catch (Throwable $e) {
-        api_fail(503, 'PRICING_UNAVAILABLE', 'Unable to calculate pricing right now. Please try again shortly.');
-    }
-    $priced = calculate_delivery_price($pdo, (float) $m['distance_km'], $vehicleType);
-    api_ok([
-        'distanceKm' => round((float) $m['distance_km'], 2),
-        'durationMinutes' => (int) round((float) ($m['duration_min'] ?? 0)),
-        'total' => (float) $priced['total'],
-    ]);
-}
+// ---- Coordinate validation + pricing estimate are defined inline in api/index.php --------------
+// (api_valid_coords() and api_pricing_estimate() live there, not here; do not redefine them here).
 
 // ---- Geo: route (backend Mapbox; secret token never leaves the server) -----------------------
 
@@ -334,22 +224,7 @@ function api_geo_route(PDO $pdo): void {
 }
 
 // ---- Sender: bookings -----------------------------------------------------------------------
-
-function api_list_bookings(PDO $pdo): void {
-    // Sender's bookings grouped exactly like bookings/index.php (load_sender_bookings), so the
-    // mobile lists can never drift from what the web sender hub shows for the same account.
-    $user = api_require($pdo, ['sender']);
-    $filter = (string) ($_GET['filter'] ?? 'active');
-    $grouped = load_sender_bookings($pdo, (int) $user['id']);
-    $rows = $grouped[$filter] ?? $grouped['active'];
-
-    $before = isset($_GET['before']) ? (int) $_GET['before'] : 0;
-    if ($before > 0) {
-        $rows = array_values(array_filter($rows, static fn(array $r): bool => (int) $r['id'] < $before));
-    }
-    $rows = array_slice($rows, 0, 30);
-    api_ok(array_map('api_booking_public', $rows));
-}
+// (api_list_bookings() — GET bookings — is defined inline in api/index.php, not here.)
 
 function api_booking_create(PDO $pdo): void {
     $user = api_require($pdo, ['sender']);

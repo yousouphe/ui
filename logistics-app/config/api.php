@@ -238,6 +238,8 @@ function api_booking_public(array $b): array {
             'lng' => $b['delivery_longitude'] !== null ? (float) $b['delivery_longitude'] : null,
         ],
         'agreedCost' => $b['agreed_cost'] !== null ? (float) $b['agreed_cost'] : null,
+        'itemName' => (string) ($b['item_name'] ?? 'Delivery'),
+        'itemCategory' => (string) ($b['item_category'] ?? 'general'),
         'selectedRiderUserId' => $b['selected_rider_user_id'] !== null ? (int) $b['selected_rider_user_id'] : null,
         'createdAt' => (string) $b['created_at'],
         'updatedAt' => (string) $b['updated_at'],

@@ -1938,6 +1938,14 @@ function api_payment_init(PDO $pdo): void {
         'amount' => (int) round(((float) $booking['agreed_cost']) * 100),
         'reference' => $reference,
         'metadata' => ['booking_id' => (int) $booking['id'], 'channel' => 'mobile'],
+        // Without this, Paystack shows its own generic "payment complete" page and never
+        // navigates anywhere - the WebView's shouldOverrideUrlLoading() (which watches for
+        // "callback"/"success" in the URL to know the payment finished) never fires, so the app
+        // never calls payments/verify and the booking is left "unpaid" even though the charge
+        // went through. Same callback URL the web flow uses (payments/initialize.php,
+        // payments/start.php) - the WebView intercepts navigation to it before it ever loads, so
+        // this page's own finalize_booking_payment() call is a no-op fallback, not the primary path.
+        'callback_url' => url_path('payments/callback.php'),
     ]);
     if (!($res['ok'] ?? false)) {
         // paystack_request() returns its success flag as 'ok', not 'status' - this check was

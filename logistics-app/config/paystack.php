@@ -281,6 +281,31 @@ function finalize_booking_payment(PDO $pdo, string $reference): array {
     return ['ok' => true, 'already_paid' => false, 'booking_id' => (int)$payment['booking_id'], 'message' => 'Payment verified successfully.'];
 }
 
+// Reconciles ANY reference in our "AIKE-{booking_code}-{8 hex chars}" format, not just whichever
+// one currently happens to be sitting on bookings.paystack_reference. That column gets
+// overwritten on every payments/init call, so a reference from an earlier attempt that actually
+// succeeded on Paystack's side - but got superseded by a later retry before ever being
+// reconciled - has no other record of itself anywhere in our DB. If finalize_booking_payment()
+// can't find a booking_payments row for the reference (either it predates the fix that started
+// inserting one, or it's exactly this orphaned-earlier-attempt case), this recovers the booking
+// it belongs to straight from the reference string itself and backfills the row, then retries.
+function paystack_reconcile_reference(PDO $pdo, string $reference): array {
+    $result = finalize_booking_payment($pdo, $reference);
+    if (!$result['ok'] && !$result['already_paid'] && $result['booking_id'] === null
+        && preg_match('/^AIKE-(.+)-[0-9a-f]{8}$/', $reference, $m)) {
+        $stmt = $pdo->prepare('SELECT id, sender_user_id, agreed_cost FROM bookings WHERE booking_code = ? LIMIT 1');
+        $stmt->execute([$m[1]]);
+        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($booking) {
+            $pdo->prepare("INSERT IGNORE INTO booking_payments (booking_id, user_id, amount, currency, reference, access_code, status)
+                           VALUES (?, ?, ?, 'NGN', ?, NULL, 'initialized')")
+                ->execute([$booking['id'], $booking['sender_user_id'], (float) $booking['agreed_cost'], $reference]);
+            $result = finalize_booking_payment($pdo, $reference);
+        }
+    }
+    return $result;
+}
+
 // Full or partial refund of an already-paid transaction. Paystack processes refunds
 // asynchronously - a successful call here means the refund was accepted, not that funds
 // have landed back with the customer yet.

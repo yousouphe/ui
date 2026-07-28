@@ -34,7 +34,11 @@ if (!paystack_configured()) {
 // The webhook (payments/webhook.php) may already have confirmed this payment by the time
 // the sender's browser makes it back here - finalize_booking_payment() is idempotent either
 // way, so whichever of the two gets there first does the work and the other is a no-op.
-$result = finalize_booking_payment($pdo, $reference);
+// paystack_reconcile_reference() also recovers a reference with no booking_payments row yet
+// (a mobile-initiated payment from before that fix, or an earlier attempt that succeeded but
+// got superseded by a later retry before ever being reconciled) - this is the manual recovery
+// path for exactly that: visiting this URL with the reference found in the Paystack dashboard.
+$result = paystack_reconcile_reference($pdo, $reference);
 
 if (!$result['ok'] && !$result['already_paid']) {
     flash('error', $result['message']);

@@ -30,9 +30,10 @@ $eventType = (string) ($event['event'] ?? '');
 $reference = trim((string) ($event['data']['reference'] ?? ''));
 
 if ($eventType === 'charge.success' && $reference !== '') {
-    // finalize_booking_payment() re-verifies with Paystack directly rather than trusting
-    // this payload, and is a safe no-op if payments/callback.php already confirmed it.
-    finalize_booking_payment($pdo, $reference);
+    // paystack_reconcile_reference() re-verifies with Paystack directly rather than trusting
+    // this payload, is a safe no-op if payments/callback.php already confirmed it, and recovers
+    // a mobile-initiated reference with no booking_payments row yet.
+    paystack_reconcile_reference($pdo, $reference);
 } elseif (in_array($eventType, ['transfer.success', 'transfer.failed', 'transfer.reversed'], true) && $reference !== '') {
     // Rider withdrawal payouts - without this, a withdrawal an admin approved never leaves
     // "Awaiting Paystack confirmation" until someone manually checks the Paystack dashboard

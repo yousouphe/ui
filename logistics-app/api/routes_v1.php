@@ -1931,26 +1931,19 @@ function api_payment_init(PDO $pdo): void {
     // on Paystack but still shows unpaid" case automatically (just reopening payment for that
     // booking heals it) and guarantees a retry can never double-charge the sender for something
     // that already went through.
-    if (!empty($booking['paystack_reference']) && function_exists('finalize_booking_payment')) {
+    if (!empty($booking['paystack_reference']) && function_exists('paystack_reconcile_reference')) {
         $existingRef = (string) $booking['paystack_reference'];
-        $existing = finalize_booking_payment($pdo, $existingRef);
-        // "Payment record not found" specifically means this reference predates this fix - the
-        // original mobile init never inserted a booking_payments row for finalize_booking_payment
-        // to find (see the INSERT added below). Backfill that row once from what we already know
-        // about the booking, then retry the same verification - this is what actually reconciles
-        // an already-stuck legacy transaction instead of leaving it permanently unrecoverable.
-        if (!$existing['ok'] && !$existing['already_paid'] && $existing['booking_id'] === null) {
-            $pdo->prepare("INSERT IGNORE INTO booking_payments (booking_id, user_id, amount, currency, reference, access_code, status)
-                           VALUES (?, ?, ?, 'NGN', ?, NULL, 'initialized')")
-                ->execute([$booking['id'], $user['id'], (float) $booking['agreed_cost'], $existingRef]);
-            $existing = finalize_booking_payment($pdo, $existingRef);
-        }
+        $existing = paystack_reconcile_reference($pdo, $existingRef);
         if ($existing['ok'] || $existing['already_paid']) {
             api_ok(['alreadyPaid' => true, 'reference' => $existingRef]);
         }
         // Falling through to create a fresh charge below - log exactly why the old reference
-        // couldn't be reconciled (previously discarded silently), since "still shows unpaid after
-        // retrying" is otherwise undiagnosable without direct DB/Paystack dashboard access.
+        // couldn't be reconciled, since "still shows unpaid after retrying" is otherwise
+        // undiagnosable without direct DB/Paystack dashboard access. Note this only ever checks
+        // bookings.paystack_reference (the *last* reference generated for this booking) - an
+        // earlier attempt that actually succeeded but got superseded by a later retry before
+        // ever being reconciled has no other record of itself here; recovering that needs the
+        // exact reference from the Paystack dashboard, reconciled via payments/callback.php.
         error_log('payments/init self-heal could not reconcile ' . $existingRef . ' for booking ' . $booking['id'] . ': ' . ($existing['message'] ?? 'unknown'));
     }
     if ($booking['agreed_cost'] === null || (float) $booking['agreed_cost'] <= 0) {
@@ -2032,8 +2025,8 @@ function api_payment_verify(PDO $pdo): void {
     if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
         api_fail(404, 'NOT_FOUND', 'Payment not found.');
     }
-    if (function_exists('finalize_booking_payment')) {
-        try { finalize_booking_payment($pdo, $reference); } catch (Throwable $e) { error_log('api verify: ' . $e->getMessage()); }
+    if (function_exists('paystack_reconcile_reference')) {
+        try { paystack_reconcile_reference($pdo, $reference); } catch (Throwable $e) { error_log('api verify: ' . $e->getMessage()); }
     }
     $stmt->execute([$reference]);
     $fresh = $stmt->fetch(PDO::FETCH_ASSOC);

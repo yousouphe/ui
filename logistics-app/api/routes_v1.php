@@ -1915,7 +1915,7 @@ function api_payment_init(PDO $pdo): void {
     $user = api_require($pdo, ['sender']);
     api_idempotency_replay($pdo, (int) $user['id'], 'POST payments/init');
     $bookingId = (int) (api_body()['bookingId'] ?? 0);
-    $stmt = $pdo->prepare('SELECT id, sender_user_id, agreed_cost, payment_status, booking_code, booking_status FROM bookings WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, sender_user_id, agreed_cost, payment_status, booking_code, booking_status, paystack_reference FROM bookings WHERE id = ? LIMIT 1');
     $stmt->execute([$bookingId]);
     $booking = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$booking || (int) $booking['sender_user_id'] !== (int) $user['id']) {
@@ -1923,6 +1923,31 @@ function api_payment_init(PDO $pdo): void {
     }
     if (($booking['payment_status'] ?? '') === 'paid') {
         api_fail(409, 'ALREADY_PAID', 'This booking is already paid.');
+    }
+    // Self-heal before ever creating a new charge: a previous attempt on this booking may have
+    // already succeeded on Paystack's side without ever being reconciled locally (the WebView's
+    // redirect detection can miss the callback, or the app could have been killed mid-flow) -
+    // re-verify that old reference directly with Paystack first. This both fixes the "confirmed
+    // on Paystack but still shows unpaid" case automatically (just reopening payment for that
+    // booking heals it) and guarantees a retry can never double-charge the sender for something
+    // that already went through.
+    if (!empty($booking['paystack_reference']) && function_exists('finalize_booking_payment')) {
+        $existingRef = (string) $booking['paystack_reference'];
+        $existing = finalize_booking_payment($pdo, $existingRef);
+        // "Payment record not found" specifically means this reference predates this fix - the
+        // original mobile init never inserted a booking_payments row for finalize_booking_payment
+        // to find (see the INSERT added below). Backfill that row once from what we already know
+        // about the booking, then retry the same verification - this is what actually reconciles
+        // an already-stuck legacy transaction instead of leaving it permanently unrecoverable.
+        if (!$existing['ok'] && !$existing['already_paid'] && $existing['booking_id'] === null) {
+            $pdo->prepare("INSERT IGNORE INTO booking_payments (booking_id, user_id, amount, currency, reference, access_code, status)
+                           VALUES (?, ?, ?, 'NGN', ?, NULL, 'initialized')")
+                ->execute([$booking['id'], $user['id'], (float) $booking['agreed_cost'], $existingRef]);
+            $existing = finalize_booking_payment($pdo, $existingRef);
+        }
+        if ($existing['ok'] || $existing['already_paid']) {
+            api_ok(['alreadyPaid' => true, 'reference' => $existingRef]);
+        }
     }
     if ($booking['agreed_cost'] === null || (float) $booking['agreed_cost'] <= 0) {
         api_fail(422, 'NO_PRICE', 'This booking does not have a confirmed price yet.');
@@ -1957,8 +1982,26 @@ function api_payment_init(PDO $pdo): void {
         api_fail(502, 'PAYMENT_INIT_FAILED', 'Could not start the payment. Please try again.');
     }
     $data = $res['data'] ?? [];
+    $accessCode = $data['access_code'] ?? null;
+    // finalize_booking_payment() (called from both payments/verify and the webhook) looks the
+    // payment up by joining booking_payments on its reference - mobile never actually inserted
+    // that row, only updated bookings.paystack_reference. That meant even a correctly-detected
+    // WebView success still could never be reconciled: finalize_booking_payment() would find no
+    // matching booking_payments row and silently return "Payment record not found", leaving the
+    // booking "unpaid" forever despite the charge having gone through. Same insert the web flow
+    // already does (payments/initialize.php).
+    $wasInTransaction = $pdo->inTransaction();
+    if (!$wasInTransaction) {
+        $pdo->beginTransaction();
+    }
+    $pdo->prepare("INSERT INTO booking_payments (booking_id, user_id, amount, currency, reference, access_code, status)
+                   VALUES (?, ?, ?, 'NGN', ?, ?, 'initialized')")
+        ->execute([$booking['id'], $user['id'], (float) $booking['agreed_cost'], $reference, $accessCode]);
     $pdo->prepare('UPDATE bookings SET paystack_reference = ?, paystack_access_code = ?, payment_status = "pending" WHERE id = ?')
-        ->execute([$reference, $data['access_code'] ?? null, $booking['id']]);
+        ->execute([$reference, $accessCode, $booking['id']]);
+    if (!$wasInTransaction) {
+        $pdo->commit();
+    }
     $env = ['ok' => true, 'data' => [
         'reference' => $reference,
         'accessCode' => $data['access_code'] ?? null,

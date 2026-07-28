@@ -1044,6 +1044,13 @@ function api_rider_confirm_payment(PDO $pdo, int $id): void {
     api_ok((float) $payout);
 }
 
+// How close (metres) a rider's last reported GPS fix must be to the relevant address before
+// arrived_at_pickup/delivered are accepted - generous enough for GPS drift/multi-storey buildings/
+// street-side parking, tight enough that "anywhere in the city" can't pass.
+const RIDER_TRANSITION_PROXIMITY_METERS = 300;
+// A location fix older than this is treated as not knowing where the rider actually is right now.
+const RIDER_TRANSITION_LOCATION_MAX_AGE_SECONDS = 300;
+
 function api_rider_transition(PDO $pdo, int $id): void {
     $user = api_require($pdo, ['rider']);
     $to = (string) (api_body()['to'] ?? '');
@@ -1056,7 +1063,9 @@ function api_rider_transition(PDO $pdo, int $id): void {
     if (!isset($map[$to])) {
         api_fail(400, 'INVALID_ACTION', 'Unknown transition.');
     }
-    $stmt = $pdo->prepare('SELECT id, booking_status, sender_user_id, booking_code FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, booking_status, sender_user_id, booking_code, sender_handover_confirmed,
+                                   pickup_latitude, pickup_longitude, delivery_latitude, delivery_longitude
+                            FROM bookings WHERE id = ? AND selected_rider_user_id = ? LIMIT 1');
     $stmt->execute([$id, $user['id']]);
     $booking = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$booking) {
@@ -1065,6 +1074,44 @@ function api_rider_transition(PDO $pdo, int $id): void {
     if (!in_array($booking['booking_status'], $map[$to], true)) {
         api_fail(422, 'INVALID_TRANSITION', 'Booking is not in the expected state for this action.');
     }
+
+    // The rider can only mark the package received once the sender has confirmed the handover
+    // from their own side (TrackingScreen's "Confirm Item Handed to Rider") - previously a rider
+    // tapping this button alone, with no corroboration from the other party, was enough to
+    // advance the whole delivery with no real handover having necessarily happened.
+    if ($to === 'package_received' && (int) ($booking['sender_handover_confirmed'] ?? 0) !== 1) {
+        api_fail(409, 'HANDOVER_NOT_CONFIRMED', 'Waiting for the sender to confirm the item was handed over.');
+    }
+
+    // Arrival and delivery both require the rider's last reported GPS fix to actually be near the
+    // relevant address - previously a rider could tap "Arrived at pickup" or "Mark as delivered"
+    // from anywhere with no location check at all.
+    if ($to === 'arrived_at_pickup' || $to === 'delivered') {
+        $targetLat = $to === 'arrived_at_pickup' ? $booking['pickup_latitude'] : $booking['delivery_latitude'];
+        $targetLng = $to === 'arrived_at_pickup' ? $booking['pickup_longitude'] : $booking['delivery_longitude'];
+        // Fail open if this booking has no geocoded coordinates for the leg in question - a data
+        // gap shouldn't permanently strand a delivery with no way to progress.
+        if ($targetLat !== null && $targetLng !== null) {
+            $stmt = $pdo->prepare('SELECT last_latitude, last_longitude, last_location_updated_at FROM rider_profiles WHERE user_id = ? LIMIT 1');
+            $stmt->execute([$user['id']]);
+            $rp = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$rp || $rp['last_latitude'] === null || $rp['last_longitude'] === null) {
+                api_fail(409, 'LOCATION_REQUIRED', 'Turn on location sharing to confirm you are at the right place.');
+            }
+            $ageSeconds = !empty($rp['last_location_updated_at'])
+                ? (time() - strtotime((string) $rp['last_location_updated_at']))
+                : PHP_INT_MAX;
+            if ($ageSeconds > RIDER_TRANSITION_LOCATION_MAX_AGE_SECONDS) {
+                api_fail(409, 'LOCATION_STALE', "Your location hasn't updated recently. Move somewhere with better signal and try again.");
+            }
+            $distance = api_haversine_m((float) $rp['last_latitude'], (float) $rp['last_longitude'], (float) $targetLat, (float) $targetLng);
+            if ($distance > RIDER_TRANSITION_PROXIMITY_METERS) {
+                $legLabel = $to === 'arrived_at_pickup' ? 'pickup' : 'delivery';
+                api_fail(409, 'TOO_FAR', "You need to be within " . RIDER_TRANSITION_PROXIMITY_METERS . "m of the $legLabel location to do this.");
+            }
+        }
+    }
+
     if ($to === 'delivered') {
         $pdo->prepare('UPDATE bookings SET booking_status = ?, updated_at = NOW(),
                         actual_duration_minutes = CASE WHEN matched_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, matched_at, NOW()) ELSE actual_duration_minutes END
@@ -1095,18 +1142,63 @@ function api_rider_bookings(PDO $pdo): void {
         $where = "booking_status = 'cancelled'";
     } elseif ($filter === 'pending') {
         $where = "booking_status = 'matched'";
+    } elseif ($filter === 'history') {
+        // Trip-history view: every trip that reached a final state, newest first, with optional
+        // date-range narrowing below - unlike the other buckets this isn't meant to auto-refresh
+        // on a dashboard, so it takes a wider window and real from/to filters.
+        $where = "booking_status IN ('delivered','cancelled')";
     } else { // active
         $where = "booking_status IN ('accepted','arrived_at_pickup','package_received','in_transit')";
     }
-    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE selected_rider_user_id = ? AND $where ORDER BY id DESC LIMIT 30");
-    $stmt->execute([$user['id']]);
+    $params = [$user['id']];
+    if ($filter === 'history') {
+        $from = trim((string) ($_GET['from'] ?? ''));
+        $to = trim((string) ($_GET['to'] ?? ''));
+        if ($from !== '') {
+            $where .= ' AND created_at >= ?';
+            $params[] = $from . ' 00:00:00';
+        }
+        if ($to !== '') {
+            $where .= ' AND created_at <= ?';
+            $params[] = $to . ' 23:59:59';
+        }
+        $limit = 100;
+    } else {
+        $limit = 30;
+    }
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE selected_rider_user_id = ? AND $where ORDER BY id DESC LIMIT $limit");
+    $stmt->execute($params);
     api_ok(array_map('api_booking_public', $stmt->fetchAll(PDO::FETCH_ASSOC)));
+}
+
+function api_rider_booking_get(PDO $pdo, int $id): void {
+    // Rider-scoped single-booking detail - the sender-only api_booking_get() above must never be
+    // reused here (that was the cause of a 403 on every rider "Delivery Details" open: a rider is
+    // never the sender, so the ownership check there always failed).
+    $user = api_require($pdo, ['rider']);
+    $booking = api_fetch_booking($pdo, $id);
+    if (!$booking || (int) $booking['selected_rider_user_id'] !== (int) $user['id']) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+    api_ok(api_booking_public($booking));
 }
 
 function api_rider_wallet(PDO $pdo): void {
     $user = api_require($pdo, ['rider']);
     $available = rider_available_balance($pdo, (int) $user['id']);
     $balance = rider_wallet_balance($pdo, (int) $user['id']);
+
+    // Same two queries as rider/wallet.php - the settled ledger sum above conflates earnings and
+    // withdrawals into one net figure, which is why the app never had an actual "earnings" number
+    // to show separately from what had already been paid out.
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM wallet_transactions WHERE rider_user_id = ? AND type = 'earning'");
+    $stmt->execute([$user['id']]);
+    $totalEarned = (float) $stmt->fetchColumn();
+
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(-amount), 0) FROM wallet_transactions WHERE rider_user_id = ? AND type = 'withdrawal'");
+    $stmt->execute([$user['id']]);
+    $totalWithdrawn = (float) $stmt->fetchColumn();
+
     $stmt = $pdo->prepare('SELECT type, amount, description, created_at FROM wallet_transactions WHERE rider_user_id = ? ORDER BY id DESC LIMIT 50');
     $stmt->execute([$user['id']]);
     $ledger = array_map(static fn(array $t): array => [
@@ -1115,7 +1207,55 @@ function api_rider_wallet(PDO $pdo): void {
         'description' => (string) ($t['description'] ?? ''),
         'createdAt' => (string) $t['created_at'],
     ], $stmt->fetchAll(PDO::FETCH_ASSOC));
-    api_ok(['balance' => (float) $balance, 'availableBalance' => (float) $available, 'ledger' => $ledger]);
+    api_ok([
+        'balance' => (float) $balance,
+        'availableBalance' => (float) $available,
+        'totalEarned' => $totalEarned,
+        'totalWithdrawn' => $totalWithdrawn,
+        'ledger' => $ledger,
+    ]);
+}
+
+// ---- Rider training (mobile-only: web's rider/training.php has no completion tracking) ------
+
+function api_rider_training_sections(): array {
+    // Mirrors rider/training.php's six static sections exactly (same title/items lang keys), so
+    // copy stays in sync with the web version if either is edited.
+    return [
+        ['key' => 'professionalism', 'icon' => 'handshake', 'titleKey' => 'training.section.professionalism_title', 'itemsKey' => 'training.section.professionalism_items'],
+        ['key' => 'communication', 'icon' => 'comments', 'titleKey' => 'training.section.communication_title', 'itemsKey' => 'training.section.communication_items'],
+        ['key' => 'handling', 'icon' => 'box', 'titleKey' => 'training.section.handling_title', 'itemsKey' => 'training.section.handling_items'],
+        ['key' => 'safety', 'icon' => 'shield-halved', 'titleKey' => 'training.section.safety_title', 'itemsKey' => 'training.section.safety_items'],
+        ['key' => 'rating', 'icon' => 'star', 'titleKey' => 'training.section.rating_title', 'itemsKey' => 'training.section.rating_items'],
+        ['key' => 'conduct', 'icon' => 'circle-exclamation', 'titleKey' => 'training.section.conduct_title', 'itemsKey' => 'training.section.conduct_items'],
+    ];
+}
+
+function api_rider_training_get(PDO $pdo): void {
+    $user = api_require($pdo, ['rider']);
+    $sections = array_map(static fn(array $s): array => [
+        'key' => $s['key'],
+        'icon' => $s['icon'],
+        'title' => t($s['titleKey']),
+        'items' => array_values(array_map('trim', explode('|', t($s['itemsKey'])))),
+    ], api_rider_training_sections());
+
+    $stmt = $pdo->prepare('SELECT training_completed_at FROM rider_profiles WHERE user_id = ? LIMIT 1');
+    $stmt->execute([$user['id']]);
+    $completedAt = $stmt->fetchColumn();
+
+    api_ok([
+        'sections' => $sections,
+        'completed' => !empty($completedAt),
+        'completedAt' => !empty($completedAt) ? (string) $completedAt : null,
+    ]);
+}
+
+function api_rider_training_complete(PDO $pdo): void {
+    $user = api_require($pdo, ['rider']);
+    $pdo->prepare('UPDATE rider_profiles SET training_completed_at = NOW() WHERE user_id = ?')
+        ->execute([$user['id']]);
+    api_ok(['completed' => true, 'completedAt' => date('Y-m-d H:i:s')]);
 }
 
 // ---- Notifications --------------------------------------------------------------------------
@@ -1799,7 +1939,13 @@ function api_payment_init(PDO $pdo): void {
         'reference' => $reference,
         'metadata' => ['booking_id' => (int) $booking['id'], 'channel' => 'mobile'],
     ]);
-    if (!($res['status'] ?? false)) {
+    if (!($res['ok'] ?? false)) {
+        // paystack_request() returns its success flag as 'ok', not 'status' - this check was
+        // reading a key that never exists in that return shape, so it failed unconditionally on
+        // every single mobile payment attempt regardless of whether Paystack actually succeeded.
+        // Log the real reason (never shown to the user - could be a stale key, a Paystack-side
+        // rejection, or a network failure to api.paystack.co) so this doesn't stay a black box.
+        error_log('payments/init failed for booking ' . $booking['id'] . ': ' . ($res['message'] ?? 'unknown') . ' (http ' . ($res['http_code'] ?? 0) . ')');
         api_fail(502, 'PAYMENT_INIT_FAILED', 'Could not start the payment. Please try again.');
     }
     $data = $res['data'] ?? [];

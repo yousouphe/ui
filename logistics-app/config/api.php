@@ -243,5 +243,7 @@ function api_booking_public(array $b): array {
         'selectedRiderUserId' => $b['selected_rider_user_id'] !== null ? (int) $b['selected_rider_user_id'] : null,
         'createdAt' => (string) $b['created_at'],
         'updatedAt' => (string) $b['updated_at'],
+        'matchedAt' => !empty($b['matched_at']) ? (string) $b['matched_at'] : null,
+        'senderHandoverConfirmed' => (int) ($b['sender_handover_confirmed'] ?? 0) === 1,
     ];
 }

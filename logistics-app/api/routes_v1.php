@@ -1948,6 +1948,10 @@ function api_payment_init(PDO $pdo): void {
         if ($existing['ok'] || $existing['already_paid']) {
             api_ok(['alreadyPaid' => true, 'reference' => $existingRef]);
         }
+        // Falling through to create a fresh charge below - log exactly why the old reference
+        // couldn't be reconciled (previously discarded silently), since "still shows unpaid after
+        // retrying" is otherwise undiagnosable without direct DB/Paystack dashboard access.
+        error_log('payments/init self-heal could not reconcile ' . $existingRef . ' for booking ' . $booking['id'] . ': ' . ($existing['message'] ?? 'unknown'));
     }
     if ($booking['agreed_cost'] === null || (float) $booking['agreed_cost'] <= 0) {
         api_fail(422, 'NO_PRICE', 'This booking does not have a confirmed price yet.');

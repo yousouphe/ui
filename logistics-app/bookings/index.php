@@ -346,6 +346,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $payload['planned_duration_minutes'] = (int) round($metrics['duration_min']);
         } catch (NoRouteFoundException $e) {
             $errors['general'] = 'No route could be found between these locations. Please check the pickup and delivery addresses.';
+        } catch (DeliveryTooFarException $e) {
+            // Must be its own catch, ahead of the generic RuntimeException one below - falling
+            // through to $pricingPending=true would create the booking anyway (unpriced, for
+            // admin manual pricing), which defeats the entire point of a hard distance cap.
+            $errors['general'] = $e->getMessage();
         } catch (RuntimeException $e) {
             $pricingPending = true;
         }

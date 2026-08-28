@@ -264,6 +264,11 @@ function api_booking_create(PDO $pdo): void {
         $plannedMinutes = (int) round((float) ($m['duration_min'] ?? 0));
     } catch (NoRouteFoundException $e) {
         api_fail(422, 'NO_ROUTE', 'No route could be found between these locations. Please check the addresses.');
+    } catch (DeliveryTooFarException $e) {
+        // Must be its own catch, ahead of the generic one below - falling through to
+        // $pricingPending=true would create the booking anyway (unpriced, for admin manual
+        // pricing), which defeats the entire point of a hard distance cap.
+        api_fail(422, 'DELIVERY_TOO_FAR', $e->getMessage());
     } catch (Throwable $e) {
         $pricingPending = true; // our problem, not the sender's — create anyway, admins notified
     }
@@ -414,6 +419,8 @@ function api_booking_update(PDO $pdo, int $id): void {
                 }
             } catch (NoRouteFoundException $e) {
                 api_fail(422, 'NO_ROUTE', 'No route could be found between these locations. Please check the delivery address.');
+            } catch (DeliveryTooFarException $e) {
+                api_fail(422, 'DELIVERY_TOO_FAR', $e->getMessage());
             } catch (Throwable $e) {
                 api_fail(503, 'ROUTE_UNAVAILABLE', 'Unable to calculate route distance right now. Please try again shortly.');
             }

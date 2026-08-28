@@ -21,6 +21,17 @@ function mapbox_road_routing_configured(): bool {
 // "try again shortly".
 class NoRouteFoundException extends RuntimeException {}
 
+// A delivery whose road distance exceeds our service range - user-fixable (pick a closer
+// pickup/dropoff pair) the same way NoRouteFoundException is, so callers should surface this
+// with a clear message rather than a generic pricing failure.
+class DeliveryTooFarException extends RuntimeException {}
+
+// Business rule, not a technical limit - the sender/rider match pool and pricing were never
+// designed for long-haul distances. Centralised here (checked once, in pricing_route_metrics(),
+// the single choke point every distance calculation on both web and mobile passes through)
+// rather than duplicated at each call site.
+const MAX_DELIVERY_DISTANCE_KM = 20.0;
+
 // Returns null (rather than throwing) for a transient/config failure - pricing_route_metrics()
 // below turns that into a generic retryable error, so this stays a low-level "couldn't get
 // it" signal that other, non-pricing callers could use permissively if they ever need to.
@@ -145,7 +156,13 @@ function pricing_route_metrics(float $lat1, float $lng1, float $lat2, float $lng
             // ignore
         }
 
-        return ['distance_km' => $distance_km, 'duration_min' => $duration_min];
+        $metrics = ['distance_km' => $distance_km, 'duration_min' => $duration_min];
+    }
+
+    if ($metrics['distance_km'] > MAX_DELIVERY_DISTANCE_KM) {
+        throw new DeliveryTooFarException(
+            'This delivery is ' . round($metrics['distance_km'], 1) . 'km, which exceeds our ' . MAX_DELIVERY_DISTANCE_KM . 'km service range.'
+        );
     }
 
     return $metrics;

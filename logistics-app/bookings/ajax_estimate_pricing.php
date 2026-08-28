@@ -34,11 +34,25 @@ if ($distanceKm === null || $durationMinutes === null || $distanceKm <= 0 || $du
         http_response_code(422);
         echo json_encode(['success' => false, 'message' => 'No route could be found between these locations. Please check the pickup and delivery addresses.']);
         exit;
+    } catch (DeliveryTooFarException $e) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
     } catch (RuntimeException $e) {
         http_response_code(503);
         echo json_encode(['success' => false, 'message' => 'Unable to calculate pricing right now. Please try again shortly.']);
         exit;
     }
+}
+
+// The client-supplied distance branch above skips pricing_route_metrics() entirely, so its
+// MAX_DELIVERY_DISTANCE_KM check needs repeating here - otherwise a client that already computed
+// its own (correct, in-range) route earlier but then had the sender drag the map to a farther
+// point without re-estimating could still lock in a price for a delivery beyond service range.
+if ($distanceKm > MAX_DELIVERY_DISTANCE_KM) {
+    http_response_code(422);
+    echo json_encode(['success' => false, 'message' => 'This delivery is ' . round($distanceKm, 1) . 'km, which exceeds our ' . MAX_DELIVERY_DISTANCE_KM . 'km service range.']);
+    exit;
 }
 
 $plannedDurationMinutes = (int) round($durationMinutes);

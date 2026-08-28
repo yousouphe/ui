@@ -210,6 +210,8 @@ function api_pricing_estimate(PDO $pdo): void {
     [$plat, $plng, $dlat, $dlng] = $coords;
     try {
         $metrics = cached_route_metrics($pdo, $plat, $plng, $dlat, $dlng);
+    } catch (DeliveryTooFarException $e) {
+        api_fail(422, 'DELIVERY_TOO_FAR', $e->getMessage());
     } catch (Throwable $e) {
         api_fail(422, 'NO_ROUTE', 'We could not calculate a route for those locations. Please check the addresses.');
     }

@@ -656,25 +656,30 @@ function cached_route_metrics(PDO $pdo, float $lat1, float $lng1, float $lat2, f
         number_format($lat2, 4, '.', ''), number_format($lng2, 4, '.', ''),
     ]));
 
+    $cached = null;
     try {
         $stmt = $pdo->prepare('SELECT distance_km, duration_min FROM route_cache WHERE coord_key = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND) LIMIT 1');
         $stmt->execute([$key, $ttlSeconds]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             $cached = ['distance_km' => (float) $row['distance_km'], 'duration_min' => (float) $row['duration_min']];
-            // A cache hit skips pricing_route_metrics() entirely, so its MAX_DELIVERY_DISTANCE_KM
-            // check needs repeating here too - otherwise a route cached before this rule existed
-            // (or from the ~24h before it does) would keep passing silently until the cache entry
-            // expires.
-            if ($cached['distance_km'] > MAX_DELIVERY_DISTANCE_KM) {
-                throw new DeliveryTooFarException(
-                    'This delivery is ' . round($cached['distance_km'], 1) . 'km, which exceeds our ' . MAX_DELIVERY_DISTANCE_KM . 'km service range.'
-                );
-            }
-            return $cached;
         }
     } catch (Throwable $e) {
         error_log('cached_route_metrics read failed: ' . $e->getMessage());
+    }
+    if ($cached !== null) {
+        // A cache hit skips pricing_route_metrics() entirely, so its MAX_DELIVERY_DISTANCE_KM
+        // check needs repeating here too - otherwise a route cached before this rule existed
+        // (or from the ~24h before it does) would keep passing silently until the cache entry
+        // expires. Deliberately outside the try/catch above: that block's catch(Throwable) exists
+        // for DB failures, and would otherwise silently swallow this exception too (logging it as
+        // a "read failed" and falling through to a fresh Mapbox call instead of rejecting).
+        if ($cached['distance_km'] > MAX_DELIVERY_DISTANCE_KM) {
+            throw new DeliveryTooFarException(
+                'This delivery is ' . round($cached['distance_km'], 1) . 'km, which exceeds our ' . MAX_DELIVERY_DISTANCE_KM . 'km service range.'
+            );
+        }
+        return $cached;
     }
 
     // Cache miss - the one outbound Mapbox call. Let its exceptions propagate unchanged.

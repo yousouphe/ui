@@ -590,6 +590,17 @@ function client_ip(): string {
     return $remote;
 }
 
+// The Android app's stable per-install id (X-Device-Id header - see DeviceIdProvider.kt), not a
+// hardware identifier. Absent on web requests and on any client that doesn't send it, which is
+// fine - it's an additional signal for the audit trail, not a requirement.
+function client_device_id(): ?string {
+    $id = trim((string) ($_SERVER['HTTP_X_DEVICE_ID'] ?? ''));
+    if ($id === '' || strlen($id) > 64) {
+        return null;
+    }
+    return $id;
+}
+
 // True if $ip matches any of $ranges (exact IP or CIDR, IPv4/IPv6).
 function ip_in_ranges(string $ip, array $ranges): bool {
     foreach ($ranges as $range) {
@@ -784,24 +795,35 @@ function log_event(
     // incident un-investigatable: "mobile admin" as the only trace of who did what from where.
     $ip = function_exists('client_ip') ? client_ip() : (string) ($_SERVER['REMOTE_ADDR'] ?? '');
     $ua = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+    $deviceId = client_device_id();
+    $baseParams = [$eventType, $actorUserId, $actorRole, $targetType, $targetId, $description, $meta !== [] ? json_encode($meta) : null];
     try {
         $stmt = $pdo->prepare('
-            INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta, ip_address, user_agent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta, ip_address, user_agent, device_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
-        $stmt->execute([
-            $eventType,
-            $actorUserId,
-            $actorRole,
-            $targetType,
-            $targetId,
-            $description,
-            $meta !== [] ? json_encode($meta) : null,
-            $ip !== '' ? $ip : null,
-            $ua !== '' ? $ua : null,
-        ]);
+        $stmt->execute([...$baseParams, $ip !== '' ? $ip : null, $ua !== '' ? $ua : null, $deviceId]);
     } catch (Throwable $e) {
-        error_log('log_event failed for ' . $eventType . ': ' . $e->getMessage());
+        // device_id column not there yet (module22 not applied) - never let a pending migration
+        // black out the entire audit trail while it waits to be run. Falls back one column at a
+        // time down to the always-present base columns from module11.
+        try {
+            $stmt = $pdo->prepare('
+                INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ');
+            $stmt->execute([...$baseParams, $ip !== '' ? $ip : null, $ua !== '' ? $ua : null]);
+        } catch (Throwable $e2) {
+            try {
+                $stmt = $pdo->prepare('
+                    INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ');
+                $stmt->execute($baseParams);
+            } catch (Throwable $e3) {
+                error_log('log_event failed for ' . $eventType . ': ' . $e3->getMessage());
+            }
+        }
     }
 }
 

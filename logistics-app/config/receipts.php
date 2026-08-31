@@ -127,12 +127,13 @@ function audit_financial_event(
 ): void {
     $ip = function_exists('client_ip') ? client_ip() : (string) ($_SERVER['REMOTE_ADDR'] ?? '');
     $ua = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+    $deviceId = function_exists('client_device_id') ? client_device_id() : null;
     try {
         $stmt = $pdo->prepare('
             INSERT INTO event_logs
                 (event_type, actor_user_id, actor_role, target_type, target_id, description, meta,
-                 ip_address, user_agent, transaction_reference, order_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ip_address, user_agent, transaction_reference, order_id, device_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $eventType,
@@ -146,10 +147,12 @@ function audit_financial_event(
             $ua !== '' ? $ua : null,
             $reference,
             $orderId,
+            $deviceId,
         ]);
     } catch (Throwable $e) {
         // Columns missing (migration not yet run) or any insert issue: fall back so we never lose
-        // the event, and never let auditing break the money path.
+        // the event, and never let auditing break the money path. log_event() has its own
+        // narrower fallback chain for the same reason.
         log_event($pdo, $eventType, $description, $actorUserId, $actorRole, $orderId !== null ? 'booking' : null, $orderId, $meta);
     }
 }

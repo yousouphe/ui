@@ -2737,6 +2737,8 @@ function api_admin_logs(PDO $pdo): void {
             // Was already stored (module19) but never actually returned here - the one thing
             // that makes "who did this" answerable for a shared/admin-role account.
             'ip_address' => !empty($l['ip_address']) ? (string) $l['ip_address'] : null,
+            // module22 - the mobile app's stable per-install id, not a hardware identifier.
+            'device_id' => !empty($l['device_id']) ? (string) $l['device_id'] : null,
         ], $rows),
         'hasMore' => count($rows) === $perPage,
     ]);

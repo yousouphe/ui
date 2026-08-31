@@ -37,6 +37,7 @@ $routes = [
     ['PATCH','#^profile$#',                             fn() => api_profile_update($pdo)],
     ['POST', '#^auth/forgot$#',                         fn() => api_auth_forgot($pdo)],
     ['POST', '#^auth/reset$#',                          fn() => api_auth_reset($pdo)],
+    ['POST', '#^auth/change-password$#',                fn() => api_auth_change_password($pdo)],
 
     // Sender
     ['POST', '#^pricing/estimate$#',                    fn() => api_pricing_estimate($pdo)],

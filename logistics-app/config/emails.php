@@ -41,8 +41,19 @@ function send_password_reset_email(string $toEmail, string $fullName, string $re
     $body = '<p>Hi ' . e($fullName) . ',</p>'
         . '<p>We received a request to reset your password. Click the button below to choose a new one. This link expires in 30 minutes.</p>'
         . '<p style="text-align:center;margin:24px 0;"><a href="' . e($resetUrl) . '" style="background:#0284c7;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Reset Password</a></p>'
-        . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, you can safely ignore this email.</p>';
+        . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, you can safely ignore this email - your password will not change unless the link above is used.</p>';
     mailer_dispatch($toEmail, $fullName, 'Reset your Aike password', mailer_layout('Reset Your Password', $body));
+}
+
+// Sent after a password actually changes (either the forgot-password/reset flow or an in-app
+// change-password) - closes the loop for the account owner: the request email above says "safely
+// ignore if this wasn't you", but only this one confirms whether a change actually went through,
+// so it's the signal worth acting on if it's unexpected.
+function send_password_changed_email(string $toEmail, string $fullName): void {
+    $body = '<p>Hi ' . e($fullName) . ',</p>'
+        . '<p>Your Aike password was just changed. You have been signed out of any other devices - you will need to sign in again there with the new password.</p>'
+        . '<p style="color:#5c7a91;font-size:13px;">If you did not make this change, reset your password immediately using the "Forgot password" link on the sign-in screen, then contact support.</p>';
+    mailer_dispatch($toEmail, $fullName, 'Your Aike password was changed', mailer_layout('Password Changed', $body));
 }
 
 // Every admin gets every accountability event - not just whoever is logged in when it happens.

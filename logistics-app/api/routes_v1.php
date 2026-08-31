@@ -1419,7 +1419,65 @@ function api_auth_reset(PDO $pdo): void {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         api_fail(503, 'RESET_FAILED', 'We could not reset your password right now. Please try again.');
     }
+    if (function_exists('send_password_changed_email')) {
+        $stmt = $pdo->prepare('SELECT email, full_name FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$rec['user_id']]);
+        if ($u = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            try { send_password_changed_email((string) $u['email'], (string) $u['full_name']); } catch (Throwable $e) {}
+        }
+    }
     api_ok(['message' => 'Your password has been reset. Please sign in.']);
+}
+
+// Distinct from api_auth_reset above: this is for a signed-in user who still remembers their
+// current password (no email round-trip needed) - mirrors profile.php's change_password action,
+// which mobile never had an equivalent of. Keeps the calling device's own session alive (the
+// current password proves ownership already, unlike a reset link) but revokes every other active
+// session, same as a reset would.
+function api_auth_change_password(PDO $pdo): void {
+    $user = api_require($pdo);
+    // A stolen/replayed access token trying to brute-force the current password is the threat
+    // here (the token alone doesn't prove password knowledge) - cap attempts same as forgot's IP
+    // limiter rather than leaving this endpoint uncapped.
+    if (is_rate_limited($pdo, 'change_password', (string) $user['id'], 8, 15)) {
+        api_fail(429, 'RATE_LIMITED', 'Too many attempts. Please try again in a few minutes.');
+    }
+    $b = api_body();
+    $currentPassword = (string) ($b['currentPassword'] ?? '');
+    $newPassword = (string) ($b['newPassword'] ?? '');
+    if (strlen($newPassword) < 8) {
+        api_fail(400, 'VALIDATION', 'New password must be at least 8 characters.', ['newPassword' => 'At least 8 characters']);
+    }
+    record_rate_limit_attempt($pdo, 'change_password', (string) $user['id']);
+    if (!password_verify($currentPassword, (string) $user['password_hash'])) {
+        api_fail(400, 'INVALID_CURRENT_PASSWORD', 'Current password is incorrect.');
+    }
+    if (password_verify($newPassword, (string) $user['password_hash'])) {
+        api_fail(400, 'SAME_PASSWORD', 'New password must be different from your current password.');
+    }
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+            ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $user['id']]);
+        $stmt = $pdo->prepare('SELECT family FROM api_tokens WHERE id = ? LIMIT 1');
+        $stmt->execute([(int) $user['token_id']]);
+        $currentFamily = $stmt->fetchColumn();
+        if ($currentFamily) {
+            $pdo->prepare('UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = ? AND family != ? AND revoked_at IS NULL')
+                ->execute([$user['id'], $currentFamily]);
+        } else {
+            $pdo->prepare('UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL')
+                ->execute([$user['id']]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        api_fail(503, 'CHANGE_FAILED', 'We could not change your password right now. Please try again.');
+    }
+    if (function_exists('send_password_changed_email')) {
+        try { send_password_changed_email((string) $user['email'], (string) $user['full_name']); } catch (Throwable $e) {}
+    }
+    api_ok(['message' => 'Your password has been changed.']);
 }
 
 // ---- Rating & complaint (post-delivery) -----------------------------------------------------

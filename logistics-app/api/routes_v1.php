@@ -2125,7 +2125,9 @@ function api_admin_riders(PDO $pdo): void {
         'account_status' => (string) $r['account_status'],
         'completed_count' => (int) $r['completed_count'],
         'complaint_count' => (int) $r['complaint_count'],
-        'available_balance' => (float) rider_available_balance($pdo, (int) $r['user_id']),
+        // Balance is sensitive - mobile now matches the web's OTP gate (config/otp.php) instead of
+        // sending it plain in every list/detail response. See api_admin_rider_balance_otp_request/
+        // api_admin_rider_balance_verify below.
         'biodata' => [
             'age' => isset($r['kyc_age']) && $r['kyc_age'] !== null ? (int) $r['kyc_age'] : null,
             'stateOfOrigin' => $r['kyc_state_of_origin'] ?? null,
@@ -2147,6 +2149,44 @@ function api_admin_riders(PDO $pdo): void {
             'drivingLicense' => !empty($r['kyc_driving_license_path']),
         ],
     ], $rows));
+}
+
+/** Confirms $id is an existing rider, or fails 404 - shared by both OTP endpoints below. */
+function api_admin_require_rider(PDO $pdo, int $id): void {
+    $stmt = $pdo->prepare("SELECT 1 FROM users WHERE id = ? AND role = 'rider' LIMIT 1");
+    $stmt->execute([$id]);
+    if (!$stmt->fetchColumn()) {
+        api_fail(404, 'NOT_FOUND', 'Rider not found.');
+    }
+}
+
+function api_admin_rider_balance_otp_request(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    require_once __DIR__ . '/../config/otp.php';
+    api_admin_require_rider($pdo, $id);
+    $res = generate_admin_balance_otp($pdo, $admin, 'rider', $id);
+    if (!$res['ok']) {
+        api_fail(429, 'OTP_RATE_LIMITED', $res['message']);
+    }
+    api_ok(['message' => $res['message']]);
+}
+
+/** Verifies the code and, only on success, reveals the balance - mirrors admin/transactions.php's
+ * request_otp/verify_otp actions but stateless (no server-session unlock window; the mobile client
+ * gets the number back directly instead of a follow-up GET being allowed for the next 5 minutes). */
+function api_admin_rider_balance_verify(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    require_once __DIR__ . '/../config/otp.php';
+    api_admin_require_rider($pdo, $id);
+    $code = trim((string) (api_body()['code'] ?? ''));
+    if ($code === '') {
+        api_fail(400, 'VALIDATION', 'A code is required.');
+    }
+    $res = verify_admin_balance_otp($pdo, $admin, 'rider', $id, $code);
+    if (!$res['ok']) {
+        api_fail(400, 'OTP_INVALID', $res['message']);
+    }
+    api_ok(['availableBalance' => (float) rider_available_balance($pdo, $id)]);
 }
 
 function api_admin_bookings(PDO $pdo): void {

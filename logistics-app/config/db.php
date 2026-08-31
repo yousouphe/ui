@@ -1,14 +1,24 @@
 <?php
 $config = require __DIR__ . '/env.php';
 try {
+    $pdoOptions = [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ];
+    // TLS for the app-server-to-database connection - a no-op unless db_ssl_ca is actually set to
+    // a real CA cert path, since a same-host "localhost" DB has no network hop to encrypt. Set
+    // this if db_host points at a remote/managed MySQL instance (get the CA cert from your DB
+    // host's provider).
+    $dbSslCa = trim((string) ($config['db_ssl_ca'] ?? ''));
+    if ($dbSslCa !== '' && !str_starts_with($dbSslCa, 'REDACTED')) {
+        $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $dbSslCa;
+        $pdoOptions[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+    }
     $pdo = new PDO(
         "mysql:host={$config['db_host']};dbname={$config['db_name']};charset=utf8mb4",
         $config['db_user'],
         $config['db_pass'],
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
+        $pdoOptions
     );
 } catch (PDOException $e) {
     // Never echo the driver message to the browser - it leaks the DB host/user/schema.

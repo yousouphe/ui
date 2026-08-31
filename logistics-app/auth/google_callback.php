@@ -136,7 +136,7 @@ try {
         redirect_to('complete-profile');
     }
     if ($dbUser['role'] === 'rider') redirect_to('rider/');
-    if (in_array($dbUser['role'], ['admin', 'super_admin'], true)) redirect_to('admin/');
+    if (in_array($dbUser['role'], ['admin', 'super_admin'], true)) redirect_to(admin_home_path((string) $dbUser['role']));
     redirect_to('/bookings');
 } catch (Throwable $e) {
     error_log('Google OAuth callback failed: ' . $e->getMessage());

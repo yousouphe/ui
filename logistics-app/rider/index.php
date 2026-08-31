@@ -418,6 +418,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'respond_request') {
                 (string) $requestRow['booking_code']
             );
             send_web_push($pdo, (int) $requestRow['sender_user_id'], (string) $user['full_name'] . ' accepted your delivery', 'Booking ' . $requestRow['booking_code'] . ' is on its way to pickup.', url_path('bookings/index.php?booking_id=' . (int) $requestRow['booking_id']));
+            require_once __DIR__ . '/../config/ebulksms.php';
+            ebulksms_notify_recipient_rider_assigned($pdo, (int) $requestRow['booking_id']);
         } else {
             send_web_push($pdo, (int) $requestRow['sender_user_id'], 'Rider declined your request', 'Booking ' . $requestRow['booking_code'] . ' - try another rider from your dashboard.', url_path('bookings/index.php?booking_id=' . (int) $requestRow['booking_id']));
         }

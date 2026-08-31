@@ -265,6 +265,8 @@ try {
     // there's no stored per-user locale preference to look up the rider's instead.
     if ($forceMatch) {
         send_web_push($pdo, $riderUserId, 'Delivery assigned', 'You have been assigned booking ' . $booking['booking_code'] . '. Please complete the delivery.', url_path('rider/'));
+        require_once __DIR__ . '/../config/ebulksms.php';
+        ebulksms_notify_recipient_rider_assigned($pdo, $bookingId);
         $successMessage = 'Rider assigned successfully.';
     } else {
         send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . $booking['booking_code'] . '.', url_path('rider/'));

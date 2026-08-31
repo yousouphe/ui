@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', t('login.welcome_back', ['name' => $user['full_name']]));
             if ((int)($user['profile_completed'] ?? 1) === 0) redirect_to('complete-profile');
             if ($user['role'] === 'rider') redirect_to('rider/');
-            if (in_array($user['role'], ['admin', 'super_admin'], true)) redirect_to('admin/');
+            if (in_array($user['role'], ['admin', 'super_admin'], true)) redirect_to(admin_home_path((string) $user['role']));
             redirect_to('/bookings');
         }
     }

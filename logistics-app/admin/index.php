@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../config/functions.php';
-require_role(['admin', 'super_admin']);
+// Withdrawals move real money out of the platform - super_admin only. A plain admin lands on
+// Riders instead (see admin_home_path()) and never sees this in the nav.
+require_role(['super_admin']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 require_once __DIR__ . '/../config/paystack.php';
@@ -44,96 +46,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($formAction === 'approve_and_pay') {
-        if (!in_array($withdrawal['status'], ['pending', 'processing'], true)) {
-            flash('error', t('admin.withdrawal_not_pending'));
-            redirect_to('admin/index.php');
-        }
-
-        if (empty($withdrawal['bank_code'])) {
-            flash('error', t('admin.withdrawal_missing_bank_code'));
-            redirect_to('admin/index.php');
-        }
-
-        // Atomic lock: claim this request before calling Paystack so a double-click or two
-        // admin sessions racing on the same row can never trigger two real transfers. The
-        // lock is only released below if we can prove no transfer was actually created.
-        $claim = $pdo->prepare('
-            UPDATE withdrawal_requests
-            SET paystack_transfer_attempted_at = NOW()
-            WHERE id = ? AND paystack_transfer_attempted_at IS NULL AND status IN ("pending", "processing")
-        ');
-        $claim->execute([$requestId]);
-        if ($claim->rowCount() === 0) {
-            flash('error', t('admin.withdrawal_transfer_in_progress'));
-            redirect_to('admin/index.php');
-        }
-
-        $releaseLock = function () use ($pdo, $requestId): void {
-            $stmt = $pdo->prepare('UPDATE withdrawal_requests SET paystack_transfer_attempted_at = NULL WHERE id = ?');
-            $stmt->execute([$requestId]);
-        };
-
-        // Reuse a cached recipient code for this rider's bank account if we already made
-        // one, otherwise create it now and cache it for future withdrawals.
-        $stmt = $pdo->prepare('SELECT paystack_recipient_code FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
-        $stmt->execute([(int) $withdrawal['rider_user_id']]);
-        $recipientCode = (string) ($stmt->fetchColumn() ?: '');
-
-        if ($recipientCode === '') {
-            $recipientResult = paystack_create_transfer_recipient(
-                (string) $withdrawal['account_name'],
-                (string) $withdrawal['account_number'],
-                (string) $withdrawal['bank_code']
-            );
-            if (!$recipientResult['ok']) {
-                $releaseLock();
-                flash('error', t('admin.paystack_recipient_failed') . ' ' . $recipientResult['message']);
-                log_event($pdo, 'paystack_recipient_failed', 'Could not create Paystack recipient for withdrawal #' . $requestId . ': ' . $recipientResult['message'], (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
-                redirect_to('admin/index.php');
-            }
-            $recipientCode = (string) $recipientResult['recipient_code'];
-            $stmt = $pdo->prepare('UPDATE rider_bank_accounts SET paystack_recipient_code = ? WHERE rider_user_id = ?');
-            $stmt->execute([$recipientCode, (int) $withdrawal['rider_user_id']]);
-        }
-
-        $reference = 'WD-' . $requestId . '-' . time();
-        $transferResult = paystack_initiate_transfer($recipientCode, (float) $withdrawal['amount'], 'Aike rider withdrawal #' . $requestId, $reference);
-
-        if (!$transferResult['ok']) {
-            $releaseLock();
-            flash('error', t('admin.paystack_transfer_failed') . ' ' . $transferResult['message']);
-            log_event($pdo, 'paystack_transfer_failed', 'Paystack transfer initiation failed for withdrawal #' . $requestId . ': ' . $transferResult['message'], (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
-            redirect_to('admin/index.php');
-        }
-
-        $transferStatus = (string) $transferResult['status'];
-
-        if ($transferStatus === 'success') {
-            $finalizeResult = finalize_withdrawal_paid($pdo, $requestId, (int) $user['id'], $transferResult['transfer_code'], $reference);
-            if ($finalizeResult['ok']) {
-                flash('success', t('admin.marked_paid'));
-            } else {
-                flash('error', t('admin.withdrawal_process_failed') . ' ' . $finalizeResult['message']);
-            }
-        } elseif (in_array($transferStatus, ['otp', 'pending'], true)) {
-            // Paystack accepted the transfer but it still needs finalization (OTP) or is
-            // queued - a real transfer now exists, so the lock stays set permanently and
-            // must never be retried automatically. Admin finalizes via the Paystack
-            // dashboard, then can manually mark this paid once confirmed.
-            $stmt = $pdo->prepare('
-                UPDATE withdrawal_requests
-                SET status = "processing", admin_user_id = ?, paystack_transfer_code = ?, paystack_transfer_reference = ?
-                WHERE id = ? AND status IN ("pending", "processing")
-            ');
-            $stmt->execute([$user['id'], $transferResult['transfer_code'], $reference, $requestId]);
-            flash('success', t('admin.paystack_transfer_pending'));
-            log_event($pdo, 'withdrawal_transfer_pending', 'Withdrawal #' . $requestId . ' transfer initiated, status: ' . $transferStatus, (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId, ['transfer_code' => $transferResult['transfer_code'], 'reference' => $reference]);
+        // Shared with the mobile admin API (POST admin/withdrawals/{id}/approve) - see
+        // admin_approve_and_pay_withdrawal() in config/paystack.php for the full claim-lock /
+        // Paystack / finalize flow. Kept in one place since this moves real money.
+        $result = admin_approve_and_pay_withdrawal($pdo, $requestId, $user);
+        if ($result['ok']) {
+            flash('success', $result['status'] === 'paid' ? t('admin.marked_paid') : t('admin.paystack_transfer_pending'));
         } else {
-            // failed/reversed/unknown - no transfer was actually created, safe to release
-            // the lock and let the admin retry.
-            $releaseLock();
-            flash('error', t('admin.paystack_transfer_failed') . ' ' . ($transferResult['message'] ?: $transferStatus));
-            log_event($pdo, 'paystack_transfer_failed', 'Withdrawal #' . $requestId . ' transfer status: ' . $transferStatus, (int) $user['id'], (string) $user['role'], 'withdrawal', $requestId);
+            $label = match ($result['status']) {
+                'not_found' => t('admin.withdrawal_not_found'),
+                'invalid_state' => t('admin.withdrawal_not_pending'),
+                'missing_bank_code' => t('admin.withdrawal_missing_bank_code'),
+                'lock_conflict' => t('admin.withdrawal_transfer_in_progress'),
+                'recipient_failed' => t('admin.paystack_recipient_failed'),
+                'finalize_failed' => t('admin.withdrawal_process_failed'),
+                default => t('admin.paystack_transfer_failed'),
+            };
+            flash('error', $label . ' ' . $result['message']);
         }
         redirect_to('admin/index.php');
     }

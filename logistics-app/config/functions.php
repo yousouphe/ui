@@ -222,9 +222,17 @@ function require_guest(): void {
         $user = current_user();
         $role = $user['role'] ?? '';
         if ($role === 'rider') redirect_to('rider/');
-        if (in_array($role, ['admin', 'super_admin'], true)) redirect_to('admin/');
+        if (in_array($role, ['admin', 'super_admin'], true)) redirect_to(admin_home_path((string) $role));
         redirect_to('bookings/');
     }
+}
+
+// Landing page for an admin-level role - super_admin lands on Withdrawals (admin/index.php);
+// a plain admin lands on Riders since Withdrawals is super-admin-only. Single source of truth
+// so login.php / complete-profile.php / auth/google_callback.php / require_guest() (and the nav's
+// own brand-link/locale-redirect) can never drift on where each admin role actually lands.
+function admin_home_path(string $role): string {
+    return $role === 'super_admin' ? 'admin/' : 'admin/riders.php';
 }
 
 function flash(string $key, ?string $message = null): ?string {
@@ -616,6 +624,31 @@ function ip_in_ranges(string $ip, array $ranges): bool {
         }
     }
     return false;
+}
+
+// Compares two names tolerant of real-world formatting differences (extra middle names, spacing,
+// case) rather than requiring exact string equality - used to confirm a bank account's Paystack-
+// resolved holder name actually belongs to the account holder's own Aike profile. Whichever name
+// has fewer words must have ALL of its words present in the other, so a bank name carrying (or
+// missing) a middle name still matches, without accepting a genuinely different person's name.
+function names_match(string $a, string $b): bool {
+    $normalize = static function (string $s): array {
+        $s = strtolower($s);
+        $s = preg_replace('/[^a-z\s]/', ' ', $s) ?? '';
+        return array_values(array_filter(explode(' ', $s), static fn($w) => $w !== ''));
+    };
+    $wordsA = $normalize($a);
+    $wordsB = $normalize($b);
+    if (!$wordsA || !$wordsB) {
+        return false;
+    }
+    [$shorter, $longer] = count($wordsA) <= count($wordsB) ? [$wordsA, $wordsB] : [$wordsB, $wordsA];
+    foreach ($shorter as $word) {
+        if (!in_array($word, $longer, true)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Checked BEFORE doing sensitive work (verifying a password, sending a reset email,

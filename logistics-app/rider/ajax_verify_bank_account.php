@@ -21,4 +21,9 @@ if (!$result['ok']) {
     respond_json(['success' => false, 'message' => $result['message'] ?: t('wallet.account_verification_failed')], 422);
 }
 
+$user = current_user();
+if (!names_match((string) $result['account_name'], (string) $user['full_name'])) {
+    respond_json(['success' => false, 'message' => t('wallet.bank_name_mismatch')], 422);
+}
+
 respond_json(['success' => true, 'account_name' => $result['account_name']]);

@@ -117,6 +117,25 @@ function send_rider_matched_email(string $toEmail, string $fullName, string $rid
     mailer_dispatch($toEmail, $fullName, 'Rider assigned - ' . $bookingCode, mailer_layout('Rider Assigned', $body));
 }
 
+// Sent alongside an SMS code (see config/rider_verification.php) whenever a rider needs to
+// confirm a withdrawal or bank-account change - either the code or the link confirms the action.
+function send_rider_action_confirmation_email(string $toEmail, string $fullName, string $actionLabel, string $code, string $confirmUrl): void {
+    $body = '<p>Hi ' . e($fullName) . ',</p>'
+        . '<p>Confirm your ' . e($actionLabel) . ' using either method below. This expires in 10 minutes.</p>'
+        . '<p style="text-align:center;margin:24px 0;"><span style="font-size:30px;font-weight:800;letter-spacing:8px;color:#0284c7;">' . e($code) . '</span></p>'
+        . '<p style="text-align:center;color:#5c7a91;">— or —</p>'
+        . '<p style="text-align:center;margin:24px 0;"><a href="' . e($confirmUrl) . '" style="background:#0284c7;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Confirm ' . e(ucfirst($actionLabel)) . '</a></p>'
+        . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, do not use the code or link - your account has not been changed.</p>';
+    mailer_dispatch($toEmail, $fullName, 'Confirm your Aike ' . $actionLabel, mailer_layout('Confirm Your ' . ucfirst($actionLabel), $body));
+}
+
+function send_account_deletion_requested_email(string $toEmail, string $fullName): void {
+    $body = '<p>Hi ' . e($fullName) . ',</p>'
+        . '<p>We have received a request to delete your Aike account. Your account has been deactivated immediately, and our team will complete the full deletion within a few business days.</p>'
+        . '<p style="color:#5c7a91;font-size:13px;">If you did not request this, please contact support right away so we can restore access to your account.</p>';
+    mailer_dispatch($toEmail, $fullName, 'Your Aike account deletion request', mailer_layout('Account Deletion Requested', $body));
+}
+
 function send_refund_email(string $toEmail, string $fullName, string $bookingCode, float $amount): void {
     $body = '<p>Hi ' . e($fullName) . ',</p>'
         . '<p>A refund of <strong>₦' . number_format($amount, 2) . '</strong> has been issued for booking <strong>' . e($bookingCode) . '</strong>.</p>'

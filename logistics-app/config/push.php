@@ -401,7 +401,9 @@ function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?stri
             $endpoint = (string) $subscription['endpoint'];
             $host = parse_url($endpoint, PHP_URL_HOST);
             $scheme = parse_url($endpoint, PHP_URL_SCHEME);
-            if (!$host || !$scheme) {
+            // Web Push endpoints are https by spec, but this is browser-supplied data stored in
+            // our DB - enforce it explicitly rather than trusting the stored value blindly.
+            if (!$host || $scheme !== 'https') {
                 continue;
             }
             $jwt = build_vapid_jwt($scheme . '://' . $host);

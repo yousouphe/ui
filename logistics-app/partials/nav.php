@@ -23,17 +23,19 @@ if (!function_exists('render_app_nav')) {
 
         // Each item: [key, url_path, i18n label key, Font Awesome icon].
         if ($isAdmin) {
-            $home = 'admin/';
+            $home = admin_home_path($role);
             $brandSuffix = ' ' . t('admin.brand_suffix');
-            $items = [
-                ['withdrawals',  'admin/',                 'admin.nav_withdrawals', 'fa-money-bill-transfer'],
-                ['transactions', 'admin/transactions.php', 'admin.nav_transactions', 'fa-receipt'],
-                ['bookings',     'admin/bookings.php',     'admin.nav_bookings',     'fa-box'],
-                ['riders',       'admin/riders.php',       'admin.nav_riders',       'fa-motorcycle'],
-                ['complaints',   'admin/complaints.php',   'admin.nav_complaints',   'fa-triangle-exclamation'],
-                ['users',        'admin/users.php',        'admin.nav_users',        'fa-users'],
-                ['logs',         'admin/logs.php',         'admin.nav_logs',         'fa-clock-rotate-left'],
-            ];
+            $items = [];
+            // Withdrawals moves real money - super_admin only, same gate as admin/index.php itself.
+            if ($isSuper) {
+                $items[] = ['withdrawals', 'admin/', 'admin.nav_withdrawals', 'fa-money-bill-transfer'];
+            }
+            $items[] = ['transactions', 'admin/transactions.php', 'admin.nav_transactions', 'fa-receipt'];
+            $items[] = ['bookings',     'admin/bookings.php',     'admin.nav_bookings',     'fa-box'];
+            $items[] = ['riders',       'admin/riders.php',       'admin.nav_riders',       'fa-motorcycle'];
+            $items[] = ['complaints',   'admin/complaints.php',   'admin.nav_complaints',   'fa-triangle-exclamation'];
+            $items[] = ['users',        'admin/users.php',        'admin.nav_users',        'fa-users'];
+            $items[] = ['logs',         'admin/logs.php',         'admin.nav_logs',         'fa-clock-rotate-left'];
             if ($isSuper) {
                 $items[] = ['pricing', 'admin/pricing.php', 'admin.nav_pricing', 'fa-sliders'];
             }

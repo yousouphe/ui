@@ -16,12 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $formAction = (string) ($_POST['form_action'] ?? '');
 
     if ($formAction === 'update_details') {
-        $fullName = trim((string) ($_POST['full_name'] ?? ''));
+        // full_name is locked after first registration - "no one" per the product rule, admins
+        // included - not accepted from this form at all.
         $phone = trim((string) ($_POST['phone'] ?? ''));
         $email = strtolower(trim((string) ($_POST['email'] ?? '')));
         $errors = [];
 
-        if ($fullName === '') $errors[] = t('profile.error.full_name_required');
         if ($phone === '') $errors[] = t('profile.error.phone_required');
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = t('register.error.invalid_email');
 
@@ -44,10 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($errors) {
             flash('error', implode(' ', $errors));
         } else {
-            $stmt = $pdo->prepare('UPDATE users SET full_name = ?, phone = ?, email = ?, avatar_path = ? WHERE id = ?');
-            $stmt->execute([$fullName, $phone, $email, $avatarPath, $user['id']]);
+            $stmt = $pdo->prepare('UPDATE users SET phone = ?, email = ?, avatar_path = ? WHERE id = ?');
+            $stmt->execute([$phone, $email, $avatarPath, $user['id']]);
 
-            $_SESSION['user']['full_name'] = $fullName;
             $_SESSION['user']['phone'] = $phone;
             $_SESSION['user']['email'] = $email;
 
@@ -130,7 +129,8 @@ $dbUser = $stmt->fetch(PDO::FETCH_ASSOC);
                     </div>
                     <div class="mb-3">
                         <label class="form-label"><?= e(t('register.full_name_label')) ?></label>
-                        <input class="form-control" name="full_name" value="<?= e((string) $dbUser['full_name']) ?>" required>
+                        <input class="form-control" value="<?= e((string) $dbUser['full_name']) ?>" readonly disabled>
+                        <div class="form-text"><?= e(t('profile.full_name_locked')) ?></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label"><?= e(t('register.phone_label')) ?></label>

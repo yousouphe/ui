@@ -4,6 +4,7 @@ require_role(['rider']);
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/emails.php';
 require_once __DIR__ . '/../config/paystack.php';
+require_once __DIR__ . '/../config/rider_verification.php';
 
 $user = current_user();
 $success = flash('success');
@@ -48,16 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect_to('rider/wallet');
         }
 
-        $stmt = $pdo->prepare('
-            INSERT INTO rider_bank_accounts (rider_user_id, bank_name, bank_code, account_number, account_name, verified_at, paystack_recipient_code)
-            VALUES (?, ?, ?, ?, ?, NOW(), NULL)
-            ON DUPLICATE KEY UPDATE
-                bank_name = VALUES(bank_name), bank_code = VALUES(bank_code),
-                account_number = VALUES(account_number), account_name = VALUES(account_name),
-                verified_at = VALUES(verified_at), paystack_recipient_code = NULL
-        ');
-        $stmt->execute([$user['id'], $bankName, $bankCode, $accountNumber, $verifyResult['account_name']]);
-        flash('success', t('wallet.bank_details_saved'));
+        if (!names_match((string) $verifyResult['account_name'], (string) $user['full_name'])) {
+            flash('error', t('wallet.bank_name_mismatch'));
+            redirect_to('rider/wallet');
+        }
+
+        // Not saved yet - a verification code/link must be confirmed first (see the
+        // confirm_verification handler below and confirm_rider_action.php for the email-link path).
+        $verification = rider_verification_start($pdo, $user, 'bank_change', [
+            'bankName' => $bankName,
+            'bankCode' => $bankCode,
+            'accountNumber' => $accountNumber,
+            'accountName' => (string) $verifyResult['account_name'],
+        ]);
+        if (!$verification['ok']) {
+            flash('error', $verification['message']);
+            redirect_to('rider/wallet');
+        }
+        $_SESSION['pending_rider_verification_id'] = $verification['verificationId'];
+        flash('success', $verification['message']);
         redirect_to('rider/wallet');
     }
 
@@ -72,52 +82,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', t('wallet.invalid_withdrawal_amount'));
             redirect_to('rider/wallet');
         }
-
-        // Create the withdrawal under a transaction so the balance check and the insert are
-        // atomic. rider_available_balance_locked() takes row locks on this rider's ledger and
-        // pending withdrawals, so two withdrawal submissions racing each other serialise here
-        // instead of both reading the same balance and both inserting (TOCTOU double-spend).
-        $withdrawalCreated = false;
-        try {
-            $pdo->beginTransaction();
-            $available = rider_available_balance_locked($pdo, (int) $user['id']);
-
-            if ($amount > $available) {
-                $pdo->rollBack();
-                flash('error', t('wallet.withdrawal_exceeds_balance'));
-                redirect_to('rider/wallet');
-            }
-
-            $stmt = $pdo->prepare('
-                INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status)
-                VALUES (?, ?, ?, ?, ?, ?, "pending")
-            ');
-            $stmt->execute([
-                $user['id'],
-                $amount,
-                $bankAccount['bank_name'],
-                $bankAccount['bank_code'],
-                $bankAccount['account_number'],
-                $bankAccount['account_name'],
-            ]);
-            $pdo->commit();
-            $withdrawalCreated = true;
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            error_log('withdrawal request failed: ' . $e->getMessage());
+        // Fast-feedback pre-check only - the authoritative, row-locked check happens in
+        // execute_rider_verified_action() at confirm time, not here, so a withdrawal can't be
+        // created without the rider actually confirming via code or email link first.
+        if ($amount > rider_available_balance($pdo, (int) $user['id'])) {
             flash('error', t('wallet.withdrawal_exceeds_balance'));
             redirect_to('rider/wallet');
         }
 
-        if ($withdrawalCreated) {
-            flash('success', t('wallet.withdrawal_request_submitted'));
-            // Notifications run after commit so a failed/rolled-back attempt never emails a
-            // "request received" message for a withdrawal that was not actually recorded.
-            send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount);
-            notify_admins($pdo, 'New withdrawal request', '<p><strong>' . e((string) $user['full_name']) . '</strong> requested a withdrawal of ₦' . number_format($amount, 2) . '.</p><p>Review it from the admin portal.</p>');
+        $verification = rider_verification_start($pdo, $user, 'withdrawal', ['amount' => $amount]);
+        if (!$verification['ok']) {
+            flash('error', $verification['message']);
+            redirect_to('rider/wallet');
         }
+        $_SESSION['pending_rider_verification_id'] = $verification['verificationId'];
+        flash('success', $verification['message']);
+        redirect_to('rider/wallet');
+    }
+
+    if ($formAction === 'confirm_verification') {
+        $verificationId = (int) ($_SESSION['pending_rider_verification_id'] ?? 0);
+        $code = trim((string) ($_POST['code'] ?? ''));
+        if ($verificationId <= 0 || $code === '') {
+            flash('error', t('wallet.verification_code_required'));
+            redirect_to('rider/wallet');
+        }
+        $result = rider_verification_confirm_code($pdo, $user, $verificationId, $code);
+        if (!$result['ok']) {
+            flash('error', $result['message']);
+            redirect_to('rider/wallet');
+        }
+        unset($_SESSION['pending_rider_verification_id']);
+        $execResult = execute_rider_verified_action($pdo, (int) $user['id'], (string) $result['actionType'], (array) $result['payload']);
+        if (!$execResult['ok']) {
+            flash('error', $execResult['message']);
+            redirect_to('rider/wallet');
+        }
+        if ($result['actionType'] === 'withdrawal') {
+            notify_admins($pdo, 'New withdrawal request', '<p><strong>' . e((string) $user['full_name']) . '</strong> requested a withdrawal.</p><p>Review it from the admin portal.</p>');
+        }
+        flash('success', $execResult['message']);
         redirect_to('rider/wallet');
     }
 }
@@ -247,6 +251,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
 
     <?php if ($success): ?><div class="alert alert-success border-0 mb-4"><?= e($success) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="alert alert-danger border-0 mb-4"><?= e($error) ?></div><?php endif; ?>
+
+    <?php if (!empty($_SESSION['pending_rider_verification_id'])): ?>
+        <div class="cardx p-4 mb-4">
+            <h2 class="h5 fw-bold mb-2"><?= e(t('wallet.confirm_action_heading')) ?></h2>
+            <p class="text-soft"><?= e(t('wallet.confirm_action_subheading')) ?></p>
+            <form method="post" class="row g-2 align-items-end">
+                <?= csrf_field() ?>
+                <input type="hidden" name="form_action" value="confirm_verification">
+                <div class="col-auto">
+                    <input class="form-control" name="code" placeholder="<?= e(t('wallet.confirm_action_code_placeholder')) ?>" maxlength="6" required>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-primary fw-bold" type="submit"><?= e(t('confirm_action.submit')) ?></button>
+                </div>
+            </form>
+        </div>
+    <?php endif; ?>
 
     <div class="row g-4 mb-4">
         <div class="col-md-4">

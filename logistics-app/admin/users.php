@@ -37,6 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to('admin/users.php');
     }
 
+    // A plain admin's whole view of this page is riders-only (see $roleFilter below) - this is
+    // the server-side backstop so the same restriction holds even against a hand-crafted POST,
+    // and explicitly covers suspending a super_admin (or another admin, or a sender), not just
+    // the UI-level filtering.
+    if (!$isSuperAdmin && in_array($formAction, ['suspend_user', 'activate_user'], true) && $targetUser['role'] !== 'rider') {
+        flash('error', t('admin.admin_can_only_manage_riders'));
+        redirect_to('admin/users.php');
+    }
+
     if ($formAction === 'change_role') {
         $newRole = (string) ($_POST['role'] ?? '');
         if (!in_array($newRole, $allowedRoles, true)) {
@@ -97,8 +106,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$roleFilter = (string) ($_GET['role'] ?? '');
-$roleFilter = in_array($roleFilter, $allowedRoles, true) ? $roleFilter : '';
+// A plain admin only ever manages riders here - forced regardless of any role query param, not
+// just defaulted, so this can't be bypassed by editing the URL.
+if ($isSuperAdmin) {
+    $roleFilter = (string) ($_GET['role'] ?? '');
+    $roleFilter = in_array($roleFilter, $allowedRoles, true) ? $roleFilter : '';
+} else {
+    $roleFilter = 'rider';
+}
 $search = trim((string) ($_GET['q'] ?? ''));
 
 $sql = "SELECT id, full_name, email, phone, role, status, avatar_path, created_at FROM users WHERE 1=1";
@@ -159,22 +174,30 @@ function admin_role_badge_class(string $role): string {
     <?php if ($success): ?><div class="alert alert-success border-0 mb-4"><?= e($success) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="alert alert-danger border-0 mb-4"><?= e($error) ?></div><?php endif; ?>
 
+    <?php if (!$isSuperAdmin): ?>
+        <div class="alert alert-info border-0 mb-4"><?= e(t('admin.admin_riders_only_notice')) ?></div>
+    <?php endif; ?>
+
     <div class="cardx p-4 mb-4">
         <form method="get" class="row g-2 align-items-end">
-            <div class="col-md-5">
+            <div class="<?= $isSuperAdmin ? 'col-md-5' : 'col-md-9' ?>">
                 <label class="form-label small"><?= e(t('admin.search_users_label')) ?></label>
                 <input class="form-control" type="text" name="q" value="<?= e($search) ?>" placeholder="<?= e(t('admin.search_users_placeholder')) ?>">
             </div>
-            <div class="col-md-4">
-                <label class="form-label small"><?= e(t('admin.filter_role_label')) ?></label>
-                <select class="form-select" name="role">
-                    <option value=""><?= e(t('admin.all_roles')) ?></option>
-                    <option value="sender" <?= $roleFilter === 'sender' ? 'selected' : '' ?>><?= e(t('register.account_type_sender')) ?></option>
-                    <option value="rider" <?= $roleFilter === 'rider' ? 'selected' : '' ?>><?= e(t('register.account_type_rider')) ?></option>
-                    <option value="admin" <?= $roleFilter === 'admin' ? 'selected' : '' ?>><?= e(t('admin.role_admin')) ?></option>
-                    <option value="super_admin" <?= $roleFilter === 'super_admin' ? 'selected' : '' ?>><?= e(t('admin.role_super_admin')) ?></option>
-                </select>
-            </div>
+            <?php if ($isSuperAdmin): ?>
+                <div class="col-md-4">
+                    <label class="form-label small"><?= e(t('admin.filter_role_label')) ?></label>
+                    <select class="form-select" name="role">
+                        <option value=""><?= e(t('admin.all_roles')) ?></option>
+                        <option value="sender" <?= $roleFilter === 'sender' ? 'selected' : '' ?>><?= e(t('register.account_type_sender')) ?></option>
+                        <option value="rider" <?= $roleFilter === 'rider' ? 'selected' : '' ?>><?= e(t('register.account_type_rider')) ?></option>
+                        <option value="admin" <?= $roleFilter === 'admin' ? 'selected' : '' ?>><?= e(t('admin.role_admin')) ?></option>
+                        <option value="super_admin" <?= $roleFilter === 'super_admin' ? 'selected' : '' ?>><?= e(t('admin.role_super_admin')) ?></option>
+                    </select>
+                </div>
+            <?php else: ?>
+                <input type="hidden" name="role" value="rider">
+            <?php endif; ?>
             <div class="col-md-3">
                 <button class="btn btn-primary w-100 fw-bold" type="submit"><?= e(t('common.submit')) ?></button>
             </div>

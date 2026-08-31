@@ -257,7 +257,7 @@ $haversineUsed = false;
 if (file_exists(__DIR__ . '/../assets/pricing_fallback.json')) {
     try {
         $fallbackData = json_decode(file_get_contents(__DIR__ . '/../assets/pricing_fallback.json'), true);
-        if (is_array($fallbackData) && isset($fallbackData['ts'])) {
+        if (is_array($fallbackData) && isset($fallbackData['timestamp'])) {
             $haversineUsed = true;
         }
     } catch (Throwable $e) {

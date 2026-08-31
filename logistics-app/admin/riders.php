@@ -44,6 +44,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect_to('admin/riders.php');
     }
 
+    if ($formAction === 'unapprove_kyc') {
+        // Reverts a previously-approved rider back into the pending review queue, rather than
+        // "rejected" - this is for undoing a mistaken approval or re-checking someone, not a new
+        // adverse decision, so it carries no rejection note/email. Forced offline immediately,
+        // same as suspend, since an unapproved rider must not keep taking live deliveries.
+        if ($rider['kyc_status'] !== 'approved') {
+            flash('error', t('admin.kyc_not_approved'));
+            redirect_to('admin/riders.php');
+        }
+        $stmt = $pdo->prepare('UPDATE rider_profiles SET kyc_status = "pending", kyc_note = NULL, kyc_reviewed_by = ?, kyc_reviewed_at = NOW(), availability_status = "offline" WHERE user_id = ?');
+        $stmt->execute([$user['id'], $riderUserId]);
+        flash('success', t('admin.kyc_unapproved'));
+        send_web_push($pdo, $riderUserId, 'KYC under re-review', 'Your verification is being reviewed again. You will be notified once it is complete.', url_path('rider/kyc.php'));
+        log_event($pdo, 'kyc_unapproved', 'Unapproved KYC for ' . $rider['full_name'], (int) $user['id'], (string) $user['role'], 'user', $riderUserId);
+        redirect_to('admin/riders.php');
+    }
+
     if ($formAction === 'suspend_rider') {
         $stmt = $pdo->prepare('UPDATE users SET status = "suspended" WHERE id = ?');
         $stmt->execute([$riderUserId]);
@@ -200,17 +217,27 @@ function render_all_riders_html(PDO $pdo, array $rows): string {
                     <?= e(t('wallet.available_balance')) ?>: &#8358;<?= number_format(rider_available_balance($pdo, (int) $r['user_id']), 2) ?>
                 </div>
             </div>
-            <form method="post" class="d-inline">
-                <?= csrf_field() ?>
-                <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
-                <?php if ($r['account_status'] === 'suspended'): ?>
-                    <input type="hidden" name="form_action" value="activate_rider">
-                    <button class="btn btn-sm btn-outline-success fw-bold" type="submit"><?= e(t('admin.activate_rider')) ?></button>
-                <?php else: ?>
-                    <input type="hidden" name="form_action" value="suspend_rider">
-                    <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.suspend_rider')) ?></button>
+            <div class="d-flex gap-2">
+                <?php if ($r['kyc_status'] === 'approved'): ?>
+                    <form method="post" class="d-inline">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
+                        <input type="hidden" name="form_action" value="unapprove_kyc">
+                        <button class="btn btn-sm btn-outline-warning fw-bold" type="submit"><?= e(t('admin.unapprove_kyc')) ?></button>
+                    </form>
                 <?php endif; ?>
-            </form>
+                <form method="post" class="d-inline">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="rider_user_id" value="<?= (int) $r['user_id'] ?>">
+                    <?php if ($r['account_status'] === 'suspended'): ?>
+                        <input type="hidden" name="form_action" value="activate_rider">
+                        <button class="btn btn-sm btn-outline-success fw-bold" type="submit"><?= e(t('admin.activate_rider')) ?></button>
+                    <?php else: ?>
+                        <input type="hidden" name="form_action" value="suspend_rider">
+                        <button class="btn btn-sm btn-outline-danger fw-bold" type="submit"><?= e(t('admin.suspend_rider')) ?></button>
+                    <?php endif; ?>
+                </form>
+            </div>
         </div>
     <?php endforeach;
     return ob_get_clean();

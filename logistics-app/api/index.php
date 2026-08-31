@@ -13,6 +13,7 @@ require_once __DIR__ . '/../config/mapbox.php';   // pricing_route_metrics + NoR
 require_once __DIR__ . '/../config/push.php';     // send_web_push for status notifications
 require_once __DIR__ . '/../config/paystack.php'; // payments init/verify + banks (secrets stay server-side)
 require_once __DIR__ . '/../config/emails.php';   // password reset + withdrawal emails
+require_once __DIR__ . '/../config/rider_verification.php'; // OTP/email-link gate on withdrawals + bank changes
 require_once __DIR__ . '/routes_v1.php';
 
 // ---- Route parsing --------------------------------------------------------------------------
@@ -78,6 +79,7 @@ $routes = [
     ['POST', '#^rider/bank/verify$#',                   fn() => api_rider_bank_verify($pdo)],
     ['GET',  '#^rider/withdrawals$#',                   fn() => api_rider_withdrawals($pdo)],
     ['POST', '#^rider/withdrawals$#',                   fn() => api_rider_withdraw($pdo)],
+    ['POST', '#^rider/verify-action$#',                 fn() => api_rider_verify_action($pdo)],
 
     // Admin
     ['GET',  '#^admin/stats$#',                         fn() => api_admin_stats($pdo)],
@@ -88,6 +90,16 @@ $routes = [
     ['POST', '#^admin/users/(\d+)/suspend$#',           fn($id) => api_admin_user_suspend($pdo, (int) $id)],
     ['POST', '#^admin/users/(\d+)/activate$#',          fn($id) => api_admin_user_activate($pdo, (int) $id)],
     ['PATCH','#^admin/users/(\d+)/role$#',              fn($id) => api_admin_user_role($pdo, (int) $id)],
+    ['GET',  '#^admin/withdrawals$#',                   fn() => api_admin_withdrawals($pdo)],
+    ['POST', '#^admin/withdrawals/(\d+)/mark-processing$#', fn($id) => api_admin_withdrawal_mark_processing($pdo, (int) $id)],
+    ['POST', '#^admin/withdrawals/(\d+)/approve$#',     fn($id) => api_admin_withdrawal_approve($pdo, (int) $id)],
+    ['POST', '#^admin/withdrawals/(\d+)/mark-paid$#',   fn($id) => api_admin_withdrawal_mark_paid($pdo, (int) $id)],
+    ['POST', '#^admin/withdrawals/(\d+)/reject$#',      fn($id) => api_admin_withdrawal_reject($pdo, (int) $id)],
+    ['GET',  '#^admin/complaints$#',                    fn() => api_admin_complaints($pdo)],
+    ['PATCH','#^admin/complaints/(\d+)$#',              fn($id) => api_admin_complaint_update($pdo, (int) $id)],
+    ['GET',  '#^admin/pricing$#',                       fn() => api_admin_pricing_get($pdo)],
+    ['PATCH','#^admin/pricing$#',                       fn() => api_admin_pricing_update($pdo)],
+    ['GET',  '#^admin/logs$#',                          fn() => api_admin_logs($pdo)],
 
     // Shared
     ['POST', '#^payments/init$#',                       fn() => api_payment_init($pdo)],

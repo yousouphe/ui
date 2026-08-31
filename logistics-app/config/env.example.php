@@ -6,6 +6,10 @@ return [
     'db_name' => 'REDACTED_DB_NAME',
     'db_user' => 'REDACTED_DB_USER',
     'db_pass' => 'REDACTED_DB_PASSWORD',
+    // Absolute path to a CA certificate file, only needed if db_host is a remote/managed MySQL
+    // instance rather than localhost - enables TLS on the app-server-to-database connection.
+    // Leave REDACTED (or blank) for a same-host DB, where there's no network hop to encrypt.
+    'db_ssl_ca' => 'REDACTED_DB_SSL_CA_PATH',
     'app_name' => 'Aike Logistics',
     'base_url' => '',
     'app_url' => 'https://entrepoints.ng',
@@ -57,6 +61,15 @@ return [
     // on hosts with no PHP-FPM restart access). Generate any long random string, e.g.
     // `php -r "echo bin2hex(random_bytes(24));"`.
     'opcache_reset_key' => 'REDACTED_OPCACHE_RESET_KEY',
+    // EbulkSMS (ebulksms.com) - sends both SMS and WhatsApp order-summary messages to the
+    // delivery recipient when a booking is created. username is your EbulkSMS login email;
+    // apikey is generated from their dashboard (Get API Key). Leave REDACTED to disable both
+    // channels (booking creation still succeeds either way - this is best-effort, non-blocking).
+    'ebulksms_username' => 'REDACTED_EBULKSMS_USERNAME',
+    'ebulksms_apikey' => 'REDACTED_EBULKSMS_APIKEY',
+    // Alphanumeric SMS sender name shown as the "from", max 11 characters. Not used for
+    // WhatsApp, which sends from the WhatsApp number connected to your EbulkSMS account.
+    'ebulksms_sender_name' => 'Aike',
     // Trusted reverse-proxy IPs/CIDR ranges (e.g. your Cloudflare or load-balancer ranges).
     // client_ip() only honours the CF-Connecting-IP / X-Forwarded-For headers when the direct
     // peer (REMOTE_ADDR) is listed here; otherwise it uses REMOTE_ADDR directly. This stops a

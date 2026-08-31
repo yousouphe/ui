@@ -274,6 +274,7 @@ function api_booking_create(PDO $pdo): void {
     }
 
     $code = 'BK-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
+    $trackingToken = bin2hex(random_bytes(16));
     $stmt = $pdo->prepare(
         'INSERT INTO bookings
             (sender_user_id, booking_code, recipient_name, recipient_phone,
@@ -288,7 +289,7 @@ function api_booking_create(PDO $pdo): void {
         trim((string) $pickup['address']), $plat, $plng,
         trim((string) $dropoff['address']), $dlat, $dlng,
         $itemName, $itemCategory, trim((string) ($b['itemDescription'] ?? '')), trim((string) ($b['notes'] ?? '')),
-        bin2hex(random_bytes(16)), $vehicleType, $agreedCost, $plannedMinutes,
+        $trackingToken, $vehicleType, $agreedCost, $plannedMinutes,
     ]);
     $id = (int) $pdo->lastInsertId();
     log_event($pdo, 'booking_created', 'Booking ' . $code . ' submitted (mobile)', (int) $user['id'], (string) $user['role'], 'booking', $id);
@@ -824,6 +825,10 @@ function api_booking_request_rider(PDO $pdo, int $id): void {
             }
         } catch (Throwable $e) {}
     }
+    if ($matched) {
+        require_once __DIR__ . '/../config/ebulksms.php';
+        ebulksms_notify_recipient_rider_assigned($pdo, $id);
+    }
     api_ok(['requestId' => $requestId, 'bookingId' => $id, 'matched' => $matched], [], 201);
 }
 
@@ -1008,6 +1013,10 @@ function api_rider_offer_respond(PDO $pdo, int $requestId, string $action): void
                 send_web_push($pdo, (int) $req['sender_user_id'], 'Rider declined your request', 'Booking ' . $req['booking_code'] . ' - try another rider.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']));
             }
         } catch (Throwable $e) {}
+    }
+    if ($action === 'accepted') {
+        require_once __DIR__ . '/../config/ebulksms.php';
+        ebulksms_notify_recipient_rider_assigned($pdo, (int) $req['booking_id']);
     }
     log_event($pdo, 'booking_' . $action, 'Rider ' . $action . ' offer for booking ' . ($req['booking_code'] ?? '') . ' (mobile)', (int) $user['id'], (string) $user['role'], 'booking', (int) $req['booking_id']);
     api_ok(['bookingId' => (int) $req['booking_id'], 'requestStatus' => $action]);
@@ -1333,16 +1342,14 @@ function api_haversine_m(float $lat1, float $lng1, float $lat2, float $lng2): fl
 // ---- Profile update -------------------------------------------------------------------------
 
 function api_profile_update(PDO $pdo): void {
+    // full_name is locked after first registration (set at api_register/api_auth_google only) -
+    // not accepted here even if a client sends one, so an outdated app build can't reintroduce
+    // the ability to change it.
     $user = api_require($pdo);
     $b = api_body();
-    $fullName = isset($b['fullName']) ? trim((string) $b['fullName']) : null;
     $phone = isset($b['phone']) ? trim((string) $b['phone']) : null;
     $sets = [];
     $params = [];
-    if ($fullName !== null) {
-        if ($fullName === '') { api_fail(400, 'VALIDATION', 'Name cannot be empty.', ['fullName' => 'Required']); }
-        $sets[] = 'full_name = ?'; $params[] = $fullName;
-    }
     if ($phone !== null) {
         if ($phone === '') { api_fail(400, 'VALIDATION', 'Phone cannot be empty.', ['phone' => 'Required']); }
         $sets[] = 'phone = ?'; $params[] = $phone;
@@ -1797,7 +1804,8 @@ function api_rider_bank_get(PDO $pdo): void {
 function api_rider_bank_verify(PDO $pdo): void {
     // Resolve an account number + bank to the account holder's name via Paystack (read-only; no
     // secret leaves the server). Mirrors rider/ajax_verify_bank_account.php. Lets the app preview
-    // the resolved name before saving.
+    // the resolved name before saving - including the name-match check, so a mismatch is caught
+    // here rather than only surfacing at the final save step.
     $user = api_require($pdo, ['rider']);
     $b = api_body();
     $accountNumber = trim((string) ($b['accountNumber'] ?? ''));
@@ -1812,13 +1820,18 @@ function api_rider_bank_verify(PDO $pdo): void {
     if (!($result['ok'] ?? false)) {
         api_fail(422, 'VERIFY_FAILED', $result['message'] ?: 'We could not verify that account. Check the number and bank.');
     }
+    if (!names_match((string) $result['account_name'], (string) $user['full_name'])) {
+        api_fail(422, 'NAME_MISMATCH', "This bank account's registered name doesn't match your Aike profile name. Please use an account registered in your own name, or contact support if this is a mistake.");
+    }
     api_ok(['accountName' => (string) $result['account_name']]);
 }
 
 function api_rider_bank_save(PDO $pdo): void {
-    // Save/replace the rider's payout account. Mirrors rider/wallet.php save_bank_account: the name
-    // is always the one Paystack resolves (never client-supplied), and the row is upserted with a
-    // fresh verified_at and a cleared recipient code (recreated at transfer time).
+    // Starts verification for a bank-account change rather than saving immediately - the actual
+    // INSERT only happens once the rider confirms via SMS code or emailed link (see
+    // config/rider_verification.php's execute_rider_verified_action). The name is always the one
+    // Paystack resolves (never client-supplied), and re-checked here as defense-in-depth even
+    // though api_rider_bank_verify already checked it, in case a client skips straight to save.
     $user = api_require($pdo, ['rider']);
     $b = api_body();
     $accountNumber = trim((string) ($b['accountNumber'] ?? ''));
@@ -1839,13 +1852,19 @@ function api_rider_bank_save(PDO $pdo): void {
     if (!($result['ok'] ?? false)) {
         api_fail(422, 'VERIFY_FAILED', $result['message'] ?: 'We could not verify that account. Check the number and bank.');
     }
-    $pdo->prepare('INSERT INTO rider_bank_accounts (rider_user_id, bank_name, bank_code, account_number, account_name, verified_at, paystack_recipient_code)
-                   VALUES (?, ?, ?, ?, ?, NOW(), NULL)
-                   ON DUPLICATE KEY UPDATE bank_name = VALUES(bank_name), bank_code = VALUES(bank_code),
-                       account_number = VALUES(account_number), account_name = VALUES(account_name),
-                       verified_at = VALUES(verified_at), paystack_recipient_code = NULL')
-        ->execute([$user['id'], $bankName, $bankCode, $accountNumber, $result['account_name']]);
-    api_ok(['bankName' => $bankName, 'accountName' => (string) $result['account_name']], [], 201);
+    if (!names_match((string) $result['account_name'], (string) $user['full_name'])) {
+        api_fail(422, 'NAME_MISMATCH', "This bank account's registered name doesn't match your Aike profile name. Please use an account registered in your own name, or contact support if this is a mistake.");
+    }
+    $verification = rider_verification_start($pdo, $user, 'bank_change', [
+        'bankName' => $bankName,
+        'bankCode' => $bankCode,
+        'accountNumber' => $accountNumber,
+        'accountName' => (string) $result['account_name'],
+    ]);
+    if (!$verification['ok']) {
+        api_fail(422, 'VERIFICATION_FAILED', $verification['message']);
+    }
+    api_ok(['verificationId' => $verification['verificationId'], 'message' => $verification['message']], [], 201);
 }
 
 function api_rider_withdrawals(PDO $pdo): void {
@@ -1871,49 +1890,51 @@ function api_rider_withdrawals(PDO $pdo): void {
 }
 
 function api_rider_withdraw(PDO $pdo): void {
+    // Starts verification for a withdrawal rather than creating the request immediately - the
+    // actual withdrawal_requests row only appears once the rider confirms via SMS code or
+    // emailed link (see execute_rider_verified_action, which re-checks the balance with the
+    // authoritative row lock at that point - this is only a fast-feedback pre-check).
     $user = api_require($pdo, ['rider']);
-    api_idempotency_replay($pdo, (int) $user['id'], 'POST rider/withdrawals');
     $amount = (float) (api_body()['amount'] ?? 0);
     if ($amount <= 0) {
         api_fail(400, 'VALIDATION', 'Enter a valid withdrawal amount.', ['amount' => 'Must be greater than zero']);
     }
-    // Bank details must exist and be verified (mirrors rider/wallet.php).
-    $stmt = $pdo->prepare('SELECT bank_name, bank_code, account_number, account_name, verified_at FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT bank_code, verified_at FROM rider_bank_accounts WHERE rider_user_id = ? LIMIT 1');
     $stmt->execute([$user['id']]);
     $bank = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$bank || empty($bank['bank_code']) || empty($bank['verified_at'])) {
         api_fail(422, 'NO_BANK', 'Add and verify your bank account before requesting a withdrawal.');
     }
-    // Transactional balance check (reuses the row-locked helper — same double-spend protection
-    // as the web withdrawal path).
-    $created = false;
-    try {
-        $pdo->beginTransaction();
-        $available = rider_available_balance_locked($pdo, (int) $user['id']);
-        if ($amount > $available) {
-            $pdo->rollBack();
-            api_fail(422, 'INSUFFICIENT_FUNDS', 'That amount exceeds your available balance.');
-        }
-        $pdo->prepare('INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status) VALUES (?, ?, ?, ?, ?, ?, "pending")')
-            ->execute([$user['id'], $amount, $bank['bank_name'], $bank['bank_code'], $bank['account_number'], $bank['account_name']]);
-        $pdo->commit();
-        $created = true;
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
-        if ($created === false && strpos($e->getMessage(), 'INSUFFICIENT') === false) {
-            error_log('api withdrawal failed: ' . $e->getMessage());
-        }
-        api_fail(503, 'WITHDRAW_FAILED', 'We could not submit your withdrawal right now. Please try again.');
+    if ($amount > rider_available_balance($pdo, (int) $user['id'])) {
+        api_fail(422, 'INSUFFICIENT_FUNDS', 'That amount exceeds your available balance.');
     }
-    $env = ['ok' => true, 'data' => ['message' => 'Withdrawal request submitted.'], 'error' => null, 'meta' => ['requestId' => bin2hex(random_bytes(8))]];
-    $body = json_encode($env);
-    api_idempotency_store($pdo, (int) $user['id'], 'POST rider/withdrawals', 201, $body);
-    if (function_exists('send_withdrawal_requested_email')) {
-        try { send_withdrawal_requested_email((string) $user['email'], (string) $user['full_name'], $amount); } catch (Throwable $e) {}
+    $verification = rider_verification_start($pdo, $user, 'withdrawal', ['amount' => $amount]);
+    if (!$verification['ok']) {
+        api_fail(422, 'VERIFICATION_FAILED', $verification['message']);
     }
-    if (!headers_sent()) { http_response_code(201); header('Content-Type: application/json; charset=utf-8'); }
-    echo $body;
-    exit;
+    api_ok(['verificationId' => $verification['verificationId'], 'message' => $verification['message']], [], 201);
+}
+
+function api_rider_verify_action(PDO $pdo): void {
+    // Confirms a pending withdrawal or bank-change verification by its 6-digit code and executes
+    // the underlying action - mirrors the email-link path in confirm_rider_action.php, both of
+    // which funnel into the same execute_rider_verified_action().
+    $user = api_require($pdo, ['rider']);
+    $b = api_body();
+    $verificationId = (int) ($b['verificationId'] ?? 0);
+    $code = trim((string) ($b['code'] ?? ''));
+    if ($verificationId <= 0 || $code === '') {
+        api_fail(400, 'VALIDATION', 'A verification code is required.');
+    }
+    $result = rider_verification_confirm_code($pdo, $user, $verificationId, $code);
+    if (!$result['ok']) {
+        api_fail(422, 'VERIFICATION_FAILED', $result['message']);
+    }
+    $execResult = execute_rider_verified_action($pdo, (int) $user['id'], (string) $result['actionType'], (array) $result['payload']);
+    if (!$execResult['ok']) {
+        api_fail(422, 'ACTION_FAILED', $execResult['message']);
+    }
+    api_ok(['message' => $execResult['message']]);
 }
 
 // ---- Payments (Paystack — secrets stay server-side; init/verify wrap existing helpers) -------
@@ -2057,9 +2078,11 @@ function api_admin_stats(PDO $pdo): void {
 }
 
 function api_admin_users(PDO $pdo): void {
-    api_require($pdo, ['admin', 'super_admin']);
+    $admin = api_require($pdo, ['admin', 'super_admin']);
     $allowedRoles = ['sender', 'rider', 'admin', 'super_admin'];
-    $role = (string) ($_GET['role'] ?? '');
+    // A plain admin's whole view here is riders-only, same restriction as admin/users.php on the
+    // web - forced regardless of any role query param, not just defaulted.
+    $role = $admin['role'] === 'super_admin' ? (string) ($_GET['role'] ?? '') : 'rider';
     $sql = 'SELECT * FROM users WHERE 1=1';
     $params = [];
     if (in_array($role, $allowedRoles, true)) {
@@ -2185,6 +2208,11 @@ function api_admin_user_suspend(PDO $pdo, int $userId): void {
     if (!$target) {
         api_fail(404, 'NOT_FOUND', 'User not found.');
     }
+    // A plain admin can only suspend riders - explicitly covers a super_admin target (or another
+    // admin, or a sender), same restriction as admin/users.php on the web.
+    if ($admin['role'] !== 'super_admin' && $target['role'] !== 'rider') {
+        api_fail(403, 'FORBIDDEN', 'As an admin, you can only suspend rider accounts.');
+    }
     if (in_array($target['role'], ['admin', 'super_admin'], true)) {
         $activeAdmins = (int) $pdo->query("SELECT COUNT(*) FROM users WHERE role IN ('admin','super_admin') AND status = 'active'")->fetchColumn();
         if ($activeAdmins <= 1) {
@@ -2200,11 +2228,14 @@ function api_admin_user_suspend(PDO $pdo, int $userId): void {
 
 function api_admin_user_activate(PDO $pdo, int $userId): void {
     $admin = api_require($pdo, ['admin', 'super_admin']);
-    $stmt = $pdo->prepare('SELECT id, full_name FROM users WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, full_name, role FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([$userId]);
     $target = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$target) {
         api_fail(404, 'NOT_FOUND', 'User not found.');
+    }
+    if ($admin['role'] !== 'super_admin' && $target['role'] !== 'rider') {
+        api_fail(403, 'FORBIDDEN', 'As an admin, you can only activate rider accounts.');
     }
     $pdo->prepare('UPDATE users SET status = "active" WHERE id = ?')->execute([$userId]);
     log_event($pdo, 'user_activated', 'Activated ' . $target['full_name'] . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId);
@@ -2245,4 +2276,288 @@ function api_admin_user_role(PDO $pdo, int $userId): void {
     }
     log_event($pdo, 'role_changed', 'Changed role of ' . $target['full_name'] . ' from ' . $target['role'] . ' to ' . $newRole . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'user', $userId, ['from' => $target['role'], 'to' => $newRole]);
     api_ok(null);
+}
+
+// ---- Admin: Withdrawals (super_admin only - moves real money, mirrors admin/index.php) ----
+
+function api_admin_withdrawals(PDO $pdo): void {
+    api_require($pdo, ['super_admin']);
+    $shape = static fn(array $w): array => [
+        'id' => (int) $w['id'],
+        'rider_user_id' => (int) $w['rider_user_id'],
+        'rider_full_name' => (string) $w['rider_full_name'],
+        'amount' => (float) $w['amount'],
+        'bank_name' => (string) $w['bank_name'],
+        'account_number' => (string) $w['account_number'],
+        'account_name' => (string) $w['account_name'],
+        'bank_code' => $w['bank_code'] !== null ? (string) $w['bank_code'] : null,
+        'status' => (string) $w['status'],
+        'admin_note' => $w['admin_note'] !== null ? (string) $w['admin_note'] : null,
+        'requested_at' => (string) $w['requested_at'],
+        'processed_at' => $w['processed_at'] !== null ? (string) $w['processed_at'] : null,
+    ];
+
+    $stmt = $pdo->prepare("
+        SELECT wr.*, u.full_name AS rider_full_name
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.status IN ('pending', 'processing')
+        ORDER BY wr.requested_at ASC
+    ");
+    $stmt->execute();
+    $open = array_map($shape, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    $stmt = $pdo->prepare("
+        SELECT wr.*, u.full_name AS rider_full_name
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.status IN ('paid', 'rejected')
+        ORDER BY wr.processed_at DESC
+        LIMIT 100
+    ");
+    $stmt->execute();
+    $closed = array_map($shape, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    api_ok(array_merge($open, $closed));
+}
+
+function api_admin_withdrawal_lookup(PDO $pdo, int $id): array {
+    $stmt = $pdo->prepare('
+        SELECT wr.*, u.full_name AS rider_full_name, u.email AS rider_email
+        FROM withdrawal_requests wr
+        INNER JOIN users u ON u.id = wr.rider_user_id
+        WHERE wr.id = ?
+        LIMIT 1
+    ');
+    $stmt->execute([$id]);
+    $withdrawal = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$withdrawal) {
+        api_fail(404, 'NOT_FOUND', 'Withdrawal request not found.');
+    }
+    return $withdrawal;
+}
+
+function api_admin_withdrawal_mark_processing(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['super_admin']);
+    $withdrawal = api_admin_withdrawal_lookup($pdo, $id);
+    if ($withdrawal['status'] !== 'pending') {
+        api_fail(422, 'INVALID_STATE', 'This withdrawal is not pending.');
+    }
+    $pdo->prepare('UPDATE withdrawal_requests SET status = "processing", admin_user_id = ? WHERE id = ?')->execute([$admin['id'], $id]);
+    require_once __DIR__ . '/../config/emails.php';
+    try { send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'processing'); } catch (Throwable $e) {}
+    log_event($pdo, 'withdrawal_processing', 'Marked withdrawal #' . $id . ' as processing (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'withdrawal', $id, ['amount' => (float) $withdrawal['amount']]);
+    api_ok(null);
+}
+
+function api_admin_withdrawal_approve(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['super_admin']);
+    require_once __DIR__ . '/../config/paystack.php';
+    $result = admin_approve_and_pay_withdrawal($pdo, $id, $admin);
+    if (!$result['ok'] && $result['status'] === 'not_found') {
+        api_fail(404, 'NOT_FOUND', $result['message']);
+    }
+    if (!$result['ok'] && in_array($result['status'], ['invalid_state', 'missing_bank_code', 'lock_conflict'], true)) {
+        api_fail(422, strtoupper($result['status']), $result['message']);
+    }
+    // recipient_failed / transfer_failed / finalize_failed reached (or tried to reach) Paystack -
+    // these are operational outcomes, not client errors, so they come back as 200 with the
+    // specific status/message nested in data rather than a hard HTTP failure.
+    api_ok(['status' => $result['status'], 'message' => $result['message']]);
+}
+
+function api_admin_withdrawal_mark_paid(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['super_admin']);
+    $withdrawal = api_admin_withdrawal_lookup($pdo, $id);
+    if (!in_array($withdrawal['status'], ['pending', 'processing'], true)) {
+        api_fail(422, 'INVALID_STATE', 'This withdrawal is not pending or processing.');
+    }
+    require_once __DIR__ . '/../config/paystack.php';
+    $result = finalize_withdrawal_paid($pdo, $id, (int) $admin['id'], null, null);
+    if (!$result['ok']) {
+        api_fail(500, 'FINALIZE_FAILED', $result['message']);
+    }
+    api_ok(null);
+}
+
+function api_admin_withdrawal_reject(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['super_admin']);
+    $withdrawal = api_admin_withdrawal_lookup($pdo, $id);
+    if (!in_array($withdrawal['status'], ['pending', 'processing'], true)) {
+        api_fail(422, 'INVALID_STATE', 'This withdrawal is not pending or processing.');
+    }
+    $note = trim((string) (api_body()['note'] ?? ''));
+    $pdo->prepare('UPDATE withdrawal_requests SET status = "rejected", admin_user_id = ?, admin_note = ?, processed_at = NOW() WHERE id = ?')
+        ->execute([$admin['id'], $note !== '' ? $note : null, $id]);
+    require_once __DIR__ . '/../config/emails.php';
+    require_once __DIR__ . '/../config/push.php';
+    try { send_withdrawal_status_email((string) $withdrawal['rider_email'], (string) $withdrawal['rider_full_name'], (float) $withdrawal['amount'], 'rejected', $note !== '' ? $note : null); } catch (Throwable $e) {}
+    try { send_web_push($pdo, (int) $withdrawal['rider_user_id'], 'Withdrawal rejected', 'Your withdrawal request for ₦' . number_format((float) $withdrawal['amount'], 2) . ' was rejected. Check your email for details.', url_path('rider/wallet')); } catch (Throwable $e) {}
+    log_event($pdo, 'withdrawal_rejected', 'Withdrawal #' . $id . ' rejected (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'withdrawal', $id, ['note' => $note]);
+    api_ok(null);
+}
+
+// ---- Admin: Complaints (admin + super_admin, mirrors admin/complaints.php) ----
+
+function api_admin_complaints(PDO $pdo): void {
+    // All complaints platform-wide, unlike api_complaints_list() which scopes to the calling
+    // sender's own reports.
+    api_require($pdo, ['admin', 'super_admin']);
+    $stmt = $pdo->prepare('
+        SELECT bc.*, b.booking_code,
+            su.full_name AS sender_full_name,
+            ru.full_name AS rider_full_name
+        FROM booking_complaints bc
+        INNER JOIN bookings b ON b.id = bc.booking_id
+        INNER JOIN users su ON su.id = bc.sender_user_id
+        LEFT JOIN users ru ON ru.id = b.selected_rider_user_id
+        ORDER BY FIELD(bc.status, "open", "reviewing", "resolved"), bc.created_at DESC
+        LIMIT 200
+    ');
+    $stmt->execute();
+    api_ok(array_map(static fn(array $c): array => [
+        'id' => (int) $c['id'],
+        'booking_id' => (int) $c['booking_id'],
+        'booking_code' => (string) $c['booking_code'],
+        'sender_full_name' => (string) $c['sender_full_name'],
+        'rider_full_name' => $c['rider_full_name'] !== null ? (string) $c['rider_full_name'] : null,
+        'category' => (string) $c['category'],
+        'message' => (string) $c['message'],
+        'status' => (string) $c['status'],
+        'admin_note' => $c['admin_note'] !== null ? (string) $c['admin_note'] : null,
+        'created_at' => (string) $c['created_at'],
+        'resolved_at' => $c['resolved_at'] !== null ? (string) $c['resolved_at'] : null,
+    ], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+}
+
+function api_admin_complaint_update(PDO $pdo, int $id): void {
+    $admin = api_require($pdo, ['admin', 'super_admin']);
+    $b = api_body();
+    $status = (string) ($b['status'] ?? '');
+    if (!in_array($status, ['open', 'reviewing', 'resolved'], true)) {
+        api_fail(400, 'VALIDATION', 'status must be open, reviewing, or resolved.');
+    }
+    $note = trim((string) ($b['adminNote'] ?? ''));
+
+    $stmt = $pdo->prepare('
+        SELECT bc.*, b.booking_code, su.full_name AS sender_full_name, su.email AS sender_email
+        FROM booking_complaints bc
+        INNER JOIN bookings b ON b.id = bc.booking_id
+        INNER JOIN users su ON su.id = bc.sender_user_id
+        WHERE bc.id = ? LIMIT 1
+    ');
+    $stmt->execute([$id]);
+    $complaint = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$complaint) {
+        api_fail(404, 'NOT_FOUND', 'Complaint not found.');
+    }
+
+    $wasResolved = $complaint['status'] === 'resolved';
+    if ($status === 'resolved') {
+        $pdo->prepare('UPDATE booking_complaints SET status = ?, admin_note = ?, resolved_by = ?, resolved_at = NOW() WHERE id = ?')
+            ->execute([$status, $note !== '' ? $note : null, $admin['id'], $id]);
+    } else {
+        $pdo->prepare('UPDATE booking_complaints SET status = ?, admin_note = ?, resolved_by = NULL, resolved_at = NULL WHERE id = ?')
+            ->execute([$status, $note !== '' ? $note : null, $id]);
+    }
+
+    if ($status === 'resolved' && !$wasResolved) {
+        require_once __DIR__ . '/../config/emails.php';
+        try { send_complaint_resolved_email((string) $complaint['sender_email'], (string) $complaint['sender_full_name'], (string) $complaint['booking_code'], $note !== '' ? $note : null); } catch (Throwable $e) {}
+    }
+    log_event($pdo, 'complaint_status_changed', 'Complaint #' . $id . ' set to ' . $status . ' (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'complaint', $id, ['status' => $status]);
+    api_ok(null);
+}
+
+// ---- Admin: Pricing (super_admin only, mirrors admin/pricing.php) ----
+
+function api_admin_pricing_get(PDO $pdo): void {
+    api_require($pdo, ['super_admin']);
+    $row = $pdo->query('SELECT * FROM pricing_settings WHERE id = 1')->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        api_fail(404, 'NOT_FOUND', 'Pricing settings not configured.');
+    }
+    api_ok([
+        'minimum_fee' => (float) $row['minimum_fee'],
+        'per_km_rate' => (float) $row['per_km_rate'],
+        'bike_multiplier' => (float) $row['bike_multiplier'],
+        'car_multiplier' => (float) $row['car_multiplier'],
+        'van_multiplier' => (float) $row['van_multiplier'],
+        'tax_percent' => (float) $row['tax_percent'],
+    ]);
+}
+
+function api_admin_pricing_update(PDO $pdo): void {
+    $admin = api_require($pdo, ['super_admin']);
+    $b = api_body();
+    $minimumFee = (float) ($b['minimum_fee'] ?? -1);
+    $perKmRate = (float) ($b['per_km_rate'] ?? -1);
+    $bikeMultiplier = (float) ($b['bike_multiplier'] ?? 0);
+    $carMultiplier = (float) ($b['car_multiplier'] ?? 0);
+    $vanMultiplier = (float) ($b['van_multiplier'] ?? 0);
+    $taxPercent = (float) ($b['tax_percent'] ?? -1);
+
+    if ($minimumFee < 0 || $perKmRate < 0 || $bikeMultiplier <= 0 || $carMultiplier <= 0 || $vanMultiplier <= 0 || $taxPercent < 0 || $taxPercent > 100) {
+        api_fail(400, 'VALIDATION', 'Invalid pricing values.');
+    }
+
+    $pdo->prepare('
+        UPDATE pricing_settings
+        SET minimum_fee = ?, per_km_rate = ?, bike_multiplier = ?, car_multiplier = ?, van_multiplier = ?, tax_percent = ?, updated_by = ?
+        WHERE id = 1
+    ')->execute([$minimumFee, $perKmRate, $bikeMultiplier, $carMultiplier, $vanMultiplier, $taxPercent, $admin['id']]);
+
+    log_event($pdo, 'pricing_updated', 'Pricing settings updated (mobile admin)', (int) $admin['id'], (string) $admin['role'], 'pricing', 1, [
+        'minimum_fee' => $minimumFee, 'per_km_rate' => $perKmRate, 'bike_multiplier' => $bikeMultiplier,
+        'car_multiplier' => $carMultiplier, 'van_multiplier' => $vanMultiplier, 'tax_percent' => $taxPercent,
+    ]);
+    api_ok(null);
+}
+
+// ---- Admin: Audit Logs (admin + super_admin, read-only, mirrors admin/logs.php) ----
+
+function api_admin_logs(PDO $pdo): void {
+    api_require($pdo, ['admin', 'super_admin']);
+    $perPage = 50;
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $offset = ($page - 1) * $perPage;
+
+    $where = [];
+    $params = [];
+    $eventType = trim((string) ($_GET['event_type'] ?? ''));
+    if ($eventType !== '') { $where[] = 'el.event_type = ?'; $params[] = $eventType; }
+    $targetType = trim((string) ($_GET['target_type'] ?? ''));
+    if ($targetType !== '') { $where[] = 'el.target_type = ?'; $params[] = $targetType; }
+    $q = trim((string) ($_GET['q'] ?? ''));
+    if ($q !== '') { $where[] = 'el.description LIKE ?'; $params[] = '%' . $q . '%'; }
+    $dateFrom = trim((string) ($_GET['date_from'] ?? ''));
+    if ($dateFrom !== '') { $where[] = 'el.created_at >= ?'; $params[] = $dateFrom . ' 00:00:00'; }
+    $dateTo = trim((string) ($_GET['date_to'] ?? ''));
+    if ($dateTo !== '') { $where[] = 'el.created_at <= ?'; $params[] = $dateTo . ' 23:59:59'; }
+
+    $whereSql = $where !== [] ? 'WHERE ' . implode(' AND ', $where) : '';
+    $stmt = $pdo->prepare("
+        SELECT el.*, u.full_name AS actor_name
+        FROM event_logs el
+        LEFT JOIN users u ON u.id = el.actor_user_id
+        $whereSql
+        ORDER BY el.created_at DESC
+        LIMIT $perPage OFFSET $offset
+    ");
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    api_ok([
+        'items' => array_map(static fn(array $l): array => [
+            'id' => (int) $l['id'],
+            'event_type' => (string) $l['event_type'],
+            'actor_name' => $l['actor_name'] !== null ? (string) $l['actor_name'] : null,
+            'actor_role' => $l['actor_role'] !== null ? (string) $l['actor_role'] : null,
+            'target_type' => $l['target_type'] !== null ? (string) $l['target_type'] : null,
+            'target_id' => $l['target_id'] !== null ? (int) $l['target_id'] : null,
+            'description' => (string) $l['description'],
+            'created_at' => (string) $l['created_at'],
+        ], $rows),
+        'hasMore' => count($rows) === $perPage,
+    ]);
 }

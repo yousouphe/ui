@@ -777,10 +777,17 @@ function log_event(
     ?int $targetId = null,
     array $meta = []
 ): void {
+    // ip_address/user_agent (module19_financial_receipts_audit.sql) previously only got captured
+    // by audit_financial_event()'s own separate INSERT - every other event type routed through
+    // this function (kyc decisions, suspensions, role changes, pricing, and now the password
+    // flows below) had no IP on the record at all, which is exactly the gap that made a real
+    // incident un-investigatable: "mobile admin" as the only trace of who did what from where.
+    $ip = function_exists('client_ip') ? client_ip() : (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $ua = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
     try {
         $stmt = $pdo->prepare('
-            INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO event_logs (event_type, actor_user_id, actor_role, target_type, target_id, description, meta, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute([
             $eventType,
@@ -790,6 +797,8 @@ function log_event(
             $targetId,
             $description,
             $meta !== [] ? json_encode($meta) : null,
+            $ip !== '' ? $ip : null,
+            $ua !== '' ? $ua : null,
         ]);
     } catch (Throwable $e) {
         error_log('log_event failed for ' . $eventType . ': ' . $e->getMessage());

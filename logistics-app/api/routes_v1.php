@@ -1373,6 +1373,12 @@ function api_auth_forgot(PDO $pdo): void {
     $ip = client_ip();
     $limited = is_rate_limited($pdo, 'forgot_password_ip', $ip, 5, 60)
         || ($email !== '' && is_rate_limited($pdo, 'forgot_password_email', $email, 3, 60));
+    if ($limited) {
+        // Repeated attempts against the same email/IP within the window - previously invisible
+        // beyond the rate_limit_attempts row itself, which only carries an IP when it happens to
+        // be the one used as the identifier (the email-keyed limiter never recorded one at all).
+        log_event($pdo, 'password_reset_rate_limited', 'Forgot-password rate limit hit' . ($email !== '' ? ' for ' . $email : ''), null, null, 'auth', null, ['email' => $email !== '' ? $email : null]);
+    }
     if (!$limited) {
         record_rate_limit_attempt($pdo, 'forgot_password_ip', $ip);
         if ($email !== '') { record_rate_limit_attempt($pdo, 'forgot_password_email', $email); }
@@ -1388,6 +1394,7 @@ function api_auth_forgot(PDO $pdo): void {
                     $resetUrl = rtrim((string) (config_app()['app_url'] ?? ''), '/') . '/reset-password?token=' . $token;
                     try { send_password_reset_email($u['email'], $u['full_name'], $resetUrl); } catch (Throwable $e) {}
                 }
+                log_event($pdo, 'password_reset_requested', 'Password reset requested for ' . $u['email'], (int) $u['id'], null, 'user', (int) $u['id']);
             }
         }
     }
@@ -1426,6 +1433,7 @@ function api_auth_reset(PDO $pdo): void {
             try { send_password_changed_email((string) $u['email'], (string) $u['full_name']); } catch (Throwable $e) {}
         }
     }
+    log_event($pdo, 'password_reset_completed', 'Password reset completed', (int) $rec['user_id'], null, 'user', (int) $rec['user_id']);
     api_ok(['message' => 'Your password has been reset. Please sign in.']);
 }
 
@@ -1477,6 +1485,7 @@ function api_auth_change_password(PDO $pdo): void {
     if (function_exists('send_password_changed_email')) {
         try { send_password_changed_email((string) $user['email'], (string) $user['full_name']); } catch (Throwable $e) {}
     }
+    log_event($pdo, 'password_changed', 'Password changed (in-app)', (int) $user['id'], (string) $user['role'], 'user', (int) $user['id']);
     api_ok(['message' => 'Your password has been changed.']);
 }
 
@@ -2725,6 +2734,9 @@ function api_admin_logs(PDO $pdo): void {
             'target_id' => $l['target_id'] !== null ? (int) $l['target_id'] : null,
             'description' => (string) $l['description'],
             'created_at' => (string) $l['created_at'],
+            // Was already stored (module19) but never actually returned here - the one thing
+            // that makes "who did this" answerable for a shared/admin-role account.
+            'ip_address' => !empty($l['ip_address']) ? (string) $l['ip_address'] : null,
         ], $rows),
         'hasMore' => count($rows) === $perPage,
     ]);

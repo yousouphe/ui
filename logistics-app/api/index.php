@@ -86,6 +86,7 @@ $routes = [
     ['GET',  '#^admin/users$#',                         fn() => api_admin_users($pdo)],
     ['GET',  '#^admin/riders$#',                        fn() => api_admin_riders($pdo)],
     ['GET',  '#^admin/bookings$#',                      fn() => api_admin_bookings($pdo)],
+    ['GET',  '#^admin/bookings/(\d+)$#',                fn($id) => api_admin_booking_detail($pdo, (int) $id)],
     ['POST', '#^admin/riders/(\d+)/verify$#',           fn($id) => api_admin_rider_verify($pdo, (int) $id)],
     ['POST', '#^admin/users/(\d+)/suspend$#',           fn($id) => api_admin_user_suspend($pdo, (int) $id)],
     ['POST', '#^admin/users/(\d+)/activate$#',          fn($id) => api_admin_user_activate($pdo, (int) $id)],

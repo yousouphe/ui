@@ -2164,6 +2164,76 @@ function api_admin_bookings(PDO $pdo): void {
     api_ok(array_map('api_booking_public', $stmt->fetchAll(PDO::FETCH_ASSOC)));
 }
 
+function api_admin_booking_detail(PDO $pdo, int $id): void {
+    // api_admin_bookings()/api_booking_public() only ever exposed IDs, never who's actually on
+    // the order - an admin investigating a delivery had no name, phone, item description, cost
+    // breakdown, or complaint status to go on, just a status enum and a price.
+    api_require($pdo, ['admin', 'super_admin']);
+    $stmt = $pdo->prepare('
+        SELECT b.*,
+               s.full_name AS sender_name, s.email AS sender_email, s.phone AS sender_phone,
+               r.full_name AS rider_name, r.phone AS rider_phone,
+               rp.vehicle_type AS rider_vehicle_type, rp.rating AS rider_rating
+        FROM bookings b
+        INNER JOIN users s ON s.id = b.sender_user_id
+        LEFT JOIN users r ON r.id = b.selected_rider_user_id
+        LEFT JOIN rider_profiles rp ON rp.user_id = b.selected_rider_user_id
+        WHERE b.id = ?
+        LIMIT 1
+    ');
+    $stmt->execute([$id]);
+    $b = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$b) {
+        api_fail(404, 'NOT_FOUND', 'Booking not found.');
+    }
+
+    // Only exists once the order is paid (generate_payment_receipt runs on successful payment) -
+    // null here just means "not paid yet", not an error.
+    require_once __DIR__ . '/../config/receipts.php';
+    $receipt = get_receipt_for_booking($pdo, $id);
+
+    $stmt = $pdo->prepare('SELECT id, category, message, status, created_at FROM booking_complaints WHERE booking_id = ? ORDER BY id DESC LIMIT 1');
+    $stmt->execute([$id]);
+    $complaint = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $detail = api_booking_public($b);
+    $detail['bookingCode'] = (string) $b['booking_code'];
+    $detail['itemDescription'] = $b['item_description'] !== null ? (string) $b['item_description'] : null;
+    $detail['estimatedValue'] = $b['estimated_value'] !== null ? (float) $b['estimated_value'] : null;
+    $detail['specialInstructions'] = $b['special_instructions'] !== null ? (string) $b['special_instructions'] : null;
+    $detail['recipientName'] = (string) $b['recipient_name'];
+    $detail['recipientPhone'] = (string) $b['recipient_phone'];
+    $detail['sender'] = [
+        'id' => (int) $b['sender_user_id'],
+        'fullName' => (string) $b['sender_name'],
+        'email' => (string) $b['sender_email'],
+        'phone' => $b['sender_phone'] !== null ? (string) $b['sender_phone'] : null,
+    ];
+    $detail['rider'] = $b['selected_rider_user_id'] !== null ? [
+        'id' => (int) $b['selected_rider_user_id'],
+        'fullName' => (string) $b['rider_name'],
+        'phone' => $b['rider_phone'] !== null ? (string) $b['rider_phone'] : null,
+        'vehicleType' => $b['rider_vehicle_type'] !== null ? (string) $b['rider_vehicle_type'] : null,
+        'rating' => $b['rider_rating'] !== null ? (float) $b['rider_rating'] : null,
+    ] : null;
+    $detail['costBreakdown'] = $receipt ? [
+        'amount' => (float) $receipt['amount'],
+        'vatAmount' => (float) $receipt['vat_amount'],
+        'vatPercent' => (float) $receipt['vat_percent'],
+        'totalAmount' => (float) $receipt['total_amount'],
+        'paymentMethod' => (string) $receipt['payment_method'],
+    ] : null;
+    $detail['latestComplaint'] = $complaint ? [
+        'id' => (int) $complaint['id'],
+        'category' => (string) $complaint['category'],
+        'message' => (string) $complaint['message'],
+        'status' => (string) $complaint['status'],
+        'createdAt' => (string) $complaint['created_at'],
+    ] : null;
+
+    api_ok($detail);
+}
+
 function api_admin_rider_verify(PDO $pdo, int $userId): void {
     // Mirrors admin/riders.php approve_kyc/reject_kyc.
     $admin = api_require($pdo, ['admin', 'super_admin']);

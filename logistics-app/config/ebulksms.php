@@ -101,6 +101,10 @@ function ebulksms_post(string $url, array $body): array {
 // without each call site having to assemble the same joined data itself.
 function ebulksms_notify_recipient_rider_assigned(PDO $pdo, int $bookingId): void {
     if (!ebulksms_configured()) {
+        // Previously a silent no-op - "never configured" and "configured but every send failing"
+        // were indistinguishable from the error log, since nothing here ever wrote to it either
+        // way. This one line at least rules the first case in or out.
+        error_log('EbulkSMS: skipping notify for booking #' . $bookingId . ' - not configured (ebulksms_username/ebulksms_apikey empty or REDACTED in config/env.php).');
         return;
     }
     $stmt = $pdo->prepare('
@@ -133,9 +137,16 @@ function ebulksms_notify_recipient_rider_assigned(PDO $pdo, int $bookingId): voi
         $trackingUrl
     );
     try {
-        ebulksms_send_sms($recipientPhone, $message);
-        ebulksms_send_whatsapp($recipientPhone, $message);
+        $smsResult = ebulksms_send_sms($recipientPhone, $message);
+        if (!$smsResult['ok']) {
+            error_log('EbulkSMS: SMS send failed for booking #' . $bookingId . ': ' . ($smsResult['message'] ?? 'unknown error'));
+        }
+        $waResult = ebulksms_send_whatsapp($recipientPhone, $message);
+        if (!$waResult['ok']) {
+            error_log('EbulkSMS: WhatsApp send failed for booking #' . $bookingId . ': ' . ($waResult['message'] ?? 'unknown error'));
+        }
     } catch (Throwable $e) {
         // Best-effort, same as email/push notifications elsewhere - never blocks the request.
+        error_log('EbulkSMS: notify threw for booking #' . $bookingId . ': ' . $e->getMessage());
     }
 }

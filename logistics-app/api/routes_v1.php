@@ -61,6 +61,7 @@ function api_register(PDO $pdo): void {
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
     $platform = isset($b['platform']) ? substr((string) $b['platform'], 0, 20) : null;
     $tokens = api_issue_tokens($pdo, $userId, $platform, isset($b['deviceLabel']) ? substr((string) $b['deviceLabel'], 0, 120) : null);
+    log_event($pdo, 'user_registered', 'Registered as ' . $role, $userId, $role, 'user', $userId);
     api_ok([
         'accessToken' => $tokens['accessToken'],
         'refreshToken' => $tokens['refreshToken'],
@@ -127,6 +128,7 @@ function api_auth_google(PDO $pdo): void {
     $stmt = $pdo->prepare('SELECT * FROM users WHERE google_id = ? LIMIT 1');
     $stmt->execute([$googleId]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
+    $isNewAccount = false;
     if (!$u) {
         $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? LIMIT 1');
         $stmt->execute([$email]);
@@ -137,6 +139,7 @@ function api_auth_google(PDO $pdo): void {
         }
     }
     if (!$u) {
+        $isNewAccount = true;
         $pdo->prepare('INSERT INTO users (full_name, email, phone, password_hash, role, status, google_id, profile_completed)
                        VALUES (?, ?, "", ?, "sender", "active", ?, 0)')
             ->execute([$name, $email, password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), $googleId]);
@@ -154,6 +157,15 @@ function api_auth_google(PDO $pdo): void {
     $platform = isset($body['platform']) ? substr((string) $body['platform'], 0, 20) : null;
     $device = isset($body['deviceLabel']) ? substr((string) $body['deviceLabel'], 0, 120) : null;
     $tokens = api_issue_tokens($pdo, (int) $u['id'], $platform, $device);
+    log_event(
+        $pdo,
+        $isNewAccount ? 'user_registered' : 'login_succeeded',
+        ($isNewAccount ? 'Registered' : 'Signed in') . ' via Google',
+        (int) $u['id'],
+        (string) $u['role'],
+        'user',
+        (int) $u['id']
+    );
     api_ok([
         'accessToken' => $tokens['accessToken'],
         'refreshToken' => $tokens['refreshToken'],
@@ -194,6 +206,7 @@ function api_profile_complete(PDO $pdo): void {
         error_log('api profile complete failed: ' . $e->getMessage());
         api_fail(503, 'PROFILE_FAILED', 'We could not complete your profile right now. Please try again.');
     }
+    log_event($pdo, 'profile_completed', 'Profile completed' . ($becomingRider ? ' (became a rider)' : ''), (int) $user['id'], $becomingRider ? 'rider' : (string) $user['role'], 'user', (int) $user['id']);
     $stmt = $pdo->prepare('SELECT * FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([$user['id']]);
     api_ok(api_user_public($stmt->fetch(PDO::FETCH_ASSOC)));
@@ -2094,6 +2107,10 @@ function api_payment_init(PDO $pdo): void {
     if (!$wasInTransaction) {
         $pdo->commit();
     }
+    // The confirmed "paid" transition is already logged 4x over inside finalize_booking_payment()
+    // - this is the other end of that flow, a charge actually being initiated, which had no trace
+    // of its own before now.
+    log_event($pdo, 'payment_initiated', 'Payment initiated for booking ' . $booking['booking_code'], (int) $user['id'], 'sender', 'booking', (int) $booking['id'], ['amount' => (float) $booking['agreed_cost'], 'reference' => $reference]);
     $env = ['ok' => true, 'data' => [
         'reference' => $reference,
         'accessCode' => $data['access_code'] ?? null,

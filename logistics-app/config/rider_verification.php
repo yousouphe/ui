@@ -175,7 +175,12 @@ function execute_rider_verified_action(PDO $pdo, int $riderUserId, string $actio
             }
             $pdo->prepare('INSERT INTO withdrawal_requests (rider_user_id, amount, bank_name, bank_code, account_number, account_name, status) VALUES (?, ?, ?, ?, ?, ?, "pending")')
                 ->execute([$riderUserId, $amount, $bank['bank_name'], $bank['bank_code'], $bank['account_number'], $bank['account_name']]);
+            $withdrawalId = (int) $pdo->lastInsertId();
             $pdo->commit();
+            // The bank_change branch above already logs; this one never did - a rider actually
+            // requesting money out (as opposed to the admin's later approve/reject/mark-paid,
+            // which all log already) had no trace of its own.
+            log_event($pdo, 'withdrawal_requested', 'Withdrawal requested', $riderUserId, 'rider', 'withdrawal', $withdrawalId, ['amount' => $amount]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) { $pdo->rollBack(); }
             error_log('execute_rider_verified_action withdrawal failed: ' . $e->getMessage());

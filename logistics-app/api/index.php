@@ -157,11 +157,12 @@ function api_auth_refresh(PDO $pdo): void {
 }
 
 function api_auth_logout(PDO $pdo): void {
-    api_require($pdo);
+    $user = api_require($pdo);
     $token = api_bearer_token();
     if ($token) {
         api_revoke_by_access($pdo, $token);
     }
+    log_event($pdo, 'logout', 'Signed out', (int) $user['id'], (string) $user['role'], 'user', (int) $user['id']);
     if (!headers_sent()) {
         http_response_code(204);
     }
@@ -176,6 +177,7 @@ function api_login(PDO $pdo): void {
 
     if (is_rate_limited($pdo, 'api_login_ip', $ip, 10, 15)
         || ($email !== '' && is_rate_limited($pdo, 'api_login_email', $email, 5, 15))) {
+        log_event($pdo, 'login_rate_limited', 'Login rate limit hit' . ($email !== '' ? ' for ' . $email : ''), null, null, 'auth', null, ['email' => $email !== '' ? $email : null]);
         api_fail(429, 'RATE_LIMITED', 'Too many attempts. Please wait a few minutes and try again.');
     }
     if ($email === '' || $password === '') {
@@ -194,15 +196,21 @@ function api_login(PDO $pdo): void {
         if ($email !== '') {
             record_rate_limit_attempt($pdo, 'api_login_email', $email);
         }
+        // Failed attempts are the actual brute-force signal - deliberately logged even though the
+        // email may not correspond to a real account (an attacker probing random addresses is
+        // exactly the pattern this needs to surface).
+        log_event($pdo, 'login_failed', 'Failed login attempt for ' . $email, null, null, 'auth', null, ['email' => $email]);
         api_fail(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
     }
     if (($u['status'] ?? '') !== 'active') {
+        log_event($pdo, 'login_blocked_inactive', 'Login blocked - account not active', (int) $u['id'], (string) $u['role'], 'user', (int) $u['id']);
         api_fail(403, 'ACCOUNT_INACTIVE', 'This account is not active. Please contact support.');
     }
 
     $platform = isset($body['platform']) ? substr((string) $body['platform'], 0, 20) : null;
     $device = isset($body['deviceLabel']) ? substr((string) $body['deviceLabel'], 0, 120) : null;
     $tokens = api_issue_tokens($pdo, (int) $u['id'], $platform, $device);
+    log_event($pdo, 'login_succeeded', 'Signed in', (int) $u['id'], (string) $u['role'], 'user', (int) $u['id']);
 
     api_ok([
         'accessToken' => $tokens['accessToken'],

@@ -83,7 +83,14 @@ function base_url(): string {
 
     $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $dir = rtrim(dirname($scriptName), '/');
-    foreach (['/bookings', '/rider', '/admin', '/auth', '/payments', '/chat'] as $suffix) {
+    // '/api' was missing here, so any url_path()/base_url() call made from a mobile API request
+    // (SCRIPT_NAME is always api/index.php there, regardless of which /api/v1/... route matched)
+    // kept the api segment in the base - e.g. the SMS/WhatsApp delivery-notification link came
+    // out as ".../aike/api/bookings/track.php" instead of ".../aike/bookings/track.php". Every
+    // other subdirectory here is a page folder that only ever handles its own web page requests,
+    // which is why this one was missed - api/ is both a folder AND the front controller for
+    // every mobile endpoint, so it needed stripping unconditionally, not just for one page.
+    foreach (['/bookings', '/rider', '/admin', '/auth', '/payments', '/chat', '/api'] as $suffix) {
         if (str_ends_with($dir, $suffix)) {
             $dir = substr($dir, 0, -strlen($suffix));
             break;

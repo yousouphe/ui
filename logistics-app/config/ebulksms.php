@@ -127,13 +127,17 @@ function ebulksms_notify_recipient_rider_assigned(PDO $pdo, int $bookingId): voi
         return;
     }
     $trackingUrl = url_path('bookings/track.php?token=' . urlencode((string) $row['sender_tracking_token']));
+    // Tightened from the original (inconsistent leading/trailing spaces on every line, "Use the
+    // below link for tracking" as its own line) - rider name+phone now share a line since a
+    // recipient reads them as one fact ("who's bringing it, how do I reach them"), and shorter
+    // is cheaper per the SMS channel's per-segment pricing.
     $message = sprintf(
-        "Hi %s, %s has sent an item to you via Aike Logistics.\nItem: %s\n Rider: %s\n Contact: %s \nUse the below link for tracking: \n %s",
+        "Hi %s! %s sent you \"%s\" via Aike Logistics.\nRider: %s (%s)\nTrack it here: %s",
         $row['recipient_name'] ?: 'there',
         $row['sender_full_name'] ?: 'A sender',
         $row['item_name'] ?: 'a package',
-        $row['rider_full_name'] ?: 'Not yet available',
-        $row['rider_phone'] ?: 'Not yet available',
+        $row['rider_full_name'] ?: 'Not yet assigned',
+        $row['rider_phone'] ?: 'N/A',
         $trackingUrl
     );
     try {

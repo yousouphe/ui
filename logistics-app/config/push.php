@@ -138,7 +138,7 @@ function build_vapid_jwt(string $audienceOrigin): ?string {
 // Tokens are Expo push tokens stored in device_tokens (registered by the mobile app through
 // POST /api/v1/notifications/device). No FCM/APNs server secret is needed for the basic Expo
 // flow, so nothing sensitive lives here. Invalid tokens ("DeviceNotRegistered") are pruned.
-function send_expo_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+function send_expo_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null, array $data = []): void {
     $stmt = $pdo->prepare('SELECT id, token FROM device_tokens WHERE user_id = ?');
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -159,7 +159,7 @@ function send_expo_push(PDO $pdo, int $userId, string $title, string $body, ?str
             'title' => $title,
             'body' => $body,
             'sound' => 'default',
-            'data' => ['url' => $url],
+            'data' => array_merge(['url' => $url], $data),
         ];
     }
     if (!$messages) {
@@ -291,7 +291,7 @@ function firebase_access_token(): ?string {
 
 // Sends to every raw (non-Expo) FCM token on file for a user via the HTTP v1 API. Mirrors
 // send_expo_push()'s shape: fire-and-forget, prunes tokens FCM reports as gone.
-function send_fcm_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+function send_fcm_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null, array $data = []): void {
     if (!firebase_configured()) {
         return;
     }
@@ -313,13 +313,22 @@ function send_fcm_push(PDO $pdo, int $userId, string $title, string $body, ?stri
     }
     $projectId = (string) firebase_service_account()['project_id'];
 
+    // Data-only (no top-level "notification" key) so onMessageReceived() in the Android app fires
+    // every time - foreground, background, or killed - and our own code always builds the
+    // notification (right channel/sound/vibration/tap target). A "notification" key here would
+    // make the FCM SDK auto-post a bare default-look notification itself whenever the app is
+    // backgrounded, bypassing onMessageReceived() (and everything in it) entirely until tapped.
+    $dataPayload = array_merge(
+        ['title' => $title, 'body' => $body, 'url' => (string) ($url ?? '')],
+        array_map('strval', $data)
+    );
     foreach ($rawTokenRows as $row) {
         $token = (string) $row['token'];
         $payload = [
             'message' => [
                 'token' => $token,
-                'notification' => ['title' => $title, 'body' => $body],
-                'data' => ['url' => (string) ($url ?? '')],
+                'data' => $dataPayload,
+                'android' => ['priority' => 'high'],
             ],
         ];
         $ch = curl_init("https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send");
@@ -355,7 +364,7 @@ function send_fcm_push(PDO $pdo, int $userId, string $title, string $body, ?stri
 // and BOTH mobile push transports (Expo and native FCM), and always records the notification.
 // Every existing call site therefore reaches a user's mobile devices too, with no change needed
 // at the call sites.
-function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null): void {
+function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?string $url = null, array $data = []): void {
     // Record once - the source of truth for the web AND mobile in-app notification lists.
     // Recorded unconditionally, even if no transport is configured, so history is never lost.
     try {
@@ -367,14 +376,14 @@ function send_web_push(PDO $pdo, int $userId, string $title, string $body, ?stri
 
     // Mobile push (FCM on Android / APNs on iOS, via the Expo push service) to any device tokens.
     try {
-        send_expo_push($pdo, $userId, $title, $body, $url);
+        send_expo_push($pdo, $userId, $title, $body, $url, $data);
     } catch (Throwable $e) {
         error_log('send_expo_push failed: ' . $e->getMessage());
     }
 
     // Native FCM (HTTP v1) for the native Android app's raw registration tokens - see above.
     try {
-        send_fcm_push($pdo, $userId, $title, $body, $url);
+        send_fcm_push($pdo, $userId, $title, $body, $url, $data);
     } catch (Throwable $e) {
         error_log('send_fcm_push failed: ' . $e->getMessage());
     }

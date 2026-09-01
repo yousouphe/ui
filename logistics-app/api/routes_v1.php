@@ -831,10 +831,16 @@ function api_booking_request_rider(PDO $pdo, int $id): void {
 
     if (function_exists('send_web_push')) {
         try {
+            // type/requestId/bookingId let the Android app deep-link straight to the dashboard
+            // with this exact offer in view (rather than just "open the app somewhere") and
+            // cancel this specific notification once the rider acts on it from anywhere else -
+            // in-app banner, the dashboard's own offer list, or another device.
             if ($matched) {
-                send_web_push($pdo, $riderUserId, 'Delivery assigned', 'You have been assigned booking ' . ($booking['booking_code'] ?? '') . '. Please complete the delivery.', url_path('rider/'));
+                send_web_push($pdo, $riderUserId, 'Delivery assigned', 'You have been assigned booking ' . ($booking['booking_code'] ?? '') . '. Please complete the delivery.', url_path('rider/'),
+                    ['type' => 'offer_assigned', 'requestId' => $requestId, 'bookingId' => $id]);
             } else {
-                send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . ($booking['booking_code'] ?? '') . '.', url_path('rider/'));
+                send_web_push($pdo, $riderUserId, 'New delivery request', 'You have a new delivery request for booking ' . ($booking['booking_code'] ?? '') . '.', url_path('rider/'),
+                    ['type' => 'new_offer', 'requestId' => $requestId, 'bookingId' => $id]);
             }
         } catch (Throwable $e) {}
     }
@@ -1021,9 +1027,11 @@ function api_rider_offer_respond(PDO $pdo, int $requestId, string $action): void
     if (function_exists('send_web_push')) {
         try {
             if ($action === 'accepted') {
-                send_web_push($pdo, (int) $req['sender_user_id'], (string) $user['full_name'] . ' accepted your delivery', 'Booking ' . $req['booking_code'] . ' is on its way to pickup.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']));
+                send_web_push($pdo, (int) $req['sender_user_id'], (string) $user['full_name'] . ' accepted your delivery', 'Booking ' . $req['booking_code'] . ' is on its way to pickup.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']),
+                    ['type' => 'offer_matched', 'bookingId' => (int) $req['booking_id']]);
             } else {
-                send_web_push($pdo, (int) $req['sender_user_id'], 'Rider declined your request', 'Booking ' . $req['booking_code'] . ' - try another rider.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']));
+                send_web_push($pdo, (int) $req['sender_user_id'], 'Rider declined your request', 'Booking ' . $req['booking_code'] . ' - try another rider.', url_path('bookings/index.php?booking_id=' . (int) $req['booking_id']),
+                    ['type' => 'offer_declined', 'bookingId' => (int) $req['booking_id']]);
             }
         } catch (Throwable $e) {}
     }
@@ -1150,13 +1158,20 @@ function api_rider_transition(PDO $pdo, int $id): void {
     }
     // Notify the sender exactly as the web flow does (best-effort).
     if (function_exists('send_web_push')) {
+        // type tags let the Android app pick urgent (sound+vibration) vs calm (silent/default)
+        // treatment per event, same idea as Uber/Bolt distinguishing "driver arrived" from
+        // "trip receipt ready" - arrived_at_pickup is time-sensitive (go meet your rider now),
+        // the other two are status updates the sender doesn't need to act on immediately.
         $titles = [
-            'arrived_at_pickup' => ['Your rider has arrived', 'Your rider is at the pickup location for booking ' . $booking['booking_code'] . '.'],
-            'package_received' => ['Package picked up', 'Your rider has your package for booking ' . $booking['booking_code'] . '.'],
-            'delivered' => ['Delivered', 'Booking ' . $booking['booking_code'] . ' has been delivered.'],
+            'arrived_at_pickup' => ['Your rider has arrived', 'Your rider is at the pickup location for booking ' . $booking['booking_code'] . '.', 'rider_arrived'],
+            'package_received' => ['Package picked up', 'Your rider has your package for booking ' . $booking['booking_code'] . '.', 'package_picked_up'],
+            'delivered' => ['Delivered', 'Booking ' . $booking['booking_code'] . ' has been delivered.', 'delivered'],
         ];
         if (isset($titles[$to])) {
-            try { send_web_push($pdo, (int) $booking['sender_user_id'], $titles[$to][0], $titles[$to][1], url_path('bookings/index.php?booking_id=' . $id)); } catch (Throwable $e) {}
+            try {
+                send_web_push($pdo, (int) $booking['sender_user_id'], $titles[$to][0], $titles[$to][1], url_path('bookings/index.php?booking_id=' . $id),
+                    ['type' => $titles[$to][2], 'bookingId' => $id]);
+            } catch (Throwable $e) {}
         }
     }
     api_ok(api_booking_public(api_fetch_booking($pdo, $id)));

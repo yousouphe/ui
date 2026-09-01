@@ -59,6 +59,7 @@ body{background:linear-gradient(180deg,#eaf5ff,#dbeeff 42%,#eef8ff);min-height:1
 .text-soft{color:#5c7a91}
 </style>
 </head><body>
+<?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
 <div class="container py-5">
   <div class="row justify-content-center">
     <div class="col-lg-6">

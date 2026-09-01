@@ -406,6 +406,7 @@ function admin_payment_status_badge_class(string $status): string {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'bookings', 'admin/bookings.php') ?>
 
 <div class="container py-5">

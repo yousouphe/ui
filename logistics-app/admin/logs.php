@@ -109,6 +109,7 @@ function admin_logs_query_string(array $overrides = []): string {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'logs', 'admin/logs.php') ?>
 
 <div class="container py-5">

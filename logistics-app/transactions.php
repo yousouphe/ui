@@ -92,6 +92,7 @@ $statusBadge = static function (string $s): string {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'transactions', 'transactions.php') ?>
 
 <div class="container py-4">

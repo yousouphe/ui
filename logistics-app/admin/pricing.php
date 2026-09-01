@@ -78,6 +78,7 @@ foreach ($sampleDistances as $km) {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'pricing', 'admin/pricing.php') ?>
 
 <div class="container py-5">

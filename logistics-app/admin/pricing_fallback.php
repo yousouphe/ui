@@ -32,6 +32,7 @@ if ($exists) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <div class="container py-5">
     <h1 class="h4 mb-4">Pricing Fallback Status</h1>
 

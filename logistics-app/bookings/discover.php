@@ -78,6 +78,7 @@ try {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 
 <nav class="navbar navbar-expand-lg navbar-dark navx">
   <div class="container">

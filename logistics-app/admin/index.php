@@ -247,6 +247,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'snapshot') {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'withdrawals', 'admin/') ?>
 
 <div class="container py-5">

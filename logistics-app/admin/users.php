@@ -166,6 +166,7 @@ function admin_role_badge_class(string $role): string {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'users', 'admin/users.php') ?>
 
 <div class="container py-5">

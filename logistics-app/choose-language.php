@@ -26,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
 <div class="cardx p-4 p-md-5 mx-3">
     <h1 class="h4 fw-bold mb-1 text-center">Aike</h1>
     <p class="text-center text-soft mb-4">Choose your language / Zaɓi harshenku</p>

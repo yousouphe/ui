@@ -21,6 +21,7 @@ li{margin-bottom:.35rem}
 a{color:#0b4f6c}
 </style>
 </head><body>
+<?php require_once __DIR__ . '/config/pwa.php'; pwa_boot_tags(); ?>
 <div class="container py-5">
   <div class="row justify-content-center">
     <div class="col-lg-8">

@@ -118,6 +118,7 @@ $historyRows = array_filter($allRequests, fn($req) =>
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <?= render_app_nav(current_user(), 'deliveries', 'rider/dashboard') ?>
 
 <div class="container py-5" id="deliveries-page">

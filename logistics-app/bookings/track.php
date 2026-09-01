@@ -56,6 +56,7 @@ $statusLabel = booking_status_label((string) $booking['booking_status']);
     </style>
 </head>
 <body>
+<?php require_once __DIR__ . '/../config/pwa.php'; pwa_boot_tags(); ?>
 <nav class="navbar navbar-expand-lg navbar-light navx">
     <div class="container d-flex justify-content-between align-items-center">
         <div>
